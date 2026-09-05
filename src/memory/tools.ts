@@ -112,7 +112,7 @@ export class MemoryTools {
 
     // 1. 检查是否 read 过
     if (!this.lastReadContent.has(cacheKey)) {
-      return { success: false, message: 'You must read the file first before editing.' };
+      return { success: false, message: '你没有权限直接编辑记忆文件。请先调用 read_memory 工具读取该记忆的当前内容，再调用本工具编辑（write-before-read 保护）。' };
     }
 
     // 2. 检查文件是否被外部修改
@@ -121,7 +121,7 @@ export class MemoryTools {
       : await this.storage.readSessionMemory(args.peer || 'default');
     const cachedContent = this.lastReadContent.get(cacheKey)!;
     if (currentContent !== cachedContent) {
-      return { success: false, message: 'File has been modified since last read, please re-read first.' };
+      return { success: false, message: '该文件自你上次读取后已被修改，继续编辑会覆盖他人改动。请先重新调用 read_memory 工具获取最新内容，再编辑。' };
     }
 
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');
@@ -157,7 +157,7 @@ export class MemoryTools {
 
     // 1. 检查是否 read 过
     if (!this.lastReadContent.has(cacheKey)) {
-      return { success: false, message: 'You must read the file first before editing.' };
+      return { success: false, message: '你没有权限直接编辑记忆文件。请先调用 read_memory 工具读取该记忆的当前内容，再调用本工具编辑（write-before-read 保护）。' };
     }
 
     // 2. 检查文件是否被外部修改
@@ -166,7 +166,7 @@ export class MemoryTools {
       : await this.storage.readSessionMemory(args.peer || 'default');
     const cachedContent = this.lastReadContent.get(cacheKey)!;
     if (currentContent !== cachedContent) {
-      return { success: false, message: 'File has been modified since last read, please re-read first.' };
+      return { success: false, message: '该文件自你上次读取后已被修改，继续编辑会覆盖他人改动。请先重新调用 read_memory 工具获取最新内容，再编辑。' };
     }
 
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');

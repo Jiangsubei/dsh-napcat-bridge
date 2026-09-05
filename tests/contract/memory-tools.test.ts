@@ -168,7 +168,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
       peer: 'group_test_protect',
     });
     expect(unreadAppend.success).toBe(false);
-    expect(unreadAppend.message).toBe('You must read the file first before editing.');
+    expect(unreadAppend.message).toContain('read_memory');
 
     // 2. 未 read 过直接 update 必须拒绝
     const unreadUpdate = await tools.updateMemory({
@@ -177,7 +177,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
       peer: 'group_test_protect',
     });
     expect(unreadUpdate.success).toBe(false);
-    expect(unreadUpdate.message).toBe('You must read the file first before editing.');
+    expect(unreadUpdate.message).toContain('read_memory');
 
     // 3. read 后第一次 append 成功
     await tools.readMemory({ type: 'session', peer: 'group_test_protect' });
@@ -204,7 +204,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
       peer: 'group_test_protect',
     });
     expect(conflictedAppend.success).toBe(false);
-    expect(conflictedAppend.message).toBe('File has been modified since last read, please re-read first.');
+    expect(conflictedAppend.message).toContain('read_memory');
 
     // 6. 重新 read 后即可再次写入
     await tools.readMemory({ type: 'session', peer: 'group_test_protect' });
