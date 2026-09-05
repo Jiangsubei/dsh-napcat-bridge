@@ -340,9 +340,8 @@ export class BackgroundReviewManager {
     }
 
     const reviewSessionId = `review-${peer}-${Date.now()}`;
-    let subagentHandle: any = null;
+    let agentHandle: any = null;
     let parentSession: any = sessionContext.parentSession;
-    let parentWorkspace: any = undefined;
 
     try {
       const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
@@ -356,31 +355,6 @@ export class BackgroundReviewManager {
         parentSession?.header?.id || parentSession?.id || sessionContext.sessionId;
       const parentCwd = parentSession?.header?.cwd || parentSession?.cwd;
 
-      // 继承工作区
-      const wsRegistry =
-        this.ctx.get?.('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
-      if (wsRegistry && parentCwd && typeof wsRegistry.resolveByPath === 'function') {
-        try {
-          parentWorkspace = await wsRegistry.resolveByPath(parentCwd);
-        } catch {}
-      }
-      if (wsRegistry && !parentWorkspace && typeof wsRegistry.list === 'function') {
-        try {
-          const list = wsRegistry.list() || [];
-          for (const ws of list) {
-            if (
-              ws?.sessionIds &&
-              Array.isArray(ws.sessionIds) &&
-              parentSessionId &&
-              ws.sessionIds.includes(parentSessionId)
-            ) {
-              parentWorkspace = ws;
-              break;
-            }
-          }
-        } catch {}
-      }
-
       // DSH 原生 fork 机制：从父 Session 事件中截取已完成 turn 的历史切片
       let seed: any[] | undefined = undefined;
       let inheritedEventCount: number | undefined = undefined;
@@ -389,27 +363,24 @@ export class BackgroundReviewManager {
         try {
           const parentEvents = parentSession.snapshotEvents() || [];
           if (parentEvents.length > 0) {
-            let lastTurnEndIndex = -1;
-            for (let i = parentEvents.length - 1; i >= 0; i--) {
-              if (parentEvents[i]?.type === 'turn/end') {
-                lastTurnEndIndex = i;
-                break;
+            const lastTurnEndIndex = parentEvents.findLastIndex(
+              (ev: any) => ev?.type === 'turn/end'
+            );
+            if (lastTurnEndIndex >= 0) {
+              let cut = lastTurnEndIndex + 1;
+              while (cut < parentEvents.length && parentEvents[cut]?.type !== 'turn/start') {
+                cut++;
               }
+              seed = parentEvents.slice(0, cut);
+              inheritedEventCount = cut;
             }
-            let cut =
-              lastTurnEndIndex >= 0 ? lastTurnEndIndex + 1 : parentEvents.length;
-            while (cut < parentEvents.length && parentEvents[cut]?.type !== 'turn/start') {
-              cut++;
-            }
-            seed = parentEvents.slice(0, cut);
-            inheritedEventCount = cut;
           }
         } catch (err: any) {
           this.logger.warn?.(`[BackgroundReview] snapshotEvents warning: ${err?.message}`);
         }
       }
 
-      // 提示词组装：若无原生 seed 但传入了 history（兼容单测），则补充 Current Conversation History
+      // 提示词组装：若无原生 seed 但传入了 history（兼容无 parentSession 单测），则补充 Current Conversation History
       let prompt = MEMORY_REVIEW_PROMPT_TEMPLATE;
       if (
         (!seed || seed.length === 0) &&
@@ -440,14 +411,15 @@ export class BackgroundReviewManager {
 
           const maxIterations = this.config.maxIterations || REVIEW_MAX_ITERATIONS;
 
-          subagentHandle = await agentsService.create({
+          // DSH 官方原生 Fork 契约：设置 parentSession 与 isSeeded，origin 设为 'fork'，不挂载工作区
+          agentHandle = await agentsService.create({
             sessionId: reviewSessionId,
             model: reviewModelSelection?.model,
             maxIterations,
             ...(seed !== undefined ? { seed, inheritedEventCount } : {}),
             meta: {
               isBackgroundReview: true,
-              origin: 'subagent',
+              origin: 'fork',
               parentSession: parentSessionId,
               ...(parentCwd ? { cwd: parentCwd } : {}),
               ...(seed !== undefined ? { isSeeded: true } : {}),
@@ -460,14 +432,7 @@ export class BackgroundReviewManager {
             },
           });
 
-          // 继承工作区挂载
-          if (parentWorkspace && typeof parentWorkspace.attachSession === 'function') {
-            try {
-              await parentWorkspace.attachSession(reviewSessionId);
-            } catch {}
-          }
-
-          const agentObj = subagentHandle?.agent || subagentHandle;
+          const agentObj = agentHandle?.agent || agentHandle;
 
           if (!run.beginRequest(agentObj)) {
             return {
@@ -526,9 +491,8 @@ export class BackgroundReviewManager {
     } finally {
       await this.cleanupReviewSession(
         reviewSessionId,
-        subagentHandle,
-        parentSession,
-        parentWorkspace
+        agentHandle,
+        parentSession
       ).catch((err) => {
         this.logger.warn?.(`[BackgroundReview] Cleanup error for ${reviewSessionId}: ${err?.message}`);
       });
