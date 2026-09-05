@@ -630,11 +630,14 @@ export async function handleSlashCommand(
     case 'help': {
       const helpText = [
         '【DSH × NapCat 快捷指令】',
-        '• /mode <readonly|edit|yolo> : 切换当前会话权限模式',
-        '• /model <model_id> : 切换当前会话绑定的 LLM 模型',
-        '• /think <off|low|medium|high> : 切换当前会话思考深度',
-        '• /clear : 开启新会话（原会话保留，不再接收新消息）',
-        '• /help : 查看帮助信息',
+        '• /model <model_id> : 切换当前会话 LLM 模型',
+        '• /mode <readonly|edit|yolo> : 切换权限模式',
+        '• /think <off|low|medium|high> : 切换思考深度',
+        '• /new (clear) : 开启新会话（原会话保留）',
+        '• /resume : 列出并切换历史会话 (/resume <序号>)',
+        '• /ctx : 查看当前会话上下文用量',
+        '• /stop : 停止当前生成',
+        '• /help : 查看帮助',
       ].join('\n');
 
       return {
