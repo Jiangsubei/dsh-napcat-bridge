@@ -105,10 +105,7 @@ export class MemoryTools {
       if (!targetQQ) {
         return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
       }
-      const rawFn = (this.storage as any).readUserProfileRaw
-        ? (this.storage as any).readUserProfileRaw.bind(this.storage)
-        : this.storage.readUserProfile.bind(this.storage);
-      const content = await rawFn(targetQQ);
+      const content = await this.storage.readUserProfileRaw(targetQQ);
       return {
         success: true,
         type: 'user',
@@ -121,10 +118,7 @@ export class MemoryTools {
       if (!targetPeer || targetPeer === 'default') {
         return { success: false, message: 'session 记忆必须指定 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）。' };
       }
-      const rawFn = (this.storage as any).readSessionMemoryRaw
-        ? (this.storage as any).readSessionMemoryRaw.bind(this.storage)
-        : this.storage.readSessionMemory.bind(this.storage);
-      const content = await rawFn(targetPeer);
+      const content = await this.storage.readSessionMemoryRaw(targetPeer);
       return {
         success: true,
         type: 'session',
@@ -152,10 +146,7 @@ export class MemoryTools {
         return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
       }
 
-      const existsFn = (this.storage as any).existsUserProfile
-        ? (this.storage as any).existsUserProfile.bind(this.storage)
-        : async (qq: string) => Boolean((await this.storage.readUserProfile(qq)).trim());
-      if (await existsFn(targetQQ)) {
+      if (await this.storage.existsUserProfile(targetQQ)) {
         return { success: false, message: '目标记忆已存在，请使用 edit_memory 修改，不要重复创建。' };
       }
 
@@ -182,10 +173,7 @@ export class MemoryTools {
         return { success: false, message: 'session 记忆必须指定 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）。' };
       }
 
-      const existsFn = (this.storage as any).existsSessionMemory
-        ? (this.storage as any).existsSessionMemory.bind(this.storage)
-        : async (p: string) => Boolean((await this.storage.readSessionMemory(p)).trim());
-      if (await existsFn(targetPeer)) {
+      if (await this.storage.existsSessionMemory(targetPeer)) {
         return { success: false, message: '目标记忆已存在，请使用 edit_memory 修改，不要重复创建。' };
       }
 
@@ -229,17 +217,11 @@ export class MemoryTools {
       }
       target = targetQQ;
 
-      const existsFn = (this.storage as any).existsUserProfile
-        ? (this.storage as any).existsUserProfile.bind(this.storage)
-        : async (qq: string) => Boolean((await this.storage.readUserProfile(qq)).trim());
-      if (!(await existsFn(targetQQ))) {
+      if (!(await this.storage.existsUserProfile(targetQQ))) {
         return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
       }
 
-      const rawFn = (this.storage as any).readUserProfileRaw
-        ? (this.storage as any).readUserProfileRaw.bind(this.storage)
-        : this.storage.readUserProfile.bind(this.storage);
-      currentContent = await rawFn(targetQQ);
+      currentContent = await this.storage.readUserProfileRaw(targetQQ);
       if (!currentContent || !currentContent.trim()) {
         return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
       }
@@ -250,17 +232,11 @@ export class MemoryTools {
       }
       target = targetPeer;
 
-      const existsFn = (this.storage as any).existsSessionMemory
-        ? (this.storage as any).existsSessionMemory.bind(this.storage)
-        : async (p: string) => Boolean((await this.storage.readSessionMemory(p)).trim());
-      if (!(await existsFn(targetPeer))) {
+      if (!(await this.storage.existsSessionMemory(targetPeer))) {
         return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
       }
 
-      const rawFn = (this.storage as any).readSessionMemoryRaw
-        ? (this.storage as any).readSessionMemoryRaw.bind(this.storage)
-        : this.storage.readSessionMemory.bind(this.storage);
-      currentContent = await rawFn(targetPeer);
+      currentContent = await this.storage.readSessionMemoryRaw(targetPeer);
       if (!currentContent || !currentContent.trim()) {
         return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
       }
