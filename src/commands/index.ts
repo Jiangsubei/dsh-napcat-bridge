@@ -403,6 +403,32 @@ export async function handleSlashCommand(
       }
     }
 
+    case 'stop': {
+      const sessionController =
+        context.ctx.get('sessionController') || (context.ctx as any).sessionController;
+      if (!sessionController?.cancel) {
+        return {
+          handled: true,
+          success: false,
+          error: 'sessionController 服务不可用',
+        };
+      }
+      try {
+        await sessionController.cancel({ sessionId: context.session.id });
+        return {
+          handled: true,
+          success: true,
+          reply: '⏹️ 已停止当前生成。',
+        };
+      } catch (err: any) {
+        return {
+          handled: true,
+          success: false,
+          error: `停止失败: ${err?.message || String(err)}`,
+        };
+      }
+    }
+
     case 'clear': {
       // 真正执行"开启新会话"：推进该 peer 的会话版本号并失效缓存（不归档旧会话）。
       // 下一次唤醒将自动创建全新会话，上下文真正清空 (用户确认语义: 直接开启新对话)。
