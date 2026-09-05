@@ -342,6 +342,7 @@ export class BackgroundReviewManager {
     const reviewSessionId = `review-${peer}-${Date.now()}`;
     let agentHandle: any = null;
     let parentSession: any = sessionContext.parentSession;
+    let parentWorkspace: any = undefined;
 
     try {
       const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
@@ -434,6 +435,35 @@ export class BackgroundReviewManager {
 
           const agentObj = agentHandle?.agent || agentHandle;
 
+          // 挂载到工作区：使后台回顾在运行期间正常显示在工作区侧边栏
+          const wsRegistry = this.ctx.get?.('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
+          if (wsRegistry && parentCwd) {
+            try {
+              if (typeof wsRegistry.resolveByPath === 'function') {
+                parentWorkspace = await wsRegistry.resolveByPath(parentCwd);
+              }
+              if (!parentWorkspace && typeof wsRegistry.list === 'function') {
+                const list = wsRegistry.list() || [];
+                parentWorkspace = list.find((ws: any) => ws?.path === parentCwd);
+              }
+              if (parentWorkspace && typeof parentWorkspace.attachSession === 'function') {
+                await parentWorkspace.attachSession(reviewSessionId);
+              }
+            } catch (err: any) {
+              this.logger.warn?.(`[BackgroundReview] attachSession warning: ${err?.message}`);
+            }
+          }
+
+          // 标记 WebUI 会话标题，明确标识为 Background Review
+          const sessionTitleSvc = this.ctx.get?.('sessionTitle') || (this.ctx as any).sessionTitle;
+          const targetSession = agentObj?.session || (agentHandle as any)?.session;
+          if (sessionTitleSvc && typeof sessionTitleSvc.rename === 'function' && targetSession) {
+            try {
+              const baseTitle = parentSession?.header?.title || parentSession?.title || peer;
+              sessionTitleSvc.rename(targetSession, `${baseTitle} [Background Review]`);
+            } catch {}
+          }
+
           if (!run.beginRequest(agentObj)) {
             return {
               executed: false,
@@ -492,7 +522,8 @@ export class BackgroundReviewManager {
       await this.cleanupReviewSession(
         reviewSessionId,
         agentHandle,
-        parentSession
+        parentSession,
+        parentWorkspace
       ).catch((err) => {
         this.logger.warn?.(`[BackgroundReview] Cleanup error for ${reviewSessionId}: ${err?.message}`);
       });
