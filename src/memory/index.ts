@@ -159,8 +159,17 @@ export function setupMemoryService(
     }
 
     const resolved = resolveContextPeerAndQQ(session);
-    const peer = resolved.peer;
-
+    let peer = resolved.peer;
+    // 修复：resolveContextPeerAndQQ 为工具 exec 设计，raw Session 对象会被
+    // `anyCtx.session || anyCtx.agent?.session` 抢先取到错误对象 → peer 误判为 default。
+    // 这里直接基于 session.id 重新解析 peer（qq-group-/qq-user-/group_/user_ 前缀）。
+    {
+      const sid = String(session.id || '');
+      const g = sid.match(/^(?:qq-group-|group_)(\d+)/);
+      const u = sid.match(/^(?:qq-user-|user-|qq-)(\d+)/);
+      if (g) peer = `group_${g[1]}`;
+      else if (u) peer = `user_${u[1]}`;
+    }
     if (event.type === 'turn/start') {
       try {
         await reviewManager.cancelReviewForLiveTurn(peer);

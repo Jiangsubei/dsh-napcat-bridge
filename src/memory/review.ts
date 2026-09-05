@@ -420,7 +420,9 @@ export class BackgroundReviewManager {
             ...(seed !== undefined ? { seed, inheritedEventCount } : {}),
             meta: {
               isBackgroundReview: true,
-              origin: 'fork',
+              // 注意：DSH validateSessionHeader 要求 origin 必须是 "subagent" 或「不传」。
+              // 传任何其他值(如 'fork')都会在 create 时抛 "origin must be subagent"。
+              // 这里不传 origin —— 通过校验，且 WebUI 侧 `origin !== 'subagent'` 不会把它当子代理显示。
               parentSession: parentSessionId,
               ...(parentCwd ? { cwd: parentCwd } : {}),
               ...(seed !== undefined ? { isSeeded: true } : {}),

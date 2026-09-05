@@ -249,7 +249,6 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
         parentSession: 'qq-group-3000000001',
         isSeeded: true,
         cwd: '/workspace/project-root',
-        origin: 'fork',
         allowedTools: expect.arrayContaining(['read_chat_history', 'read_memory']),
       }),
     }));
@@ -376,7 +375,6 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
       inheritedEventCount: 4,
       meta: expect.objectContaining({
         isBackgroundReview: true,
-        origin: 'fork',
         parentSession: 'main-session-qq-12345',
         cwd: '/workspace/project-root',
         isSeeded: true,
