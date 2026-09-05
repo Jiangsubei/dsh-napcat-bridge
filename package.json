@@ -1,0 +1,116 @@
+{
+  "name": "dsh-napcat-bridge",
+  "version": "0.1.0",
+  "description": "DSH NapCat QQ bridge plugin — 接入 NapCat(OneBot 11) 让 DeepSeek Harness agent 在 QQ 群聊/私聊对话、检索历史、收发文件",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": "./dist/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "package.json",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "tsc && npm run build:client",
+    "build:client": "tsx scripts/build-client.ts",
+    "dev": "pnpm run build && tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "pnpm run build && vitest run",
+    "test:quick": "vitest run",
+    "probe": "tsx scripts/probe-server.ts",
+    "probe:analyze": "tsx scripts/analyze-probe.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:all": "tsc -p tsconfig.test.json",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "napcat",
+    "onebot",
+    "qq",
+    "cordis"
+  ],
+  "author": "nyara",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "ws": "^8.21.3",
+    "zod": "^4.5.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-base": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-commands": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-permission-presets": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage-json": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-user-approval": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-user-questions": "^0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-app-boot": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-base": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-commands": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-permission-presets": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage-json": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-user-approval": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-user-questions": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}
