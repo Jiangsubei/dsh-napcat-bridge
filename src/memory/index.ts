@@ -1,0 +1,255 @@
+/**
+ * dsh-napcat-bridge: Memory 插件核心模块
+ * 组合 MemoryStorage, MemoryTools, BackgroundReviewManager 与 SystemPrompt 动态段注入。
+ */
+
+import type { Context } from '@deepseek-ai/cordis';
+import type { MessageDatabase } from '../storage/database.js';
+import type { SessionManager } from '../gateway/session.js';
+import { MemoryStorage } from './storage.js';
+import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } from './tools.js';
+import { BackgroundReviewManager, type HistoryMessage } from './review.js';
+import {
+  DEFAULT_MEMORY_DIR,
+  DEFAULT_MEMORY_BUDGET_CHARS,
+  DEFAULT_REVIEW_ENABLED,
+  DEFAULT_REVIEW_TURNS_INTERVAL,
+  DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+} from '../constants/index.js';
+
+export * from './types.js';
+export * from './storage.js';
+export * from './tools.js';
+export * from './review.js';
+
+export interface MemoryServiceOptions {
+  storageDir?: string;
+  budgetChars?: number;
+  reviewEnabled?: boolean;
+  reviewTurnsInterval?: number;
+  reviewToolCallsInterval?: number;
+  reviewModel?: string;
+  db?: MessageDatabase;
+  sessionManager?: SessionManager;
+}
+
+export function registerMemoryPromptContext(
+  ctx: Context,
+  storage: MemoryStorage,
+  db?: MessageDatabase,
+  getBudget: () => number = () => DEFAULT_MEMORY_BUDGET_CHARS
+): () => void {
+  const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
+  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
+    return () => {};
+  }
+
+  return systemPrompt.context({
+    name: 'napcat:memory',
+    order: 40,
+    text: (assembleCtx?: any) => {
+      const resolved = resolveContextPeerAndQQ(assembleCtx);
+      const peer = resolved.peer;
+
+      const isQQSession = Boolean(
+        peer &&
+          (peer.startsWith('group_') ||
+            peer.startsWith('user_') ||
+            peer.startsWith('qq-group-') ||
+            peer.startsWith('qq-user-') ||
+            peer.startsWith('qq-'))
+      );
+
+      if (!peer || !isQQSession || peer === 'default') {
+        return '';
+      }
+
+      const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
+      const budget = getBudget() || DEFAULT_MEMORY_BUDGET_CHARS;
+
+      if (isPrivate) {
+        // 私聊：直接传入单用户，无 7 天活跃限制
+        return storage.getPromptSnapshotSync(peer, [{ qq: resolved.qq, name: resolved.qq }], budget);
+      }
+
+      // 群聊：从 SQLite 查询近 7 天活跃发言用户列表 (按发言时间倒序)
+      let activeUsers: Array<{ qq: string; name: string }> = [];
+      if (db) {
+        try {
+          const rows = db.getActiveUsers(peer, 7, 15);
+          activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
+        } catch {}
+      }
+
+      return storage.getPromptSnapshotSync(peer, activeUsers, budget);
+    },
+  });
+}
+
+export function setupMemoryService(
+  ctx: Context,
+  options: MemoryServiceOptions
+): {
+  storage: MemoryStorage;
+  tools: MemoryTools;
+  reviewManager: BackgroundReviewManager;
+  dispose: () => void;
+} {
+  const storage = new MemoryStorage(options.storageDir || DEFAULT_MEMORY_DIR);
+  const tools = new MemoryTools(storage, ctx);
+  const reviewManager = new BackgroundReviewManager(
+    ctx,
+    {
+      enabled: options.reviewEnabled ?? DEFAULT_REVIEW_ENABLED,
+      turnsInterval: options.reviewTurnsInterval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
+      toolCallsInterval: options.reviewToolCallsInterval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+      storageDir: options.storageDir || DEFAULT_MEMORY_DIR,
+      reviewModel: options.reviewModel,
+      db: options.db,
+      sessionManager: options.sessionManager,
+    },
+    storage
+  );
+
+  const unregisters: Array<() => void> = [];
+
+  // 1. 注册 3 个 Memory Agent 工具到 DSH ctx.tools
+  const doRegisterTools = (toolsService: any) => {
+    if (!toolsService || typeof toolsService.register !== 'function') return;
+    const defs = createMemoryToolDefinitions(tools);
+    for (const def of defs) {
+      if (typeof toolsService.get === 'function' && toolsService.get(def.name)) {
+        continue;
+      }
+      unregisters.push(toolsService.register(def));
+    }
+  };
+
+  const initialTools = ctx.get('tools') || (ctx as any).tools;
+  if (initialTools) {
+    doRegisterTools(initialTools);
+  }
+
+  (ctx as any).on?.('ready', () => {
+    const readyTools = ctx.get('tools') || (ctx as any).tools;
+    if (readyTools) doRegisterTools(readyTools);
+  });
+
+  // 2. 注册 systemPrompt.context 动态记忆段
+  const promptDisposer = registerMemoryPromptContext(
+    ctx,
+    storage,
+    options.db,
+    () => options.budgetChars || DEFAULT_MEMORY_BUDGET_CHARS
+  );
+  unregisters.push(promptDisposer);
+
+  // 3. 监听 session/event 驱动后台自动回顾
+  const eventDisposer = (ctx as any).on?.('session/event', async (session: any, event: any) => {
+    if (!session || !session.id || !event) return;
+    const sessionId = String(session.id);
+
+    // 过滤回顾子代理自身会话
+    if (
+      sessionId.startsWith('review-') ||
+      session.meta?.isBackgroundReview ||
+      session.options?.meta?.isBackgroundReview
+    ) {
+      return;
+    }
+
+    const resolved = resolveContextPeerAndQQ(session);
+    const peer = resolved.peer;
+
+    if (event.type === 'turn/start') {
+      try {
+        await reviewManager.cancelReviewForLiveTurn(peer);
+      } catch {}
+    } else if (event.type === 'turn/end') {
+      let toolCallsCount = 0;
+      if (typeof session.snapshotEvents === 'function') {
+        try {
+          const events = session.snapshotEvents() || [];
+          const currentTurn = event.data?.turn;
+          let lastTurnStartSeq = -1;
+          for (let i = events.length - 1; i >= 0; i--) {
+            if (events[i]?.type === 'turn/start') {
+              lastTurnStartSeq = events[i].seq;
+              break;
+            }
+          }
+          toolCallsCount = events.filter((e: any) =>
+            e?.type === 'tool/call' &&
+            (currentTurn !== undefined
+              ? e.data?.turn === currentTurn
+              : (lastTurnStartSeq >= 0 ? e.seq >= lastTurnStartSeq : true) && e.seq <= event.seq)
+          ).length;
+        } catch {}
+      }
+
+      if (toolCallsCount === 0) {
+        if (typeof event.data?.toolCallsCount === 'number') {
+          toolCallsCount = event.data.toolCallsCount;
+        } else if (Array.isArray(event.data?.tool_calls)) {
+          toolCallsCount = event.data.tool_calls.length;
+        }
+      }
+
+      const history: HistoryMessage[] = [];
+      if (Array.isArray(session.history)) {
+        history.push(...session.history);
+      } else if (Array.isArray(session.messages)) {
+        history.push(...session.messages);
+      } else if (Array.isArray(session.events)) {
+        for (const ev of session.events) {
+          if (ev.type === 'user/message' || ev.type === 'user/input') {
+            history.push({
+              role: 'user',
+              content: ev.data?.content || ev.data?.text || '',
+            });
+          } else if (ev.type === 'assistant/message' || ev.type === 'assistant/chunk') {
+            if (ev.data?.content || ev.data?.text) {
+              history.push({
+                role: 'assistant',
+                content: ev.data?.content || ev.data?.text || '',
+                tool_calls: ev.data?.tool_calls,
+              });
+            }
+          }
+        }
+      }
+
+      const mainModel = session.options?.model || session.model;
+
+      reviewManager
+        .onTurnFinished(
+          {
+            peer,
+            sessionId,
+            history,
+            mainModel,
+            parentSession: session,
+          },
+          toolCallsCount
+        )
+        .catch(() => {});
+    }
+  });
+
+  if (typeof eventDisposer === 'function') {
+    unregisters.push(eventDisposer);
+  }
+
+  return {
+    storage,
+    tools,
+    reviewManager,
+    dispose: () => {
+      for (const unreg of unregisters) {
+        try {
+          unreg();
+        } catch {}
+      }
+    },
+  };
+}
