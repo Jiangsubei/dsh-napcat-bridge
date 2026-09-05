@@ -346,5 +346,40 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(errRes.success).toBe(false);
     expect(errRes.error).toContain('停止失败: agent not found');
   });
+
+  it('契约 6: /new 命令开启全新会话且不归档原会话（语义对齐 /clear 并受管理员白名单保护）', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const sessionA = booted.ctx.sessions.create('qq-group-1002' as any);
+    const admins = ['2000000001'];
+
+    // 1. 非管理员拒绝
+    const nonAdminRes = await handleSlashCommand('/new', {
+      userId: '1234567890',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(nonAdminRes.handled).toBe(true);
+    expect(nonAdminRes.success).toBe(false);
+    expect(nonAdminRes.error).toContain('权限不足');
+
+    // 2. 管理员执行成功，版本递增
+    expect(sessionManager.peerToSessionId('group_1002')).toBe('qq-group-1002');
+    const res = await handleSlashCommand('/new', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(res.handled).toBe(true);
+    expect(res.success).toBe(true);
+    expect(res.reply).toContain('✅ 会话已开启新对话');
+
+    // 3. 验证会话已更新且原会话未被归档
+    expect(sessionManager.peerToSessionId('group_1002')).toBe('qq-group-1002-2');
+  });
 });
+
 
