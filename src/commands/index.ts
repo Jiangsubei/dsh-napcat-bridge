@@ -429,6 +429,7 @@ export async function handleSlashCommand(
       }
     }
 
+    case 'new':
     case 'clear': {
       // 真正执行"开启新会话"：推进该 peer 的会话版本号并失效缓存（不归档旧会话）。
       // 下一次唤醒将自动创建全新会话，上下文真正清空 (用户确认语义: 直接开启新对话)。
@@ -436,7 +437,7 @@ export async function handleSlashCommand(
         return {
           handled: true,
           success: false,
-          error: '执行 /clear 失败: 当前环境缺少 SessionManager 服务',
+          error: `执行 /${command} 失败: 当前环境缺少 SessionManager 服务`,
         };
       }
       try {
@@ -450,7 +451,7 @@ export async function handleSlashCommand(
         return {
           handled: true,
           success: false,
-          error: `执行 /clear 失败: ${err?.message || String(err)}`,
+          error: `执行 /${command} 失败: ${err?.message || String(err)}`,
         };
       }
     }
