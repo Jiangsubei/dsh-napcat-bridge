@@ -16,8 +16,11 @@ export interface MemorySnapshot {
 
 export interface MemoryOperationResult {
   success: boolean;
-  message: string;
+  message?: string;
+  type?: MemoryType;
+  target?: string;
   content?: string;
+  preview?: string;
 }
 
 export interface MemoryPluginConfig {
