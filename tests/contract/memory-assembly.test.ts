@@ -134,7 +134,12 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memCtx1 = prompt1.contexts.find((c: any) => c.name === 'napcat:memory');
     expect(memCtx1?.text || '').toBe('');
 
-    // 模拟 Agent 在第 1 轮中执行 append_memory
+    // 模拟 Agent 在第 1 轮中遵循 read-before-write 规范，先 read_memory 后 append_memory
+    const readTool = toolsService.get('read_memory');
+    await readTool.execute(
+      { type: 'session' },
+      { agent: { session: { id: 'qq-user-99999-1' } } }
+    );
     await appendTool.execute(
       { type: 'session', content: '私聊约定：只发代码不废话' },
       { agent: { session: { id: 'qq-user-99999-1' } } }
