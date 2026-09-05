@@ -193,26 +193,26 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(res.reply).toContain('--global');
   });
 
-  it('B4-契约 3d: 验证与 apiProxy 的装配联动与宿主全局设置防污染安全拦截机制', async () => {
+  it('B4-契约 3d: 验证与 sessionController 的装配联动与宿主全局设置防污染安全拦截机制', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001'];
 
-    // 模拟挂载宿主 apiProxy 与 agentDefaultModel 服务
+    // 模拟挂载宿主 sessionController 与 agentDefaultModel 服务。
+    // 注：DSH 0.1.2-rc.1 起 apiProxy 已移除，宿主服务键为 sessionController，
+    // selectModel 直接接收 { sessionId, provider, model } 请求体（无 { rpcId, payload } 信封）。
     let selectModelCalledWith: any = null;
     let hostSaveCalled = false;
 
-    const mockApiProxy = {
-      sessions: {
-        selectModel: async (req: any) => {
-          selectModelCalledWith = req;
-          // 模拟 DSH 官方 selectModel 内部默认尝试调用 saveSelection 的行为
-          await (booted.ctx as any).agentDefaultModel?.saveSelection?.(req.payload);
-          return { ok: true, value: { selected: req.payload } };
-        },
+    const mockSessionController = {
+      selectModel: async (req: any) => {
+        selectModelCalledWith = req;
+        // 模拟 DSH 官方 selectModel 内部默认尝试调用 saveSelection 的行为
+        await (booted.ctx as any).agentDefaultModel?.saveSelection?.(req);
+        return { selected: { provider: req.provider, model: req.model } };
       },
     };
-    (booted.ctx as any).apiProxy = mockApiProxy;
+    (booted.ctx as any).provide('sessionController', mockSessionController);
 
     const agentDefaultModel = (booted.ctx as any).agentDefaultModel;
     const originalSaveSelection = agentDefaultModel?.saveSelection;
@@ -224,7 +224,8 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     }
 
     try {
-      // 1. 执行普通切换：必须调用 apiProxy.sessions.selectModel，但宿主 saveSelection 必须被拦截阻止
+      // 1. 执行普通切换：必须以新直传形态调用 sessionController.selectModel，但宿主
+      //    saveSelection 必须被拦截阻止
       const res = await handleSlashCommand('/model deepseek-v4-pro', {
         userId: '2000000001',
         admins,
@@ -235,8 +236,12 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
 
       expect(res.success).toBe(true);
       expect(selectModelCalledWith).not.toBeNull();
-      expect(selectModelCalledWith.payload.sessionId).toBe(sessionA.id);
-      expect(selectModelCalledWith.payload.model).toBe('deepseek-v4-pro');
+      // 新契约：请求体为直传 { sessionId, provider, model }，不再有旧版 { rpcId, payload } 信封
+      expect(selectModelCalledWith.sessionId).toBe(sessionA.id);
+      expect(selectModelCalledWith.model).toBe('deepseek-v4-pro');
+      expect(selectModelCalledWith.provider).toBeTruthy();
+      expect(selectModelCalledWith.rpcId).toBeUndefined();
+      expect('payload' in selectModelCalledWith).toBe(false);
       // 关键断言：宿主真实 saveSelection 在命令执行期间绝对不能被触发
       expect(hostSaveCalled).toBe(false);
       // 关键断言：安全拦截结束后原保存逻辑已恢复，后续调用正常触发

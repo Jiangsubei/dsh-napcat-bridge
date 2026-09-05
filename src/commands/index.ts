@@ -157,10 +157,13 @@ export async function handleSlashCommand(
       const agents = context.ctx.get('agents') || (context.ctx as any).agents;
       const agent = agents?.get(context.session.id);
 
-      // 安全更新 apiProxy 内部会话选择，但临时拦截抑制全局宿主 settings 保存
+      // 同步宿主会话模型选择：DSH 0.1.2-rc.1 起 dsh-host-apiproxy 的 ctx.apiProxy 服务已移除，
+      // 官方 Typert Remote 架构下宿主服务键为 sessionController（wire 命名空间 session），
+      // selectModel 直接接收 { sessionId, provider, model } 请求体（无旧版 { rpcId, payload } 信封）。
+      // 同时临时拦截抑制 agentDefaultModel.saveSelection，防止污染 Web UI 宿主全局默认设置。
       const safeSyncApiProxy = async (sessionId: string, provider: string, model: string) => {
-        const apiProxy = context.ctx.get('apiProxy') || (context.ctx as any).apiProxy;
-        if (!apiProxy?.sessions?.selectModel) return;
+        const sessionController = context.ctx.get('sessionController');
+        if (!sessionController?.selectModel) return;
 
         const defaultModelSvc =
           context.ctx.get('agentDefaultModel') || (context.ctx as any).agentDefaultModel;
@@ -169,13 +172,10 @@ export async function handleSlashCommand(
           defaultModelSvc.saveSelection = async () => {};
         }
         try {
-          await apiProxy.sessions.selectModel({
-            rpcId: 'cmd-' + Math.random().toString(36).slice(2),
-            payload: {
-              sessionId,
-              provider,
-              model,
-            },
+          await sessionController.selectModel({
+            sessionId,
+            provider,
+            model,
           });
         } catch {} finally {
           if (defaultModelSvc && originalSave) {
