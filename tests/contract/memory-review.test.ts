@@ -392,4 +392,27 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     // 验证清理完成
     expect(handleMock.dispose).toHaveBeenCalled();
   });
+
+  it('契约 10: 后台回顾 Prompt 必须注入目标 Peer 上下文与显式传参指示', async () => {
+    let capturedPrompt = '';
+    const handleMock = {
+      agent: {
+        followup: vi.fn().mockImplementation((msg: any) => {
+          if (typeof msg === 'string') capturedPrompt = msg;
+          else if (msg?.content?.[0]?.text) capturedPrompt = msg.content[0].text;
+        }),
+        whenIdle: vi.fn().mockResolvedValue(undefined),
+      },
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    mockCtx.agents.create.mockResolvedValueOnce(handleMock);
+
+    const result = await reviewManager.runReview('group_123456789', {
+      mainModel: 'deepseek-chat',
+    });
+
+    expect(result.executed).toBe(true);
+    expect(capturedPrompt).toContain('You are reviewing peer: group_123456789');
+    expect(capturedPrompt).toContain("When calling memory tools, always pass peer='group_123456789' explicitly.");
+  });
 });
