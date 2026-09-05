@@ -3,7 +3,7 @@
  * 在后台异步审视对话 Turns，自动提炼 QQ 群聊规则与用户画像偏好。
  * 严格对齐 Hermes 自动回顾架构：
  * - 门控检查 (Gating: turnsInterval / toolCallsInterval)
- * - 严格工具白名单沙箱 (仅开放 read_memory, append_memory, update_memory)
+ * - 严格工具白名单沙箱 (仅开放 read_memory, create_memory, edit_memory, read_chat_history)
  * - 写保护红线 (Do NOT capture 5 类负面约束)
  * - 2 秒取消握手协议 (前台 turn 到来时立即释放，0 阻塞)
  */
@@ -25,8 +25,8 @@ import {
 
 export const ALLOWED_MEMORY_REVIEW_TOOLS: readonly string[] = [
   'read_memory',
-  'append_memory',
-  'update_memory',
+  'create_memory',
+  'edit_memory',
   'read_chat_history',
 ];
 
@@ -178,10 +178,10 @@ export const MEMORY_REVIEW_PROMPT_TEMPLATE = `# Memory Review & Distillation Age
 Review the conversation above and consider saving to memory if appropriate.
 
 Focus on:
-1. Has any user revealed things about themselves — their persona, desires, preferences, personal details, tech stacks, or work styles worth remembering? (Save using \`append_memory(type='user', content='...', qq='...')\` or \`update_memory(type='user', ...)\`).
-2. Has the group or private chat expressed expectations, group rules, discussion topics, forbidden topics, or ways you should operate in this session? (Save using \`append_memory(type='session', content='...')\` or \`update_memory(type='session', ...)\`).
+1. Has any user revealed things about themselves — their persona, desires, preferences, personal details, tech stacks, or work styles worth remembering? (Use \`create_memory(type='user', content='...', qq='...')\` for initial creation, or \`edit_memory(type='user', old_string='...', new_string='...', qq='...')\` to update or delete).
+2. Has the group or private chat expressed expectations, group rules, discussion topics, forbidden topics, or ways you should operate in this session? (Use \`create_memory(type='session', content='...', peer='...')\` for initial creation, or \`edit_memory(type='session', old_string='...', new_string='...', peer='...')\` to update or delete).
 
-If something stands out, save it using the memory tools (read_memory, append_memory, update_memory).
+If something stands out, save it using the memory tools (read_memory, create_memory, edit_memory). Use create_memory for initial creation, and edit_memory for targeted additions, edits, or removals.
 You automatically inherit recent conversation history from the parent session. If needed, you may also use \`read_chat_history\` to inspect earlier messages.
 If nothing is worth saving, just say 'Nothing to save.' and stop.
 
@@ -344,6 +344,16 @@ export class BackgroundReviewManager {
     let parentSession: any = sessionContext.parentSession;
     let parentWorkspace: any = undefined;
 
+    let unlistenMemoryChange: (() => void) | undefined;
+    if (this.ctx && typeof (this.ctx as any).on === 'function') {
+      unlistenMemoryChange = (this.ctx as any).on('memory/change', (change: any) => {
+        if (change?.message) {
+          run.actions.push(change.message);
+          run.details.memoryChanges.push(change.message);
+        }
+      });
+    }
+
     try {
       const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
       if (!parentSession && sessionContext.sessionId && sessions?.get) {
@@ -498,6 +508,27 @@ export class BackgroundReviewManager {
         }
       }
 
+      // 兜底：若 session 事件中有 create_memory / edit_memory 调用，确保 run.actions 记录
+      try {
+        const sess = agentHandle?.agent?.session || (agentHandle as any)?.session;
+        if (sess && typeof sess.snapshotEvents === 'function' && run.actions.length === 0) {
+          const revEvents = sess.snapshotEvents() || [];
+          const toolCalls = revEvents.filter(
+            (e: any) =>
+              e?.type === 'tool/call' &&
+              (e?.data?.name === 'create_memory' || e?.data?.name === 'edit_memory')
+          );
+          for (const tc of toolCalls) {
+            const desc =
+              tc.data?.name === 'create_memory'
+                ? `已创建记忆 (${peer})`
+                : `已编辑记忆 (${peer})`;
+            run.actions.push(desc);
+            run.details.memoryChanges.push(desc);
+          }
+        }
+      } catch {}
+
       const actions = [...run.actions];
       const memoryUpdated = actions.length > 0;
       const summary = summarizeMemoryReviewActions(actions);
@@ -521,6 +552,11 @@ export class BackgroundReviewManager {
         message: summary || 'Background review completed with nothing to save.',
       };
     } finally {
+      if (typeof unlistenMemoryChange === 'function') {
+        try {
+          unlistenMemoryChange();
+        } catch {}
+      }
       await this.cleanupReviewSession(
         reviewSessionId,
         agentHandle,
