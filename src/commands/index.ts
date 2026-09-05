@@ -456,6 +456,57 @@ export async function handleSlashCommand(
       }
     }
 
+    case 'resume': {
+      const sm = context.sessionManager;
+      if (!sm) {
+        return {
+          handled: true,
+          success: false,
+          error: '执行 /resume 失败: 当前环境缺少 SessionManager 服务',
+        };
+      }
+      const peer = sm.sessionIdToPeer(context.session.id);
+      if (!args) {
+        const sessions = sm.listPeerSessionIds(peer); // 升序：旧→新
+        // 渲染：最新在最上面（编号 N），最旧的编号 1 在最下面
+        const lines = [...sessions].reverse().map((sid, i) => `${sessions.length - i}. ${sid}`);
+        return {
+          handled: true,
+          success: true,
+          reply: `📂 ${peer} 的会话：\n${lines.join('\n')}\n\n用法: /resume <序号>`,
+        };
+      }
+      const idx = parseInt(args, 10);
+      const sessions = sm.listPeerSessionIds(peer);
+      if (isNaN(idx) || idx < 1 || idx > sessions.length) {
+        return {
+          handled: true,
+          success: false,
+          error: `序号无效，范围 1~${sessions.length}`,
+        };
+      }
+      const target = sessions[idx - 1]; // 1=最旧 → sessions[0]
+      if (!target) {
+        return {
+          handled: true,
+          success: false,
+          error: `序号无效，范围 1~${sessions.length}`,
+        };
+      }
+      const ok = sm.resumeSession(peer, target);
+      return ok
+        ? {
+            handled: true,
+            success: true,
+            reply: `✅ 已切换到会话 ${target}`,
+          }
+        : {
+            handled: true,
+            success: false,
+            error: '恢复失败：会话不存在或已归档',
+          };
+    }
+
     case 'help': {
       const helpText = [
         '【DSH × NapCat 快捷指令】',

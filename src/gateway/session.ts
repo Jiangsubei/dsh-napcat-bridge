@@ -504,6 +504,161 @@ export class SessionManager {
     return sessionId;
   }
 
+  /**
+   * 列出 peer 的所有历史会话（来自 wsRegistry.headers，parseSessionId 匹配同 base）
+   * 按 (round, version) 升序返回（旧→新）
+   */
+  listPeerSessionIds(peer: string): string[] {
+    let baseId: string;
+    if (peer.startsWith('group_')) {
+      baseId = `qq-group-${peer.slice(6)}`;
+    } else if (peer.startsWith('user_')) {
+      baseId = `qq-user-${peer.slice(5)}`;
+    } else {
+      baseId = `qq-${peer}`;
+    }
+
+    const known = new Map<string, { round: number; version: number }>();
+    const wsRegistry = this.ctx.get('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
+    if (wsRegistry?.headers && typeof wsRegistry.headers.keys === 'function') {
+      for (const rawSid of Array.from(wsRegistry.headers.keys())) {
+        const sid = String(rawSid);
+        const parsed = parseSessionId(sid);
+        if (parsed) {
+          const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+          if (expectedBase === baseId) {
+            if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+              known.set(sid, { round: parsed.round, version: parsed.version });
+            }
+          }
+        }
+      }
+    }
+
+    // 同时补充来自 db 的记录
+    const dbRecord = this.db?.getSessionState(peer);
+    if (dbRecord?.current_session_id) {
+      const parsed = parseSessionId(dbRecord.current_session_id);
+      if (parsed) {
+        if (
+          this.isSessionPhysicallyPresent(dbRecord.current_session_id) &&
+          !this.isSessionArchived(dbRecord.current_session_id)
+        ) {
+          known.set(dbRecord.current_session_id, { round: parsed.round, version: parsed.version });
+        }
+      }
+    }
+
+    // 同时补充来自 peerCurrentSessionId 的记录
+    const curSid = this.peerCurrentSessionId.get(peer);
+    if (curSid) {
+      const parsed = parseSessionId(curSid);
+      if (parsed) {
+        if (this.isSessionPhysicallyPresent(curSid) && !this.isSessionArchived(curSid)) {
+          known.set(curSid, { round: parsed.round, version: parsed.version });
+        }
+      }
+    }
+
+    // 内存中活动的 sessions
+    const sessionsSvc = this.ctx.get('sessions') || (this.ctx as any).sessions;
+    if (sessionsSvc) {
+      if (typeof sessionsSvc.list === 'function') {
+        try {
+          const liveList = sessionsSvc.list() || [];
+          for (const s of liveList) {
+            const sid = s?.id ? String(s.id) : '';
+            if (!sid) continue;
+            const parsed = parseSessionId(sid);
+            if (parsed) {
+              const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+              if (expectedBase === baseId) {
+                if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+                  known.set(sid, { round: parsed.round, version: parsed.version });
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+      if (sessionsSvc.store && typeof sessionsSvc.store.keys === 'function') {
+        try {
+          for (const rawSid of Array.from(sessionsSvc.store.keys())) {
+            const sid = String(rawSid);
+            const parsed = parseSessionId(sid);
+            if (parsed) {
+              const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+              if (expectedBase === baseId) {
+                if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+                  known.set(sid, { round: parsed.round, version: parsed.version });
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // selectionMap 中跟踪的会话
+    for (const sid of this.selectionMap.keys()) {
+      const parsed = parseSessionId(sid);
+      if (parsed) {
+        const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+        if (expectedBase === baseId) {
+          if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+            known.set(sid, { round: parsed.round, version: parsed.version });
+          }
+        }
+      }
+    }
+
+    const list = Array.from(known.entries()).map(([sid, info]) => ({ sid, ...info }));
+    list.sort((a, b) => a.round - b.round || a.version - b.version);
+    return list.map((item) => item.sid);
+  }
+
+  /**
+   * 切换 peer 当前活跃会话到指定 sid
+   * 前置校验：物理存在 且 未归档；通过则写 peerCurrentSessionId + clearedVersions + db
+   */
+  resumeSession(peer: string, sessionId: string): boolean {
+    if (!this.isSessionPhysicallyPresent(sessionId) || this.isSessionArchived(sessionId)) {
+      return false;
+    }
+
+    const parsed = parseSessionId(sessionId);
+    if (!parsed) {
+      return false;
+    }
+
+    let baseId: string;
+    if (peer.startsWith('group_')) {
+      baseId = `qq-group-${peer.slice(6)}`;
+    } else if (peer.startsWith('user_')) {
+      baseId = `qq-user-${peer.slice(5)}`;
+    } else {
+      baseId = `qq-${peer}`;
+    }
+    const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+    if (expectedBase !== baseId) {
+      return false;
+    }
+
+    this.peerCurrentSessionId.set(peer, sessionId);
+    this.clearedVersions.set(peer, { round: parsed.round, version: parsed.version });
+    if (this.db) {
+      this.db.saveSessionState({
+        peer,
+        current_session_id: sessionId,
+        cleared_round: parsed.round,
+        cleared_version: parsed.version,
+        updated_at: Date.now(),
+      });
+    }
+
+    return true;
+  }
+
   private peerNames = new Map<string, string>();
 
   setPeerName(peer: string, name: string): void {
