@@ -62,6 +62,20 @@ export async function getDiscoveredModels(ctx: Context): Promise<DiscoveredModel
 }
 
 /**
+ * 格式化 Token 数量为紧凑字符串（对齐 WebUI formatTokens：<1k 直接显示，<1M 显示 XXK，>=1M 显示 XXM）
+ */
+export function formatTokens(value: number): string {
+  if (typeof value !== 'number' || isNaN(value) || value <= 0) return '0';
+  const scaled = (candidate: number) =>
+    candidate >= 100
+      ? String(Math.round(candidate))
+      : String(Math.round(candidate * 10) / 10);
+  if (value < 1e3) return String(value);
+  if (value < 1e6) return `${scaled(value / 1e3)}K`;
+  return `${scaled(value / 1e6)}M`;
+}
+
+/**
  * 判断输入文本是否为斜杠命令
  */
 export function isSlashCommand(text: string): boolean {
@@ -505,6 +519,112 @@ export async function handleSlashCommand(
             success: false,
             error: '恢复失败：会话不存在或已归档',
           };
+    }
+
+    case 'ctx': {
+      const tokenMeter =
+        context.ctx.get('tokenMeter') || (context.ctx as any).tokenMeter;
+      if (!tokenMeter?.measure) {
+        return {
+          handled: true,
+          success: false,
+          error: 'tokenMeter 服务不可用',
+        };
+      }
+
+      let usage: any;
+      try {
+        usage = tokenMeter.measure(context.session);
+      } catch (err: any) {
+        return {
+          handled: true,
+          success: false,
+          error: `计算上下文用量失败: ${err?.message || String(err)}`,
+        };
+      }
+
+      const totalTokens = usage?.totalTokens ?? 0;
+
+      // 1. 上下文上限 contextWindow
+      let contextWindow: number | undefined;
+      const sessionProjections =
+        context.ctx.get('sessionProjections') || (context.ctx as any).sessionProjections;
+      let breakdown: any;
+
+      if (sessionProjections && typeof sessionProjections.snapshot === 'function') {
+        try {
+          const snap = sessionProjections.snapshot(context.session, [
+            'contextPressure',
+            'contextBreakdown',
+          ]);
+          if (snap?.values?.contextPressure?.contextWindow) {
+            contextWindow = snap.values.contextPressure.contextWindow;
+          }
+          if (snap?.values?.contextBreakdown) {
+            breakdown = snap.values.contextBreakdown;
+          }
+        } catch {}
+      }
+
+      if (contextWindow === undefined) {
+        try {
+          const sm = context.sessionManager;
+          const curSel = sm?.getModelSelection(context.session.id);
+          const provider = curSel?.provider || 'deepseek-official';
+          const model = curSel?.model || 'deepseek-v4-flash';
+          const llm = context.ctx.get('llm') || (context.ctx as any).llm;
+          if (llm && typeof llm.resolveModel === 'function') {
+            const info = await llm.resolveModel(provider, model);
+            if (info?.context?.contextWindow) {
+              contextWindow = info.context.contextWindow;
+            }
+          }
+        } catch {}
+      }
+
+      // 2. 分段明细 (系统提示词 / 工具 / 对话消息)
+      let systemTokens = breakdown?.systemTokens ?? 0;
+      let toolsTokens = breakdown?.toolsTokens ?? 0;
+      let messageTokens = breakdown?.messageTokens ?? (usage?.surfaceTokens ?? 0);
+
+      if (!breakdown && usage?.surfaceTokens !== undefined) {
+        messageTokens = usage.surfaceTokens;
+        if (usage.totalTokens > usage.surfaceTokens) {
+          systemTokens = usage.totalTokens - usage.surfaceTokens;
+        }
+      }
+
+      const fmt = (v: number) => (v > 0 ? `~${formatTokens(v)}` : '0');
+
+      const lines: string[] = [`🧠 上下文已用 ${fmt(totalTokens)}`];
+      const details: string[] = [];
+
+      if (contextWindow && contextWindow > 0) {
+        const percent = Math.min(100, Math.round((totalTokens / contextWindow) * 100));
+        details.push(`${fmt(totalTokens)} / ${formatTokens(contextWindow)} (${percent}%)`);
+      }
+
+      const hasBreakdown =
+        breakdown !== undefined ||
+        systemTokens > 0 ||
+        toolsTokens > 0 ||
+        messageTokens > 0;
+
+      if (hasBreakdown) {
+        details.push(`系统提示词 ${fmt(systemTokens)}`);
+        details.push(`工具 ${fmt(toolsTokens)}`);
+        details.push(`对话消息 ${fmt(messageTokens)}`);
+      }
+
+      if (details.length > 0) {
+        lines.push('', details.join('\n'));
+      }
+
+      return {
+        handled: true,
+        success: true,
+        reply: lines.join('\n'),
+      };
     }
 
     case 'help': {
