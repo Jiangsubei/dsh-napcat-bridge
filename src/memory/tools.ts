@@ -54,6 +54,8 @@ export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: 
       if (userMatch) {
         peer = `user_${userMatch[1]}`;
         qq = userMatch[1];
+      } else if (trimmed.startsWith('review-')) {
+        peer = 'default';
       } else {
         peer = trimmed;
       }
@@ -163,6 +165,10 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           enum: ['session', 'user'],
           description: "记忆类型：'session' 表示读取群聊/私聊规则；'user' 表示读取个人用户画像。",
         },
+        peer: {
+          type: 'string',
+          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
+        },
         qq: {
           type: 'string',
           description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动读取当前对话者）。",
@@ -179,10 +185,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
+        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
+        }
         return tools.readMemory({
           type: args.type || 'session',
           qq: args.qq || resolved.qq,
-          peer: resolved.peer,
+          peer: args.peer || resolved.peer,
         }) as any;
       },
     }),
@@ -201,6 +210,10 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           required: true,
           description: '需要追加的记忆内容条目。',
         },
+        peer: {
+          type: 'string',
+          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
+        },
         qq: {
           type: 'string',
           description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动绑定当前对话者）。",
@@ -217,11 +230,14 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
+        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
+        }
         return tools.appendMemory({
           type: args.type || 'session',
           content: args.content,
           qq: args.qq || resolved.qq,
-          peer: resolved.peer,
+          peer: args.peer || resolved.peer,
         }) as any;
       },
     }),
@@ -240,6 +256,10 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           required: true,
           description: '新的完整 Markdown 内容。',
         },
+        peer: {
+          type: 'string',
+          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
+        },
         qq: {
           type: 'string',
           description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动绑定当前对话者）。",
@@ -256,11 +276,14 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
+        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
+        }
         return tools.updateMemory({
           type: args.type || 'session',
           content: args.content,
           qq: args.qq || resolved.qq,
-          peer: resolved.peer,
+          peer: args.peer || resolved.peer,
         }) as any;
       },
     }),
