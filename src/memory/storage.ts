@@ -78,13 +78,45 @@ export class MemoryStorage {
     this.sessionCache.set(key, content);
   }
 
-  public async appendSessionMemory(peer: string, entry: string): Promise<void> {
-    const current = await this.readSessionMemory(peer);
-    const dateStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const appended = current.trim()
-      ? `${current.trimEnd()}\n- [${dateStr}] ${entry.trim()}`
-      : `# Session 记忆（${peer}）\n\n- [${dateStr}] ${entry.trim()}`;
-    await this.writeSessionMemory(peer, appended);
+  public async readSessionMemoryRaw(peer: string): Promise<string> {
+    return this.readSessionMemory(peer);
+  }
+
+  public async existsSessionMemory(peer: string): Promise<boolean> {
+    const key = peer || 'default';
+    const filePath = this.getSessionMemoryPath(key);
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return content.trim().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  public async readUserProfileRaw(qq = 'default'): Promise<string> {
+    const key = qq && qq.trim() ? qq.trim() : 'default';
+    if (this.userCache.has(key)) {
+      return this.userCache.get(key)!;
+    }
+    const filePath = this.getUserProfilePath(key);
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      this.userCache.set(key, content);
+      return content;
+    } catch {
+      return '';
+    }
+  }
+
+  public async existsUserProfile(qq = 'default'): Promise<boolean> {
+    const key = qq && qq.trim() ? qq.trim() : 'default';
+    const filePath = this.getUserProfilePath(key);
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return content.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   public async readUserProfile(qq = 'default'): Promise<string> {
@@ -122,16 +154,6 @@ export class MemoryStorage {
     if (key === 'default') {
       this.userCache.clear();
     }
-  }
-
-  public async appendUserProfile(qq: string, entry: string): Promise<void> {
-    const key = qq && qq.trim() ? qq.trim() : 'default';
-    const current = await this.readUserProfile(key);
-    const dateStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const appended = current.trim()
-      ? `${current.trimEnd()}\n- [${dateStr}] ${entry.trim()}`
-      : `# 用户画像（${key}）\n\n- [${dateStr}] ${entry.trim()}`;
-    await this.writeUserProfile(key, appended);
   }
 
   // ==================== 同步读写方法 (供 System Prompt 同步组装) ====================
@@ -216,7 +238,11 @@ export class MemoryStorage {
 
     const parts: string[] = [];
     if (sessionMemory) {
-      parts.push(sessionMemory);
+      if (sessionMemory.startsWith('#')) {
+        parts.push(sessionMemory);
+      } else {
+        parts.push(`### Session 记忆（${peer}）\n${sessionMemory}`);
+      }
     }
 
     const userBlocks: string[] = [];
