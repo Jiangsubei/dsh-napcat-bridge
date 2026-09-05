@@ -216,7 +216,7 @@ export class MemoryStorage {
 
     const parts: string[] = [];
     if (sessionMemory) {
-      parts.push(`### Session 记忆（${peer}）\n${sessionMemory}`);
+      parts.push(sessionMemory);
     }
 
     const userBlocks: string[] = [];
@@ -228,7 +228,11 @@ export class MemoryStorage {
       const targetName = activeUsers[0]?.name || targetQQ;
       const profile = this.readUserProfileSync(targetQQ).trim();
       if (profile) {
-        userBlocks.push(`- ${targetName} (${targetQQ}): ${profile}`);
+        if (profile.startsWith('#')) {
+          userBlocks.push(profile);
+        } else {
+          userBlocks.push(`### ${targetName} (${targetQQ})\n${profile}`);
+        }
       }
     } else {
       // 群聊多用户：遍历活跃用户画像，并在达到或突破 2200 上限时放完整当前用户、丢弃后续用户
@@ -236,7 +240,9 @@ export class MemoryStorage {
         const profile = this.readUserProfileSync(user.qq).trim();
         if (!profile) continue;
 
-        const block = `- ${user.name} (${user.qq}): ${profile}`;
+        const block = profile.startsWith('#')
+          ? profile
+          : `### ${user.name} (${user.qq})\n${profile}`;
         userBlocks.push(block);
         currentLength += block.length + 1;
 
@@ -248,9 +254,10 @@ export class MemoryStorage {
     }
 
     if (userBlocks.length > 0) {
-      parts.push(`### 用户偏好与画像\n${userBlocks.join('\n')}`);
+      parts.push(userBlocks.join('\n\n'));
     }
 
     return parts.join('\n\n').trim();
   }
 }
+
