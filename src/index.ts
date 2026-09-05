@@ -178,8 +178,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'list_group_files',
     'wait_for_user_messages',
     'read_memory',
-    'append_memory',
-    'update_memory',
+    'create_memory',
+    'edit_memory',
   ]);
 
   const extractSessionId = (agent: any): string => {
