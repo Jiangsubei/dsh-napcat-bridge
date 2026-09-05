@@ -597,6 +597,42 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
       if (sessionProjections && originalSnapshot) sessionProjections.snapshot = originalSnapshot;
     }
   });
+
+  it('契约 9: /help 命令输出最新指令清单，涵盖全部管理指令并受管理员白名单保护', async () => {
+    const session = booted.ctx.sessions.create('qq-group-1005' as any);
+    const admins = ['2000000001'];
+
+    // 1. 非管理员拒绝
+    const nonAdminRes = await handleSlashCommand('/help', {
+      userId: '1234567890',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(nonAdminRes.handled).toBe(true);
+    expect(nonAdminRes.success).toBe(false);
+    expect(nonAdminRes.error).toContain('权限不足');
+
+    // 2. 管理员执行，返回完整指令列表
+    const adminRes = await handleSlashCommand('/help', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(adminRes.handled).toBe(true);
+    expect(adminRes.success).toBe(true);
+    const reply = adminRes.reply!;
+    expect(reply).toContain('【DSH × NapCat 快捷指令】');
+    expect(reply).toContain('• /model <model_id> : 切换当前会话 LLM 模型');
+    expect(reply).toContain('• /mode <readonly|edit|yolo> : 切换权限模式');
+    expect(reply).toContain('• /think <off|low|medium|high> : 切换思考深度');
+    expect(reply).toContain('• /new (clear) : 开启新会话（原会话保留）');
+    expect(reply).toContain('• /resume : 列出并切换历史会话 (/resume <序号>)');
+    expect(reply).toContain('• /ctx : 查看当前会话上下文用量');
+    expect(reply).toContain('• /stop : 停止当前生成');
+    expect(reply).toContain('• /help : 查看帮助');
+  });
 });
 
 
