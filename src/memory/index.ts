@@ -158,6 +158,12 @@ export function setupMemoryService(
       return;
     }
 
+    // 只处理 QQ 会话：qq-group-/qq-user-/qq- 或 group_/user_。
+    // 否则 WebUI 等非 QQ 会话会被误判为 peer='default'，触发后台回顾（真 bug）。
+    if (!/^(?:qq-group-|qq-user-|qq-|group_|user_)/.test(sessionId)) {
+      return;
+    }
+
     const resolved = resolveContextPeerAndQQ(session);
     let peer = resolved.peer;
     // 修复：resolveContextPeerAndQQ 为工具 exec 设计，raw Session 对象会被
