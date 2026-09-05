@@ -284,4 +284,67 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(archived).not.toContain('qq-group-1001');
     expect(archived).not.toContain('qq-group-1001-2');
   });
+
+  it('契约 5: /stop 命令通过 sessionController.cancel 停止当前会话生成并受管理员白名单保护', async () => {
+    const session = booted.ctx.sessions.create('qq-group-1001' as any);
+    const admins = ['2000000001'];
+
+    // 1. 非管理员拒绝
+    const nonAdminRes = await handleSlashCommand('/stop', {
+      userId: '1234567890',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(nonAdminRes.handled).toBe(true);
+    expect(nonAdminRes.success).toBe(false);
+    expect(nonAdminRes.error).toContain('权限不足');
+
+    // 2. 服务未提供时报错
+    const noServiceRes = await handleSlashCommand('/stop', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(noServiceRes.handled).toBe(true);
+    expect(noServiceRes.success).toBe(false);
+    expect(noServiceRes.error).toContain('sessionController 服务不可用');
+
+    // 3. 挂载 mock sessionController.cancel
+    let cancelCalledWith: any = null;
+    const mockController = {
+      cancel: async (req: any) => {
+        cancelCalledWith = req;
+        return { accepted: true };
+      },
+    };
+    (booted.ctx as any).provide('sessionController', mockController);
+
+    const adminRes = await handleSlashCommand('/stop', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(adminRes.handled).toBe(true);
+    expect(adminRes.success).toBe(true);
+    expect(adminRes.reply).toContain('⏹️ 已停止当前生成。');
+    expect(cancelCalledWith).toEqual({ sessionId: session.id });
+
+    // 4. cancel 抛错时优雅处理
+    mockController.cancel = async () => {
+      throw new Error('agent not found');
+    };
+    const errRes = await handleSlashCommand('/stop', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(errRes.handled).toBe(true);
+    expect(errRes.success).toBe(false);
+    expect(errRes.error).toContain('停止失败: agent not found');
+  });
 });
+
