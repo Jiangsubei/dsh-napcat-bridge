@@ -505,7 +505,7 @@ export class BackgroundReviewManager {
    */
   public async cleanupReviewSession(
     sessionId: string,
-    subagentHandle?: any,
+    agentHandle?: any,
     parentSession?: any,
     parentWorkspace?: any
   ): Promise<void> {
@@ -554,11 +554,18 @@ export class BackgroundReviewManager {
 
       // 4. 物理文件删除
       let sessionPath: string | undefined;
+      if (typeof parentSession === 'string') {
+        sessionPath = parentSession;
+      }
+
       const persistence =
         this.ctx.get?.('sessionPersistence') || (this.ctx as any).sessionPersistence;
-      if (persistence && typeof persistence.locate === 'function') {
+      if (!sessionPath && persistence && typeof persistence.locate === 'function') {
         try {
-          const loc = persistence.locate({ id: sessionId, cwd: parentSession?.header?.cwd });
+          const loc = persistence.locate({
+            id: sessionId,
+            cwd: parentSession?.header?.cwd || parentSession?.cwd,
+          });
           if (loc?.path) {
             sessionPath = path.dirname(loc.path);
           }
@@ -566,7 +573,9 @@ export class BackgroundReviewManager {
       }
 
       if (!sessionPath) {
-        const baseSessionsDir = path.join(os.homedir(), '.dsh', 'sessions');
+        const baseSessionsDir = (this as any).dshHome
+          ? path.join((this as any).dshHome, 'sessions')
+          : path.join(os.homedir(), '.dsh', 'sessions');
         try {
           const dirs = await fsp.readdir(baseSessionsDir).catch(() => [] as string[]);
           for (const d of dirs) {
@@ -620,8 +629,8 @@ export class BackgroundReviewManager {
       }
 
       // 6. 释放 AgentHandle
-      if (subagentHandle && typeof subagentHandle.dispose === 'function') {
-        await subagentHandle.dispose().catch(() => {});
+      if (agentHandle && typeof agentHandle.dispose === 'function') {
+        await agentHandle.dispose().catch(() => {});
       }
     } catch (error: any) {
       this.logger.warn?.(`[BackgroundReview] cleanupReviewSession error: ${error?.message}`);
