@@ -381,14 +381,14 @@ export class BackgroundReviewManager {
         }
       }
 
-      // 提示词组装：若无原生 seed 但传入了 history（兼容无 parentSession 单测），则补充 Current Conversation History
-      let prompt = MEMORY_REVIEW_PROMPT_TEMPLATE;
+      // 提示词组装：包含 peer 上下文指引；若无原生 seed 但传入了 history（兼容无 parentSession 单测），则补充 Current Conversation History
+      let prompt = `${MEMORY_REVIEW_PROMPT_TEMPLATE}\n\n## Context\nYou are reviewing peer: ${peer}\nWhen calling memory tools, always pass peer='${peer}' explicitly.`;
       if (
         (!seed || seed.length === 0) &&
         Array.isArray(sessionContext.history) &&
         sessionContext.history.length > 0
       ) {
-        prompt = `${MEMORY_REVIEW_PROMPT_TEMPLATE}\n\n## Current Conversation History:\n${JSON.stringify(sessionContext.history, null, 2)}`;
+        prompt += `\n\n## Current Conversation History:\n${JSON.stringify(sessionContext.history, null, 2)}`;
       }
 
       const agentsService = this.ctx.get?.('agents') || (this.ctx as any).agents;
