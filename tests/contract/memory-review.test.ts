@@ -413,4 +413,60 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(capturedPrompt).toContain('You are reviewing peer: group_123456789');
     expect(capturedPrompt).toContain("When calling memory tools, always pass peer='group_123456789' explicitly.");
   });
+
+  it('契约 11: 非 QQ 会话（WebUI UUID 会话）不得触发后台回顾', async () => {
+    let sessionEventHandler: any;
+    const listeners: Record<string, Function[]> = {};
+    const testCtx: any = {
+      get: (key: string) => {
+        if (key === 'tools') return { register: vi.fn(), get: vi.fn() };
+        if (key === 'systemPrompt') return { context: vi.fn() };
+        return null;
+      },
+      on: (event: string, fn: Function) => {
+        if (!listeners[event]) listeners[event] = [];
+        listeners[event].push(fn);
+        if (event === 'session/event') sessionEventHandler = fn;
+        return () => {};
+      },
+      logger: () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
+      emit: vi.fn(),
+      agents: { create: vi.fn().mockResolvedValue({ agent: { followup: vi.fn(), whenIdle: vi.fn() }, dispose: vi.fn() }) },
+    };
+
+    const memService = setupMemoryService(testCtx, {
+      storageDir: tmpDir,
+      reviewEnabled: true,
+      reviewToolCallsInterval: 1,   // 若被误处理，1 个 tool/call 即触发
+      reviewTurnsInterval: 1,        // 若被误处理，1 个 turn 即触发
+    });
+
+    const webuiSession = {
+      id: 'session-a6aabd31-693e-4da0-956d-c605acc7b2ca',  // WebUI UUID 会话（非 QQ）
+      snapshotEvents: () => [
+        { type: 'turn/start', seq: 1 },
+        { type: 'tool/call', seq: 2, data: { name: 'read_memory' } },
+      ],
+      meta: {},
+    };
+
+    // 模拟 WebUI 会话的 turn/end：本应被守卫拦截，不得触发回顾
+    await sessionEventHandler(webuiSession, { type: 'turn/end', seq: 3 });
+
+    expect(testCtx.agents.create).not.toHaveBeenCalled();
+
+    // 控制组：QQ 会话在阈值内仍应触发（证明守卫没误伤 QQ 会话）
+    const qqSession = {
+      id: 'qq-user-2415112980',
+      snapshotEvents: () => [
+        { type: 'turn/start', seq: 1 },
+        { type: 'turn/end', seq: 2 },
+      ],
+      meta: {},
+    };
+    await sessionEventHandler(qqSession, { type: 'turn/end', seq: 2 });
+    expect(testCtx.agents.create).toHaveBeenCalled();
+
+    memService.dispose();
+  });
 });
