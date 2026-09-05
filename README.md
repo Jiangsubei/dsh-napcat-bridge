@@ -30,29 +30,38 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 ```bash
 git clone https://github.com/Jiangsubei/dsh-napcat-bridge.git
 cd dsh-napcat-bridge
+# ① 构建：DSH 通过 package.json main → dist/ 加载编译产物，必须先 pnpm build 生成 dist/
+pnpm install
+pnpm build
+# ② link 安装到 DSH
 dsh plugin --profile web add link:.
 ```
 
-### 启动
+### 配置与启动
+
+安装完成后按顺序完成以下步骤：
 
 ```bash
-# 1. 启动 DSH（Web UI 在 127.0.0.1:3080）
+# ③ 启动 DSH（Web UI 在 127.0.0.1:3080）
 dsh --profile web
-
-# 2. 在 DSH Web UI 的 NapCat 插件设置中配置：
-#    - WebSocket 端口（默认 3090）
-#    - 机器人 QQ 号
-#    - 管理员白名单
-#    - 其他可选参数
-
-# 3. 配置 NapCat 反向 WebSocket 连接到本插件
 ```
+
+1. **构建**：完成上述 `pnpm install && pnpm build`（若已 clone 则直接进入下一步）
+2. **Link 安装**：`dsh plugin --profile web add link:.` 将插件链接到 DSH
+3. **NapCat 配置 WS 客户端**：在 NapCat 中新增「反向 WebSocket」客户端，地址指向插件监听的 WS 端口（默认 `8080`，见下面配置表），可用 Token 鉴权（对应 `ws_token`）
+4. **DSH WebUI 设置插件**：在 DSH Web UI（127.0.0.1:3080）的 dsh-napcat-bridge 设置卡片中填写：
+   - 机器人 QQ 号（`bot_qq`）
+   - 管理员白名单（`admins`）
+   - 对齐 NapCat 的 WebSocket 端口（`ws_port`，若改了默认值）
+   - 其他可选参数（人格、主动回复、记忆等）
+
+> 插件通过反向 WebSocket 被动接收 NapCat 连接，因此 NapCat 必须先连上，WebUI 才能看到实时消息。
 
 ## ⚙️ 配置
 
 | 参数 | 说明 | 默认值 |
 |---|---|---|
-| `ws_port` | WebSocket 监听端口（NapCat 连接目标） | `3090` |
+| `ws_port` | WebSocket 监听端口（NapCat 连接目标） | `8080` |
 | `ws_token` | 连接鉴权 Token（留空不鉴权） | `''` |
 | `bot_qq` | 机器人自身 QQ 号（自循环防护） | `''` |
 | `admins` | 管理员 QQ 号白名单（斜杠命令授权） | `[]` |
