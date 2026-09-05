@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
-import { isSlashCommand, handleSlashCommand } from '../../src/commands/index.js';
+import { isSlashCommand, handleSlashCommand, formatTokens } from '../../src/commands/index.js';
 import { SessionManager } from '../../src/gateway/session.js';
 
 describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Commands & Permission Contract)', () => {
@@ -480,7 +480,125 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
       expect(ok).toBe(false);
     }
   });
+
+  it('契约 8: /ctx 命令测量上下文用量，对齐 WebUI 格式与百分比计算，受管理员白名单保护', async () => {
+    const session = booted.ctx.sessions.create('qq-group-1004' as any);
+    const admins = ['2000000001'];
+
+    // 0. formatTokens 工具函数契约
+    expect(formatTokens(850)).toBe('850');
+    expect(formatTokens(1700)).toBe('1.7K');
+    expect(formatTokens(17000)).toBe('17K');
+    expect(formatTokens(113000)).toBe('113K');
+    expect(formatTokens(250000)).toBe('250K');
+    expect(formatTokens(1000000)).toBe('1M');
+    expect(formatTokens(1048576)).toBe('1M');
+
+    // 1. 非管理员拒绝
+    const nonAdminRes = await handleSlashCommand('/ctx', {
+      userId: '1234567890',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(nonAdminRes.handled).toBe(true);
+    expect(nonAdminRes.success).toBe(false);
+    expect(nonAdminRes.error).toContain('权限不足');
+
+    // 2. 服务未提供时报错
+    const noServiceCtx = {
+      get: () => undefined,
+    } as any;
+    const noServiceRes = await handleSlashCommand('/ctx', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: noServiceCtx,
+    });
+    expect(noServiceRes.handled).toBe(true);
+    expect(noServiceRes.success).toBe(false);
+    expect(noServiceRes.error).toContain('tokenMeter 服务不可用');
+
+    // 3. 打桩真实 tokenMeter.measure 与 sessionProjections.snapshot
+    const tokenMeter = booted.ctx.get('tokenMeter') || (booted.ctx as any).tokenMeter;
+    const originalMeasure = tokenMeter?.measure;
+    let measureCalledWith: any = null;
+    if (tokenMeter) {
+      tokenMeter.measure = (sess: any) => {
+        measureCalledWith = sess;
+        return {
+          totalTokens: 250000,
+          surfaceTokens: 113000,
+          nodes: [{ seq: 1, tokens: 113000, heuristicTokens: 113000 }],
+        };
+      };
+    }
+
+    const sessionProjections =
+      booted.ctx.get('sessionProjections') || (booted.ctx as any).sessionProjections;
+    const originalSnapshot = sessionProjections?.snapshot;
+    if (sessionProjections) {
+      sessionProjections.snapshot = (sess: any, keys: string[]) => ({
+        asOfSeq: 1,
+        values: {
+          contextPressure: {
+            contextWindow: 1000000,
+            pressureTokens: 250000,
+            projectedTokens: 250000,
+          },
+          contextBreakdown: {
+            systemTokens: 1700,
+            toolsTokens: 17000,
+            messageTokens: 113000,
+          },
+        },
+      });
+    }
+
+    try {
+      // 4. 管理员执行 /ctx：显示已用、上限与百分比，以及三段明细
+      const resWithCapacity = await handleSlashCommand('/ctx', {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+      });
+      expect(resWithCapacity.handled).toBe(true);
+      expect(resWithCapacity.success).toBe(true);
+      expect(measureCalledWith).toBe(session);
+
+      const replyText = resWithCapacity.reply!;
+      expect(replyText).toContain('🧠 上下文已用 ~250K');
+      expect(replyText).toContain('~250K / 1M (25%)');
+      expect(replyText).toContain('系统提示词 ~1.7K');
+      expect(replyText).toContain('工具 ~17K');
+      expect(replyText).toContain('对话消息 ~113K');
+
+      // 5. 当没有 contextWindow 时：仅显示 totalTokens，不显示百分比与容量
+      if (sessionProjections) {
+        sessionProjections.snapshot = () => ({
+          asOfSeq: 1,
+          values: {},
+        });
+      }
+      const resWithoutCapacity = await handleSlashCommand('/ctx', {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+      });
+      expect(resWithoutCapacity.handled).toBe(true);
+      expect(resWithoutCapacity.success).toBe(true);
+      expect(resWithoutCapacity.reply).toContain('🧠 上下文已用 ~250K');
+      expect(resWithoutCapacity.reply).not.toContain('%');
+      expect(resWithoutCapacity.reply).not.toContain('/ 1M');
+    } finally {
+      if (tokenMeter && originalMeasure) tokenMeter.measure = originalMeasure;
+      if (sessionProjections && originalSnapshot) sessionProjections.snapshot = originalSnapshot;
+    }
+  });
 });
+
 
 
 
