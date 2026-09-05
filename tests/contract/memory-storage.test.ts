@@ -52,15 +52,13 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     await storage.writeSessionMemory('group_100', '群主是BotNickname');
     expect(await storage.readSessionMemory('group_100')).toBe('群主是BotNickname');
 
-    // 3. 追加条目
-    await storage.appendSessionMemory('group_100', '禁止发广告');
-    const updated = await storage.readSessionMemory('group_100');
-    expect(updated).toContain('群主是BotNickname');
-    expect(updated).toContain('禁止发广告');
-    expect(updated).toMatch(/-\s*\[\d{4}-\d{2}-\d{2}.+?\]\s*禁止发广告/);
+    // 3. existsSessionMemory 与 readSessionMemoryRaw
+    expect(await storage.existsSessionMemory('group_100')).toBe(true);
+    expect(await storage.existsSessionMemory('group_non_existent')).toBe(false);
+    expect(await storage.readSessionMemoryRaw('group_100')).toBe('群主是BotNickname');
   });
 
-  it('契约 3: User Profile 读写、追加与 default.md 兜底', async () => {
+  it('契约 3: User Profile 读写与 default.md 兜底，及 raw 读取与存在判断', async () => {
     // 1. 无专属画像且无 default.md 时返回空字符串
     expect(await storage.readUserProfile('112233')).toBe('');
 
@@ -73,11 +71,14 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     await storage.writeUserProfile('112233', '资深 Rust 工程师');
     expect(await storage.readUserProfile('112233')).toBe('资深 Rust 工程师');
 
-    // 4. 追加条目
-    await storage.appendUserProfile('112233', '偏好简洁代码示例');
-    const profile = await storage.readUserProfile('112233');
-    expect(profile).toContain('资深 Rust 工程师');
-    expect(profile).toContain('偏好简洁代码示例');
+    // 4. existsUserProfile 与 readUserProfileRaw（无 default.md 兜底）
+    expect(await storage.existsUserProfile('112233')).toBe(true);
+    expect(await storage.existsUserProfile('998877')).toBe(false);
+    expect(await storage.readUserProfileRaw('112233')).toBe('资深 Rust 工程师');
+    // readUserProfileRaw 对未建立画像的用户返回空串，不回退到 default.md
+    expect(await storage.readUserProfileRaw('998877')).toBe('');
+    // 普通 readUserProfile 仍会兜底到 default.md
+    expect(await storage.readUserProfile('998877')).toBe('通用画像：新用户，待探索偏好');
   });
 
   it('契约 4: 私聊场景 Snapshot 组装 (全量加载，不受 7 天过滤限制，无外层冗余标题)', () => {

@@ -1,7 +1,7 @@
 /**
  * tests/contract/memory-tools.test.ts
  *
- * 契约测试: EN-003 3个核心 Memory Agent 工具 (read_memory, append_memory, update_memory)
+ * 契约测试: EN-003 3个核心 Memory Agent 工具 (read_memory, create_memory, edit_memory)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -15,7 +15,7 @@ import {
   resolveContextPeerAndQQ,
 } from '../../src/memory/tools.js';
 
-describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, update_memory)', () => {
+describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, edit_memory)', () => {
   let tmpDir: string;
   let storage: MemoryStorage;
   let tools: MemoryTools;
@@ -34,103 +34,219 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
     }
   });
 
-  it('契约 1: read_memory 读取 session 规则与用户画像', async () => {
+  it('契约 1: read_memory 读取 session 规则与用户画像（不存在返回空串，不回退 default）', async () => {
     await storage.writeSessionMemory('group_3000000001', '群规：禁止水群');
     await storage.writeUserProfile('2000000001', '偏好：喜欢 Python 和 TS');
 
-    // 1. 读 session
+    // 1. 读已存在 session
     const resSession = await tools.readMemory({
       type: 'session',
       peer: 'group_3000000001',
     });
     expect(resSession.success).toBe(true);
+    expect(resSession.type).toBe('session');
+    expect(resSession.target).toBe('group_3000000001');
     expect(resSession.content).toBe('群规：禁止水群');
-    expect(resSession.message).toContain('group_3000000001');
 
-    // 2. 读 user
+    // 2. 读已存在 user
     const resUser = await tools.readMemory({
       type: 'user',
       qq: '2000000001',
     });
     expect(resUser.success).toBe(true);
+    expect(resUser.type).toBe('user');
+    expect(resUser.target).toBe('2000000001');
     expect(resUser.content).toBe('偏好：喜欢 Python 和 TS');
-    expect(resUser.message).toContain('2000000001');
+
+    // 3. 读不存在的 session -> 返回 content: ''，不报错
+    const resEmptySession = await tools.readMemory({
+      type: 'session',
+      peer: 'group_not_exist',
+    });
+    expect(resEmptySession.success).toBe(true);
+    expect(resEmptySession.type).toBe('session');
+    expect(resEmptySession.target).toBe('group_not_exist');
+    expect(resEmptySession.content).toBe('');
+
+    // 4. 读不存在的 user（即使 user/default.md 存在内容，也不回退 default.md）
+    await storage.writeUserProfile('default', '默认兜底画像');
+    const resEmptyUser = await tools.readMemory({
+      type: 'user',
+      qq: '2000000099',
+    });
+    expect(resEmptyUser.success).toBe(true);
+    expect(resEmptyUser.type).toBe('user');
+    expect(resEmptyUser.target).toBe('2000000099');
+    expect(resEmptyUser.content).toBe('');
   });
 
-  it('契约 2: append_memory 追加条目并触发 memory/change 事件', async () => {
-    // 1. 追加到 session (遵循 read-before-write 规范先读)
-    await tools.readMemory({ type: 'session', peer: 'group_3000000001' });
-    const resSession = await tools.appendMemory({
+  it('契约 2: create_memory 仅当文件不存在时原样写入（无时间戳、无头），已存在时拒绝', async () => {
+    // 1. session 首次创建
+    const resSession = await tools.createMemory({
       type: 'session',
-      content: '新增一条群规：提问请附带报错日志',
       peer: 'group_3000000001',
+      content: '新增一条群规：提问请附带报错日志',
     });
     expect(resSession.success).toBe(true);
-    expect(resSession.message).toContain('已更新记忆');
+    expect(resSession.type).toBe('session');
+    expect(resSession.target).toBe('group_3000000001');
     expect(emitMock).toHaveBeenCalledWith('memory/change', expect.objectContaining({
       type: 'session',
       peer: 'group_3000000001',
-      action: 'append',
+      action: 'create',
+      content: '新增一条群规：提问请附带报错日志',
     }));
 
+    // 验证原样写入磁盘：无 ISO 时间戳，无 # 自动头
     const sessionContent = await storage.readSessionMemory('group_3000000001');
-    expect(sessionContent).toContain('新增一条群规：提问请附带报错日志');
+    expect(sessionContent).toBe('新增一条群规：提问请附带报错日志');
+    expect(sessionContent).not.toContain('# Session 记忆');
 
-    // 2. 追加到 user (遵循 read-before-write 规范先读)
-    await tools.readMemory({ type: 'user', qq: '470250799' });
-    const resUser = await tools.appendMemory({
+    // 2. 已存在时拒绝重复创建
+    const resDup = await tools.createMemory({
+      type: 'session',
+      peer: 'group_3000000001',
+      content: '尝试覆盖已有群规',
+    });
+    expect(resDup.success).toBe(false);
+    expect(resDup.message).toBe('目标记忆已存在，请使用 edit_memory 修改，不要重复创建。');
+
+    // 3. user 首次创建
+    const resUser = await tools.createMemory({
       type: 'user',
-      content: '经常使用 Linux 系统',
       qq: '470250799',
+      content: '偏好：经常使用 Linux 系统',
     });
     expect(resUser.success).toBe(true);
-    expect(resUser.message).toContain('470250799');
+    expect(resUser.type).toBe('user');
+    expect(resUser.target).toBe('470250799');
     expect(emitMock).toHaveBeenCalledWith('memory/change', expect.objectContaining({
       type: 'user',
       qq: '470250799',
-      action: 'append',
+      action: 'create',
     }));
 
-    const userContent = await storage.readUserProfile('470250799');
-    expect(userContent).toContain('经常使用 Linux 系统');
+    const userContent = await storage.readUserProfileRaw('470250799');
+    expect(userContent).toBe('偏好：经常使用 Linux 系统');
+
+    // 4. 内容为空时拒绝
+    const resEmpty = await tools.createMemory({
+      type: 'session',
+      peer: 'group_empty',
+      content: '   ',
+    });
+    expect(resEmpty.success).toBe(false);
+    expect(resEmpty.message).toBe('创建内容不能为空。');
   });
 
-  it('契约 3: update_memory 全量重写 session 或 user 画像', async () => {
-    // 1. 覆盖 session (遵循 read-before-write 规范先读)
-    await tools.readMemory({ type: 'session', peer: 'group_200' });
-    await tools.updateMemory({
+  it('契约 3: edit_memory 定向字面替换与删除（old_string 唯一匹配、返回 preview）', async () => {
+    // 准备初始文件
+    await tools.createMemory({
       type: 'session',
-      content: '# 新群规\n- 仅限算法讨论',
-      peer: 'group_200',
+      peer: 'group_edit_test',
+      content: '前缀\n- 规则一：禁止灌水\n- 规则二：提问附日志\n- 规则三：文明发言\n后缀',
     });
-    expect(await storage.readSessionMemory('group_200')).toBe('# 新群规\n- 仅限算法讨论');
+
+    // 1. 唯一匹配替换 old_string -> new_string
+    const resReplace = await tools.editMemory({
+      type: 'session',
+      peer: 'group_edit_test',
+      old_string: '- 规则一：禁止灌水',
+      new_string: '- 规则一：请专注技术讨论',
+    });
+    expect(resReplace.success).toBe(true);
+    expect(resReplace.preview).toBeDefined();
+    expect(resReplace.preview).toContain('- 规则一：请专注技术讨论');
+    expect(resReplace.content).toBeUndefined(); // 不回全文
     expect(emitMock).toHaveBeenCalledWith('memory/change', expect.objectContaining({
       type: 'session',
-      peer: 'group_200',
-      action: 'update',
+      peer: 'group_edit_test',
+      action: 'edit',
+      old_string: '- 规则一：禁止灌水',
+      new_string: '- 规则一：请专注技术讨论',
     }));
 
-    // 2. 覆盖 user (遵循 read-before-write 规范先读)
-    await tools.readMemory({ type: 'user', qq: '999' });
-    await tools.updateMemory({
-      type: 'user',
-      content: '# 完整用户画像\n- 昵称李四\n- 架构师',
-      qq: '999',
+    const updatedContent = await storage.readSessionMemory('group_edit_test');
+    expect(updatedContent).toContain('- 规则一：请专注技术讨论');
+    expect(updatedContent).not.toContain('禁止灌水');
+
+    // 2. new_string 为空或省略 -> 删除匹配片段
+    const resDelete = await tools.editMemory({
+      type: 'session',
+      peer: 'group_edit_test',
+      old_string: '\n- 规则三：文明发言',
+      new_string: '',
     });
-    expect(await storage.readUserProfile('999')).toBe('# 完整用户画像\n- 昵称李四\n- 架构师');
-    expect(emitMock).toHaveBeenCalledWith('memory/change', expect.objectContaining({
-      type: 'user',
-      qq: '999',
-      action: 'update',
-    }));
+    expect(resDelete.success).toBe(true);
+    const deletedContent = await storage.readSessionMemory('group_edit_test');
+    expect(deletedContent).not.toContain('文明发言');
+    expect(deletedContent).toContain('- 规则二：提问附日志');
+
+    // 3. 省略 new_string -> 同样删除匹配片段
+    const resOmit = await tools.editMemory({
+      type: 'session',
+      peer: 'group_edit_test',
+      old_string: '前缀\n',
+    });
+    expect(resOmit.success).toBe(true);
+    const omitContent = await storage.readSessionMemory('group_edit_test');
+    expect(omitContent.startsWith('- 规则一：请专注技术讨论')).toBe(true);
   });
 
-  it('契约 4: DSH ToolDefinitions 声明与执行上下文绑定', async () => {
+  it('契约 4: edit_memory 错误保护 - 未找到、多义、文件不存在、old_string 为空', async () => {
+    await tools.createMemory({
+      type: 'session',
+      peer: 'group_err_test',
+      content: 'apple banana apple cherry apple',
+    });
+
+    // 1. 未找到报错
+    const resNotFound = await tools.editMemory({
+      type: 'session',
+      peer: 'group_err_test',
+      old_string: 'pear',
+      new_string: 'peach',
+    });
+    expect(resNotFound.success).toBe(false);
+    expect(resNotFound.message).toBe('old_string 未在当前记忆中找到，可能内容已变化，请先 read_memory 获取最新内容。');
+
+    // 2. 多义（出现 N 次）报错
+    const resAmbiguous = await tools.editMemory({
+      type: 'session',
+      peer: 'group_err_test',
+      old_string: 'apple',
+      new_string: 'orange',
+    });
+    expect(resAmbiguous.success).toBe(false);
+    expect(resAmbiguous.message).toBe('old_string 出现 3 次，请补充更多上下文使其唯一。');
+
+    // 3. 文件不存在报错
+    const resNotExists = await tools.editMemory({
+      type: 'session',
+      peer: 'group_non_existent',
+      old_string: 'test',
+      new_string: 'new_test',
+    });
+    expect(resNotExists.success).toBe(false);
+    expect(resNotExists.message).toBe('目标记忆不存在，请先 create_memory 创建。');
+
+    // 4. old_string 为空报错
+    const resEmptyOld = await tools.editMemory({
+      type: 'session',
+      peer: 'group_err_test',
+      old_string: '',
+      new_string: 'something',
+    });
+    expect(resEmptyOld.success).toBe(false);
+    expect(resEmptyOld.message).toBe('old_string 不能为空。');
+  });
+
+  it('契约 5: DSH ToolDefinitions 声明与执行上下文绑定', async () => {
     const toolDefs = createMemoryToolDefinitions(tools);
     expect(toolDefs.length).toBe(3);
 
     const names = toolDefs.map((t) => t.name);
-    expect(names).toEqual(['read_memory', 'append_memory', 'update_memory']);
+    expect(names).toEqual(['read_memory', 'create_memory', 'edit_memory']);
 
     // 验证 resolveContextPeerAndQQ 上下文推导
     const execGroup = {
@@ -153,92 +269,32 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
     expect(resolvedPrivate.qq).toBe('470250799');
 
     // 验证 toolDef.execute
+    const createTool = toolDefs.find((t) => t.name === 'create_memory')!;
+    const createResult = await createTool.execute(
+      { type: 'session', content: '测试群记忆' },
+      execGroup as any
+    );
+    expect((createResult as any).success).toBe(true);
+
     const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
-    await storage.writeSessionMemory('group_3000000001', '测试群记忆');
     const readResult = await readTool.execute({ type: 'session' }, execGroup as any);
     expect((readResult as any).success).toBe(true);
     expect((readResult as any).content).toBe('测试群记忆');
+
+    const editTool = toolDefs.find((t) => t.name === 'edit_memory')!;
+    const editResult = await editTool.execute(
+      { type: 'session', old_string: '测试群记忆', new_string: '修改后的群记忆' },
+      execGroup as any
+    );
+    expect((editResult as any).success).toBe(true);
+    expect((editResult as any).preview).toContain('修改后的群记忆');
   });
 
-  it('契约 5: Read-Before-Write 保护 - 未读直接写入拒绝、连续编辑成功、外部修改检测', async () => {
-    // 1. 未 read 过直接 append 必须拒绝
-    const unreadAppend = await tools.appendMemory({
-      type: 'session',
-      content: '未读直接写入',
-      peer: 'group_test_protect',
-    });
-    expect(unreadAppend.success).toBe(false);
-    expect(unreadAppend.message).toContain('read_memory');
-
-    // 2. 未 read 过直接 update 必须拒绝
-    const unreadUpdate = await tools.updateMemory({
-      type: 'session',
-      content: '未读直接更新',
-      peer: 'group_test_protect',
-    });
-    expect(unreadUpdate.success).toBe(false);
-    expect(unreadUpdate.message).toContain('read_memory');
-
-    // 3. read 后第一次 append 成功
-    await tools.readMemory({ type: 'session', peer: 'group_test_protect' });
-    const append1 = await tools.appendMemory({
-      type: 'session',
-      content: '首次合法追加',
-      peer: 'group_test_protect',
-    });
-    expect(append1.success).toBe(true);
-
-    // 4. 同一轮连续 append 成功（缓存同步更新，不需要重新手动 read）
-    const append2 = await tools.appendMemory({
-      type: 'session',
-      content: '连续第二次追加',
-      peer: 'group_test_protect',
-    });
-    expect(append2.success).toBe(true);
-
-    // 5. 外部进程修改文件后，再次写入检测到版本冲突并拒绝
-    await storage.writeSessionMemory('group_test_protect', '# 被外部程序覆盖的内容');
-    const conflictedAppend = await tools.appendMemory({
-      type: 'session',
-      content: '冲突追加',
-      peer: 'group_test_protect',
-    });
-    expect(conflictedAppend.success).toBe(false);
-    expect(conflictedAppend.message).toContain('read_memory');
-
-    // 6. 重新 read 后即可再次写入
-    await tools.readMemory({ type: 'session', peer: 'group_test_protect' });
-    const recoveredAppend = await tools.appendMemory({
-      type: 'session',
-      content: '恢复追加',
-      peer: 'group_test_protect',
-    });
-    expect(recoveredAppend.success).toBe(true);
-  });
-
-  it('契约 6: 首次创建（文件不存在）边界 - read 返回空、append 正常创建', async () => {
-    const nonExistentPeer = 'group_brand_new_12345';
-    // 首次读取不存在的文件，返回空字符串
-    const readRes = await tools.readMemory({ type: 'session', peer: nonExistentPeer });
-    expect(readRes.success).toBe(true);
-    expect(readRes.content).toBe('');
-
-    // 随后 append 检测当前磁盘内容也是 ''，与缓存一致，允许正常创建写入
-    const appendRes = await tools.appendMemory({
-      type: 'session',
-      content: '首次初始化规则',
-      peer: nonExistentPeer,
-    });
-    expect(appendRes.success).toBe(true);
-
-    const saved = await storage.readSessionMemory(nonExistentPeer);
-    expect(saved).toContain('首次初始化规则');
-  });
-
-  it('契约 7: Peer 映射与 default 会话校验 - 拒绝 default peer，显式传 peer 正确写入目标文件', async () => {
+  it('契约 6: Peer 映射与 default 会话校验 - 拒绝 default peer，显式传 peer 正确写入目标文件', async () => {
     const toolDefs = createMemoryToolDefinitions(tools);
-    const appendTool = toolDefs.find((t) => t.name === 'append_memory')!;
+    const createTool = toolDefs.find((t) => t.name === 'create_memory')!;
     const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
+    const editTool = toolDefs.find((t) => t.name === 'edit_memory')!;
 
     // 模拟来自 review-default-xxx 或无 peer 的上下文
     const execDefault = {
@@ -248,7 +304,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
     };
 
     // 1. 未显式传 peer 且上下文解析为 default 时被拦截拒绝
-    const deniedRes = await appendTool.execute(
+    const deniedRes = await createTool.execute(
       { type: 'session', content: '测试拒绝' },
       execDefault as any
     );
@@ -257,18 +313,29 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
 
     // 2. 显式传入 peer='group_123456789' 时执行通过，且落盘到正确的文件
     const targetPeer = 'group_123456789';
-    await readTool.execute(
-      { type: 'session', peer: targetPeer },
-      execDefault as any
-    );
-    const allowedRes = await appendTool.execute(
+    const allowedCreate = await createTool.execute(
       { type: 'session', peer: targetPeer, content: '由 review agent 显式指定 peer 写入' },
       execDefault as any
     );
-    expect((allowedRes as any).success).toBe(true);
+    expect((allowedCreate as any).success).toBe(true);
 
     const targetContent = await storage.readSessionMemory(targetPeer);
-    expect(targetContent).toContain('由 review agent 显式指定 peer 写入');
+    expect(targetContent).toBe('由 review agent 显式指定 peer 写入');
+
+    // 3. edit 也支持显式传入 peer
+    const allowedEdit = await editTool.execute(
+      { type: 'session', peer: targetPeer, old_string: '指定 peer 写入', new_string: '修改成功' },
+      execDefault as any
+    );
+    expect((allowedEdit as any).success).toBe(true);
+
+    // 4. read 也支持显式传入 peer
+    const readRes = await readTool.execute(
+      { type: 'session', peer: targetPeer },
+      execDefault as any
+    );
+    expect((readRes as any).success).toBe(true);
+    expect((readRes as any).content).toContain('修改成功');
 
     // 检查绝不应该生成 review-*.md 文件
     const defaultPath = storage.getSessionMemoryPath('review-default-1788595929622');
@@ -276,35 +343,53 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
     expect(defaultExists).toBe(false);
   });
 
-  it('契约 8: user 类型 read/append 归一化 qq 缓存 key - read 不带 qq(仅 peer)仍应与带 qq 的 append 命中同一 key', async () => {
+  it('契约 7: user 类型 peer 派生 qq 命中同一文件 (user/<qq>.md)', async () => {
     const targetQQ = '2415112980';
     const peer = `user_${targetQQ}`;
 
-    // 1. 用 peer 派生 qq 读取（不显式传 qq）→ 正确读到 user_2415112980 画像，缓存 key = user:2415112980
-    const readRes = await tools.readMemory({ type: 'user', peer });
-    expect(readRes.success).toBe(true);
-    expect((readRes as any).message).toContain(targetQQ);
-
-    // 2. append 带 qq 应与 read 命中同一缓存 key（修复前 key 不匹配会被误拒）
-    const appendRes = await tools.appendMemory({
+    // 1. 用 peer 派生 qq 首次创建（不显式传 qq）-> 正确落盘到 user/2415112980.md
+    const createRes = await tools.createMemory({
       type: 'user',
       peer,
-      qq: targetQQ,
-      content: '评测偏好补充（来自后台回顾）',
+      content: '评测偏好：喜欢技术干货',
     });
-    expect(appendRes.success).toBe(true);
-    expect((appendRes as any).message).toContain('已更新用户画像');
+    expect(createRes.success).toBe(true);
+    expect(createRes.target).toBe(targetQQ);
 
-    // 3. 落到正确的 user/<qq>.md，而非 user/default.md
     const profilePath = storage.getUserProfilePath(targetQQ);
     const profileExists = await fsp.access(profilePath).then(() => true).catch(() => false);
     expect(profileExists).toBe(true);
-    const saved = await storage.readUserProfile(targetQQ);
-    expect(saved).toContain('评测偏好补充');
 
-    // 4. user/default.md 不应被误写
+    // 2. 带 qq 的 edit 与用 peer 的 read 命中同一文件
+    const editRes = await tools.editMemory({
+      type: 'user',
+      qq: targetQQ,
+      old_string: '喜欢技术干货',
+      new_string: '偏好代码实战',
+    });
+    expect(editRes.success).toBe(true);
+
+    const readRes = await tools.readMemory({ type: 'user', peer });
+    expect(readRes.success).toBe(true);
+    expect(readRes.content).toBe('评测偏好：偏好代码实战');
+
+    // 3. user/default.md 不应被误写
     const defaultPath = storage.getUserProfilePath('default');
     const defaultExists = await fsp.access(defaultPath).then(() => true).catch(() => false);
     expect(defaultExists).toBe(false);
   });
+
+  it('契约 8: getPromptSnapshotSync 无头 session 记忆自动补充 ### 标题，已有 # 头原样保留', () => {
+    // 1. 无头 session 内容 -> 注入时自动补充 ### Session 记忆（${peer}）
+    storage.writeSessionMemorySync('group_test_headless', '群规：纯文本约定，无任何标题');
+    const snapshotHeadless = storage.getPromptSnapshotSync('group_test_headless');
+    expect(snapshotHeadless).toBe('### Session 记忆（group_test_headless）\n群规：纯文本约定，无任何标题');
+
+    // 2. 已有 # 开头的内容 -> 原样保留，不重复补标题
+    storage.writeSessionMemorySync('group_test_headed', '# 明确自定义标题\n群规：已有大标题');
+    const snapshotHeaded = storage.getPromptSnapshotSync('group_test_headed');
+    expect(snapshotHeaded).toBe('# 明确自定义标题\n群规：已有大标题');
+    expect(snapshotHeaded).not.toContain('### Session 记忆');
+  });
 });
+
