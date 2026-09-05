@@ -317,7 +317,7 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     memService.dispose();
   });
 
-  it('契约 9: 后台回顾 Fork 会话不向工作区暴露 (WebUI 隔离保护) 并支持通过 sessions.get 解析父会话', async () => {
+  it('契约 9: 后台回顾 Fork 会话挂载到工作区并在完成后安全解绑与清理', async () => {
     const parentEvents = [
       { type: 'turn/start', seq: 0 },
       { type: 'user/message', seq: 1, data: { content: '请帮我写个脚本' } },
@@ -331,12 +331,14 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
       snapshotEvents: vi.fn().mockReturnValue(parentEvents),
     };
 
-    const attachSessionSpy = vi.fn();
+    const attachSessionSpy = vi.fn().mockResolvedValue(undefined);
+    const detachSessionSpy = vi.fn().mockResolvedValue(undefined);
     const fakeWorkspace = {
       id: 'ws-root',
       path: '/workspace/project-root',
       sessionIds: ['main-session-qq-12345'],
       attachSession: attachSessionSpy,
+      detachSession: detachSessionSpy,
     };
 
     mockCtx.sessions = {
@@ -381,8 +383,11 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
       }),
     }));
 
-    // 核心安全与隔离断言：绝不能调用 attachSession，WebUI 侧边栏保持干净
-    expect(attachSessionSpy).not.toHaveBeenCalled();
+    // 验证挂载到工作区：使 WebUI 侧边栏在运行期间正常显示
+    expect(attachSessionSpy).toHaveBeenCalledWith(expect.stringMatching(/^review-group_12345-\d+$/));
+
+    // 验证运行结束后安全解绑（用完即焚）
+    expect(detachSessionSpy).toHaveBeenCalledWith(expect.stringMatching(/^review-group_12345-\d+$/));
 
     // 验证清理完成
     expect(handleMock.dispose).toHaveBeenCalled();
