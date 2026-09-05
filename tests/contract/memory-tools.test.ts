@@ -275,4 +275,36 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, append_memory, 
     const defaultExists = await fsp.access(defaultPath).then(() => true).catch(() => false);
     expect(defaultExists).toBe(false);
   });
+
+  it('契约 8: user 类型 read/append 归一化 qq 缓存 key - read 不带 qq(仅 peer)仍应与带 qq 的 append 命中同一 key', async () => {
+    const targetQQ = '2415112980';
+    const peer = `user_${targetQQ}`;
+
+    // 1. 用 peer 派生 qq 读取（不显式传 qq）→ 正确读到 user_2415112980 画像，缓存 key = user:2415112980
+    const readRes = await tools.readMemory({ type: 'user', peer });
+    expect(readRes.success).toBe(true);
+    expect((readRes as any).message).toContain(targetQQ);
+
+    // 2. append 带 qq 应与 read 命中同一缓存 key（修复前 key 不匹配会被误拒）
+    const appendRes = await tools.appendMemory({
+      type: 'user',
+      peer,
+      qq: targetQQ,
+      content: '评测偏好补充（来自后台回顾）',
+    });
+    expect(appendRes.success).toBe(true);
+    expect((appendRes as any).message).toContain('已更新用户画像');
+
+    // 3. 落到正确的 user/<qq>.md，而非 user/default.md
+    const profilePath = storage.getUserProfilePath(targetQQ);
+    const profileExists = await fsp.access(profilePath).then(() => true).catch(() => false);
+    expect(profileExists).toBe(true);
+    const saved = await storage.readUserProfile(targetQQ);
+    expect(saved).toContain('评测偏好补充');
+
+    // 4. user/default.md 不应被误写
+    const defaultPath = storage.getUserProfilePath('default');
+    const defaultExists = await fsp.access(defaultPath).then(() => true).catch(() => false);
+    expect(defaultExists).toBe(false);
+  });
 });

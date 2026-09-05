@@ -76,11 +76,23 @@ export class MemoryTools {
 
   constructor(private storage: MemoryStorage, private ctx?: Context) {}
 
+  /**
+   * 归一化 user 类型的记忆 identity（QQ 号）。
+   * 优先级：显式 qq > peer 的 user_ 前缀派生 > 'default'。
+   * 保证 read/append/update 三者缓存 key 一致，避免 write-before-read 误判未读。
+   */
+  private resolveUserTarget(args: { qq?: string; peer?: string }): string {
+    const qq = args.qq?.trim();
+    if (qq) return qq;
+    if (args.peer?.startsWith('user_')) return args.peer.slice(5);
+    return 'default';
+  }
+
   public async readMemory(args: ReadMemoryArgs): Promise<MemoryOperationResult> {
     const type = args.type || 'session';
 
     if (type === 'user') {
-      const targetQQ = args.qq || 'default';
+      const targetQQ = this.resolveUserTarget(args);
       const content = await this.storage.readUserProfile(targetQQ);
       this.lastReadContent.set(`user:${targetQQ}`, content);
       return {
@@ -108,18 +120,19 @@ export class MemoryTools {
       return { success: false, message: '追加内容不能为空' };
     }
 
-    const cacheKey = type === 'user' ? `user:${args.qq || 'default'}` : `session:${args.peer || 'default'}`;
+    const targetQQ = type === 'user' ? this.resolveUserTarget(args) : undefined;
+    const acidKey = type === 'user' ? `user:${targetQQ}` : `session:${args.peer || 'default'}`;
 
     // 1. 检查是否 read 过
-    if (!this.lastReadContent.has(cacheKey)) {
+    if (!this.lastReadContent.has(acidKey)) {
       return { success: false, message: '你没有权限直接编辑记忆文件。请先调用 read_memory 工具读取该记忆的当前内容，再调用本工具编辑（write-before-read 保护）。' };
     }
 
     // 2. 检查文件是否被外部修改
     const currentContent = type === 'user'
-      ? await this.storage.readUserProfile(args.qq || 'default')
+      ? await this.storage.readUserProfile(targetQQ!)
       : await this.storage.readSessionMemory(args.peer || 'default');
-    const cachedContent = this.lastReadContent.get(cacheKey)!;
+    const cachedContent = this.lastReadContent.get(acidKey)!;
     if (currentContent !== cachedContent) {
       return { success: false, message: '该文件自你上次读取后已被修改，继续编辑会覆盖他人改动。请先重新调用 read_memory 工具获取最新内容，再编辑。' };
     }
@@ -127,10 +140,9 @@ export class MemoryTools {
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');
 
     if (type === 'user') {
-      const targetQQ = args.qq || 'default';
-      await this.storage.appendUserProfile(targetQQ, content);
-      const newContent = await this.storage.readUserProfile(targetQQ);
-      this.lastReadContent.set(cacheKey, newContent);
+      await this.storage.appendUserProfile(targetQQ!, content);
+      const newContent = await this.storage.readUserProfile(targetQQ!);
+      this.lastReadContent.set(acidKey, newContent);
       const message = `已更新用户画像 (${targetQQ})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'user', qq: targetQQ, action: 'append', content, message });
@@ -140,7 +152,7 @@ export class MemoryTools {
       const targetPeer = args.peer || 'default';
       await this.storage.appendSessionMemory(targetPeer, content);
       const newContent = await this.storage.readSessionMemory(targetPeer);
-      this.lastReadContent.set(cacheKey, newContent);
+      this.lastReadContent.set(acidKey, newContent);
       const message = `已更新记忆 (${targetPeer})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'session', peer: targetPeer, action: 'append', content, message });
@@ -153,18 +165,19 @@ export class MemoryTools {
     const type = args.type || 'session';
     const content = args.content || '';
 
-    const cacheKey = type === 'user' ? `user:${args.qq || 'default'}` : `session:${args.peer || 'default'}`;
+    const targetQQ = type === 'user' ? this.resolveUserTarget(args) : undefined;
+    const acidKey = type === 'user' ? `user:${targetQQ}` : `session:${args.peer || 'default'}`;
 
     // 1. 检查是否 read 过
-    if (!this.lastReadContent.has(cacheKey)) {
+    if (!this.lastReadContent.has(acidKey)) {
       return { success: false, message: '你没有权限直接编辑记忆文件。请先调用 read_memory 工具读取该记忆的当前内容，再调用本工具编辑（write-before-read 保护）。' };
     }
 
     // 2. 检查文件是否被外部修改
     const currentContent = type === 'user'
-      ? await this.storage.readUserProfile(args.qq || 'default')
+      ? await this.storage.readUserProfile(targetQQ!)
       : await this.storage.readSessionMemory(args.peer || 'default');
-    const cachedContent = this.lastReadContent.get(cacheKey)!;
+    const cachedContent = this.lastReadContent.get(acidKey)!;
     if (currentContent !== cachedContent) {
       return { success: false, message: '该文件自你上次读取后已被修改，继续编辑会覆盖他人改动。请先重新调用 read_memory 工具获取最新内容，再编辑。' };
     }
@@ -172,9 +185,8 @@ export class MemoryTools {
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');
 
     if (type === 'user') {
-      const targetQQ = args.qq || 'default';
-      await this.storage.writeUserProfile(targetQQ, content);
-      this.lastReadContent.set(cacheKey, content);
+      await this.storage.writeUserProfile(targetQQ!, content);
+      this.lastReadContent.set(acidKey, content);
       const message = `已重写用户画像 (${targetQQ})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'user', qq: targetQQ, action: 'update', content, message });
@@ -183,7 +195,7 @@ export class MemoryTools {
     } else {
       const targetPeer = args.peer || 'default';
       await this.storage.writeSessionMemory(targetPeer, content);
-      this.lastReadContent.set(cacheKey, content);
+      this.lastReadContent.set(acidKey, content);
       const message = `已重写 Session 记忆 (${targetPeer})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'session', peer: targetPeer, action: 'update', content, message });
