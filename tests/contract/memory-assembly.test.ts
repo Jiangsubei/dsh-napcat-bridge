@@ -90,10 +90,10 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
 
     const memCtxGroup = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');
     expect(memCtxGroup).toBeDefined();
-    expect(memCtxGroup?.text).toContain('### Session 记忆（group_3000000001）');
+    expect(memCtxGroup?.text).not.toContain('### Session 记忆');
     expect(memCtxGroup?.text).toContain('群规：技术交流');
-    expect(memCtxGroup?.text).toContain('### 用户偏好与画像');
-    expect(memCtxGroup?.text).toContain('BotNickname (2000000001): 项目架构师');
+    expect(memCtxGroup?.text).not.toContain('### 用户偏好与画像');
+    expect(memCtxGroup?.text).toContain('### BotNickname (2000000001)\n项目架构师');
 
     // 4. 验证 Web UI 普通会话（非 QQ）不注入 QQ 记忆
     const assembledWeb = await systemPrompt.assemble({
@@ -150,7 +150,8 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
       session: { id: 'qq-user-99999-1' },
     });
     const memCtx2 = prompt2.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtx2?.text).toContain('### Session 记忆（user_99999）');
+    expect(memCtx2?.text).not.toContain('### Session 记忆');
+    expect(memCtx2?.text).toContain('# Session 记忆（user_99999）');
     expect(memCtx2?.text).toContain('私聊约定：只发代码不废话');
 
     memoryService.dispose();

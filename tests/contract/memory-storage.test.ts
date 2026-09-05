@@ -80,8 +80,8 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     expect(profile).toContain('偏好简洁代码示例');
   });
 
-  it('契约 4: 私聊场景 Snapshot 组装 (全量加载，不受 7 天过滤限制)', () => {
-    storage.writeSessionMemorySync('user_2000000001', '私聊约定：每周五汇报周报');
+  it('契约 4: 私聊场景 Snapshot 组装 (全量加载，不受 7 天过滤限制，无外层冗余标题)', () => {
+    storage.writeSessionMemorySync('user_2000000001', '# Session 记忆（user_2000000001）\n\n私聊约定：每周五汇报周报');
     storage.writeUserProfileSync('2000000001', '昵称BotNickname，项目负责人');
 
     // 私聊 peer 为 user_2000000001，activeUsers 传当前私聊用户
@@ -89,10 +89,11 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
       { qq: '2000000001', name: 'BotNickname' },
     ]);
 
-    expect(snapshot).toContain('### Session 记忆（user_2000000001）');
+    expect(snapshot).not.toContain('### Session 记忆');
+    expect(snapshot).toContain('# Session 记忆（user_2000000001）');
     expect(snapshot).toContain('私聊约定：每周五汇报周报');
-    expect(snapshot).toContain('### 用户偏好与画像');
-    expect(snapshot).toContain('BotNickname (2000000001): 昵称BotNickname，项目负责人');
+    expect(snapshot).not.toContain('### 用户偏好与画像');
+    expect(snapshot).toContain('### BotNickname (2000000001)\n昵称BotNickname，项目负责人');
   });
 
   it('契约 5: 群聊场景 Snapshot 组装与 2200 字符【用户画像原子完整性截断保护】', () => {
@@ -142,10 +143,39 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     ]);
 
     // 555 被注入，444 不注入
-    expect(snapshot).toContain('ActiveUser (555): 近期活跃用户画像');
+    expect(snapshot).toContain('### ActiveUser (555)\n近期活跃用户画像');
     expect(snapshot).not.toContain('444');
 
     // 444 的文件依然完整存在
     expect(await storage.readUserProfile('444')).toBe('历史用户画像：离线超过7天');
+  });
+
+  it('契约 7: 注入标题去重 — profile 自带 # 标题时原样注入，无 # 标题时补 ### 标识 (A1-A4)', () => {
+    storage.writeSessionMemorySync(
+      'group_646988881',
+      '# Session 记忆（group_646988881）\n\n### 群友互动\n- 张三喜欢 Rust'
+    );
+    storage.writeUserProfileSync('10001', '# 用户画像（10001）\n\n### 偏好\n喜欢函数式编程');
+    storage.writeUserProfileSync('10002', '无标题旧格式画像');
+
+    const snapshot = storage.getPromptSnapshotSync('group_646988881', [
+      { qq: '10001', name: '张三' },
+      { qq: '10002', name: '李四' },
+    ]);
+
+    // A1: 无 ### Session 记忆 外层包装，保留文件自带的 # 标题与 ### 子标题
+    expect(snapshot).not.toContain('### Session 记忆');
+    expect(snapshot).toContain('# Session 记忆（group_646988881）');
+    expect(snapshot).toContain('### 群友互动\n- 张三喜欢 Rust');
+
+    // A2: 无 ### 用户偏好与画像 外层包装
+    expect(snapshot).not.toContain('### 用户偏好与画像');
+
+    // A4: profile 自带 # 标题时原样注入
+    expect(snapshot).toContain('# 用户画像（10001）\n\n### 偏好\n喜欢函数式编程');
+    expect(snapshot).not.toContain('### 张三 (10001)');
+
+    // A3: profile 无 # 标题时补充 ### Name (QQ) 标识
+    expect(snapshot).toContain('### 李四 (10002)\n无标题旧格式画像');
   });
 });
