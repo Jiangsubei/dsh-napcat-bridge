@@ -6,7 +6,7 @@
  * 覆盖场景:
  * 1. 门控触发 (Gating: turnsInterval 与 toolCallsInterval)
  * 2. Hermes 取消握手协议 (2.0s 契约，live turn 开始时不阻塞前台)
- * 3. 严格工具白名单沙箱 (仅允许 read_memory, append_memory, update_memory)
+ * 3. 严格工具白名单沙箱 (仅允许 read_memory, create_memory, edit_memory, read_chat_history)
  * 4. Hermes 对齐提示词 (5 大 Do NOT capture 负面约束与 QQ 两层指引)
  * 5. 回顾变更汇总与通知事件 (memory/review/notify)
  */
@@ -112,11 +112,11 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(abortMock).toHaveBeenCalled();
   });
 
-  it('契约 3: 严格工具白名单沙箱 (仅允许 read_memory, append_memory, update_memory, read_chat_history)', () => {
+  it('契约 3: 严格工具白名单沙箱 (仅允许 read_memory, create_memory, edit_memory, read_chat_history)', () => {
     expect(ALLOWED_MEMORY_REVIEW_TOOLS).toEqual([
       'read_memory',
-      'append_memory',
-      'update_memory',
+      'create_memory',
+      'edit_memory',
       'read_chat_history',
     ]);
   });
@@ -137,8 +137,10 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
 
     // 3. 包含 QQ 两层记忆工具指示
     expect(prompt).toContain('read_memory');
-    expect(prompt).toContain('append_memory');
-    expect(prompt).toContain('update_memory');
+    expect(prompt).toContain('create_memory');
+    expect(prompt).toContain('edit_memory');
+    expect(prompt).not.toContain('append_memory');
+    expect(prompt).not.toContain('update_memory');
     expect(prompt).toContain('session');
     expect(prompt).toContain('user');
   });
@@ -292,10 +294,10 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     const mockEvents = [
       { type: 'turn/start', seq: 1 },
       { type: 'tool/call', seq: 2, data: { name: 'read_memory' } },
-      { type: 'tool/call', seq: 3, data: { name: 'append_memory' } },
+      { type: 'tool/call', seq: 3, data: { name: 'create_memory' } },
       { type: 'tool/call', seq: 4, data: { name: 'fetch_web' } },
       { type: 'tool/call', seq: 5, data: { name: 'search_history' } },
-      { type: 'tool/call', seq: 6, data: { name: 'update_memory' } },
+      { type: 'tool/call', seq: 6, data: { name: 'edit_memory' } },
     ];
 
     const dummySession = {

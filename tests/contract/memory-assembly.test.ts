@@ -72,8 +72,8 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     // 1. 验证 3 个 Memory 工具注册在 tools 运行时
     const toolsService = ctx.get('tools') || (ctx as any).tools;
     expect(toolsService.get('read_memory')).toBeDefined();
-    expect(toolsService.get('append_memory')).toBeDefined();
-    expect(toolsService.get('update_memory')).toBeDefined();
+    expect(toolsService.get('create_memory')).toBeDefined();
+    expect(toolsService.get('edit_memory')).toBeDefined();
 
     // 2. 写入记忆
     await memoryService.storage.writeSessionMemory('group_3000000001', '群规：技术交流');
@@ -90,7 +90,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
 
     const memCtxGroup = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');
     expect(memCtxGroup).toBeDefined();
-    expect(memCtxGroup?.text).not.toContain('### Session 记忆');
+    expect(memCtxGroup?.text).toContain('### Session 记忆（group_3000000001）');
     expect(memCtxGroup?.text).toContain('群规：技术交流');
     expect(memCtxGroup?.text).not.toContain('### 用户偏好与画像');
     expect(memCtxGroup?.text).toContain('### BotNickname (2000000001)\n项目架构师');
@@ -124,7 +124,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     });
 
     const toolsService = ctx.get('tools') || (ctx as any).tools;
-    const appendTool = toolsService.get('append_memory');
+    const createTool = toolsService.get('create_memory');
     const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
 
     // 第一轮：初始无记忆
@@ -134,13 +134,8 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memCtx1 = prompt1.contexts.find((c: any) => c.name === 'napcat:memory');
     expect(memCtx1?.text || '').toBe('');
 
-    // 模拟 Agent 在第 1 轮中遵循 read-before-write 规范，先 read_memory 后 append_memory
-    const readTool = toolsService.get('read_memory');
-    await readTool.execute(
-      { type: 'session' },
-      { agent: { session: { id: 'qq-user-99999-1' } } }
-    );
-    await appendTool.execute(
+    // 模拟 Agent 在第 1 轮中通过 create_memory 首次写入会话记忆
+    await createTool.execute(
       { type: 'session', content: '私聊约定：只发代码不废话' },
       { agent: { session: { id: 'qq-user-99999-1' } } }
     );
@@ -150,8 +145,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
       session: { id: 'qq-user-99999-1' },
     });
     const memCtx2 = prompt2.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtx2?.text).not.toContain('### Session 记忆');
-    expect(memCtx2?.text).toContain('# Session 记忆（user_99999）');
+    expect(memCtx2?.text).toContain('### Session 记忆（user_99999）');
     expect(memCtx2?.text).toContain('私聊约定：只发代码不废话');
 
     memoryService.dispose();
