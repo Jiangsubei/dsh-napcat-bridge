@@ -249,7 +249,7 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
         parentSession: 'qq-group-3000000001',
         isSeeded: true,
         cwd: '/workspace/project-root',
-        origin: 'subagent',
+        origin: 'fork',
         allowedTools: expect.arrayContaining(['read_chat_history', 'read_memory']),
       }),
     }));
@@ -315,5 +315,76 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     // toolCallsCount = 5，达到 reviewToolCallsInterval: 5 阈值，触发回顾
     expect(testCtx.agents.create).toHaveBeenCalled();
     memService.dispose();
+  });
+
+  it('契约 9: 后台回顾 Fork 会话不向工作区暴露 (WebUI 隔离保护) 并支持通过 sessions.get 解析父会话', async () => {
+    const parentEvents = [
+      { type: 'turn/start', seq: 0 },
+      { type: 'user/message', seq: 1, data: { content: '请帮我写个脚本' } },
+      { type: 'assistant/message', seq: 2, data: { content: '好的' } },
+      { type: 'turn/end', seq: 3 },
+    ];
+
+    const parentSessionMock = {
+      id: 'main-session-qq-12345',
+      header: { cwd: '/workspace/project-root' },
+      snapshotEvents: vi.fn().mockReturnValue(parentEvents),
+    };
+
+    const attachSessionSpy = vi.fn();
+    const fakeWorkspace = {
+      id: 'ws-root',
+      path: '/workspace/project-root',
+      sessionIds: ['main-session-qq-12345'],
+      attachSession: attachSessionSpy,
+    };
+
+    mockCtx.sessions = {
+      get: vi.fn((id: string) => (id === 'main-session-qq-12345' ? parentSessionMock : undefined)),
+      flush: vi.fn().mockResolvedValue(undefined),
+      detachEntered: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockCtx.workspaceRegistry = {
+      resolveByPath: vi.fn().mockResolvedValue(fakeWorkspace),
+      list: vi.fn().mockReturnValue([fakeWorkspace]),
+    };
+
+    const handleMock = {
+      agent: {
+        followup: vi.fn().mockResolvedValue(undefined),
+        whenIdle: vi.fn().mockResolvedValue(undefined),
+      },
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    mockCtx.agents.create.mockResolvedValueOnce(handleMock);
+
+    // 仅传入 sessionId，验证 reviewManager 能通过 sessions.get 找到 parentSession
+    const result = await reviewManager.runReview('group_12345', {
+      sessionId: 'main-session-qq-12345',
+      mainModel: 'deepseek-chat',
+    });
+
+    expect(result.executed).toBe(true);
+    expect(mockCtx.sessions.get).toHaveBeenCalledWith('main-session-qq-12345');
+
+    // 验证 agents.create 正确使用 DSH 原生 fork 契约
+    expect(mockCtx.agents.create).toHaveBeenCalledWith(expect.objectContaining({
+      seed: parentEvents,
+      inheritedEventCount: 4,
+      meta: expect.objectContaining({
+        isBackgroundReview: true,
+        origin: 'fork',
+        parentSession: 'main-session-qq-12345',
+        cwd: '/workspace/project-root',
+        isSeeded: true,
+      }),
+    }));
+
+    // 核心安全与隔离断言：绝不能调用 attachSession，WebUI 侧边栏保持干净
+    expect(attachSessionSpy).not.toHaveBeenCalled();
+
+    // 验证清理完成
+    expect(handleMock.dispose).toHaveBeenCalled();
   });
 });
