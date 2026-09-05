@@ -8,7 +8,7 @@ import type { MessageDatabase } from '../storage/database.js';
 import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
 import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } from './tools.js';
-import { BackgroundReviewManager, type HistoryMessage } from './review.js';
+import { BackgroundReviewManager } from './review.js';
 import {
   DEFAULT_MEMORY_DIR,
   DEFAULT_MEMORY_BUDGET_CHARS,
@@ -195,30 +195,6 @@ export function setupMemoryService(
         }
       }
 
-      const history: HistoryMessage[] = [];
-      if (Array.isArray(session.history)) {
-        history.push(...session.history);
-      } else if (Array.isArray(session.messages)) {
-        history.push(...session.messages);
-      } else if (Array.isArray(session.events)) {
-        for (const ev of session.events) {
-          if (ev.type === 'user/message' || ev.type === 'user/input') {
-            history.push({
-              role: 'user',
-              content: ev.data?.content || ev.data?.text || '',
-            });
-          } else if (ev.type === 'assistant/message' || ev.type === 'assistant/chunk') {
-            if (ev.data?.content || ev.data?.text) {
-              history.push({
-                role: 'assistant',
-                content: ev.data?.content || ev.data?.text || '',
-                tool_calls: ev.data?.tool_calls,
-              });
-            }
-          }
-        }
-      }
-
       const mainModel = session.options?.model || session.model;
 
       reviewManager
@@ -226,7 +202,6 @@ export function setupMemoryService(
           {
             peer,
             sessionId,
-            history,
             mainModel,
             parentSession: session,
           },
