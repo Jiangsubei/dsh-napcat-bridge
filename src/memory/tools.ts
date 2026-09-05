@@ -72,6 +72,8 @@ export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: 
 }
 
 export class MemoryTools {
+  private lastReadContent = new Map<string, string>();
+
   constructor(private storage: MemoryStorage, private ctx?: Context) {}
 
   public async readMemory(args: ReadMemoryArgs): Promise<MemoryOperationResult> {
@@ -80,6 +82,7 @@ export class MemoryTools {
     if (type === 'user') {
       const targetQQ = args.qq || 'default';
       const content = await this.storage.readUserProfile(targetQQ);
+      this.lastReadContent.set(`user:${targetQQ}`, content);
       return {
         success: true,
         message: `成功读取用户画像 (${targetQQ})`,
@@ -88,6 +91,7 @@ export class MemoryTools {
     } else {
       const targetPeer = args.peer || 'default';
       const content = await this.storage.readSessionMemory(targetPeer);
+      this.lastReadContent.set(`session:${targetPeer}`, content);
       return {
         success: true,
         message: `成功读取 Session 记忆 (${targetPeer})`,
@@ -104,11 +108,29 @@ export class MemoryTools {
       return { success: false, message: '追加内容不能为空' };
     }
 
+    const cacheKey = type === 'user' ? `user:${args.qq || 'default'}` : `session:${args.peer || 'default'}`;
+
+    // 1. 检查是否 read 过
+    if (!this.lastReadContent.has(cacheKey)) {
+      return { success: false, message: 'You must read the file first before editing.' };
+    }
+
+    // 2. 检查文件是否被外部修改
+    const currentContent = type === 'user'
+      ? await this.storage.readUserProfile(args.qq || 'default')
+      : await this.storage.readSessionMemory(args.peer || 'default');
+    const cachedContent = this.lastReadContent.get(cacheKey)!;
+    if (currentContent !== cachedContent) {
+      return { success: false, message: 'File has been modified since last read, please re-read first.' };
+    }
+
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');
 
     if (type === 'user') {
       const targetQQ = args.qq || 'default';
       await this.storage.appendUserProfile(targetQQ, content);
+      const newContent = await this.storage.readUserProfile(targetQQ);
+      this.lastReadContent.set(cacheKey, newContent);
       const message = `已更新用户画像 (${targetQQ})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'user', qq: targetQQ, action: 'append', content, message });
@@ -117,6 +139,8 @@ export class MemoryTools {
     } else {
       const targetPeer = args.peer || 'default';
       await this.storage.appendSessionMemory(targetPeer, content);
+      const newContent = await this.storage.readSessionMemory(targetPeer);
+      this.lastReadContent.set(cacheKey, newContent);
       const message = `已更新记忆 (${targetPeer})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'session', peer: targetPeer, action: 'append', content, message });
@@ -129,11 +153,28 @@ export class MemoryTools {
     const type = args.type || 'session';
     const content = args.content || '';
 
+    const cacheKey = type === 'user' ? `user:${args.qq || 'default'}` : `session:${args.peer || 'default'}`;
+
+    // 1. 检查是否 read 过
+    if (!this.lastReadContent.has(cacheKey)) {
+      return { success: false, message: 'You must read the file first before editing.' };
+    }
+
+    // 2. 检查文件是否被外部修改
+    const currentContent = type === 'user'
+      ? await this.storage.readUserProfile(args.qq || 'default')
+      : await this.storage.readSessionMemory(args.peer || 'default');
+    const cachedContent = this.lastReadContent.get(cacheKey)!;
+    if (currentContent !== cachedContent) {
+      return { success: false, message: 'File has been modified since last read, please re-read first.' };
+    }
+
     const preview = content.length > 40 ? content.slice(0, 40).replace(/\n+/g, ' ') + '…' : content.replace(/\n+/g, ' ');
 
     if (type === 'user') {
       const targetQQ = args.qq || 'default';
       await this.storage.writeUserProfile(targetQQ, content);
+      this.lastReadContent.set(cacheKey, content);
       const message = `已重写用户画像 (${targetQQ})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'user', qq: targetQQ, action: 'update', content, message });
@@ -142,6 +183,7 @@ export class MemoryTools {
     } else {
       const targetPeer = args.peer || 'default';
       await this.storage.writeSessionMemory(targetPeer, content);
+      this.lastReadContent.set(cacheKey, content);
       const message = `已重写 Session 记忆 (${targetPeer})：${preview}`;
       if (this.ctx && typeof (this.ctx as any).emit === 'function') {
         (this.ctx as any).emit('memory/change', { type: 'session', peer: targetPeer, action: 'update', content, message });
