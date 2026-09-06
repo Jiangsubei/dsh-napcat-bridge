@@ -429,5 +429,40 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(snapshotHeaded).toBe('# 明确自定义标题\n群规：已有大标题');
     expect(snapshotHeaded).not.toContain('### Session 记忆');
   });
+
+  it('契约 9: resolveContextPeerAndQQ 支持 review 会话映射回源 peer 与 QQ', () => {
+    // 1. review 私聊会话 -> 映射回 user_<qq> 与 qq
+    const resUser = resolveContextPeerAndQQ({
+      agent: {
+        session: { id: 'review-user_2415112980-1725600000000' },
+      },
+    });
+    expect(resUser.peer).toBe('user_2415112980');
+    expect(resUser.qq).toBe('2415112980');
+
+    // 2. review 群聊会话 -> 映射回 group_<gid>，qq 保持 default
+    const resGroup = resolveContextPeerAndQQ({
+      agent: {
+        session: { id: 'review-group_646988881-1725600000000' },
+      },
+    });
+    expect(resGroup.peer).toBe('group_646988881');
+    expect(resGroup.qq).toBe('default');
+
+    // 3. 无法解析的 review id -> 回退 default
+    const resDefault = resolveContextPeerAndQQ({
+      agent: {
+        session: { id: 'review-default-1788595929622' },
+      },
+    });
+    expect(resDefault.peer).toBe('default');
+    expect(resDefault.qq).toBe('default');
+
+    const resInvalid = resolveContextPeerAndQQ({
+      sessionId: 'review-invalid-session-format',
+    });
+    expect(resInvalid.peer).toBe('default');
+    expect(resInvalid.qq).toBe('default');
+  });
 });
 
