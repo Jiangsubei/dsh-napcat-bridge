@@ -329,7 +329,7 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
   return [
     defineTool({
       name: 'read_memory',
-      description: '读取当前群聊/私聊的 Session 记忆规则或特定用户的个人画像与偏好。目标文件不存在时返回空内容，不报错。',
+      description: '读取当前群聊/私聊的 Session 记忆规则或特定用户的个人画像与偏好。目标文件不存在或内容为空时不报错，并提示可用 create_memory 创建。',
       parameters: {
         type: {
           type: 'string',
@@ -371,13 +371,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     }),
     defineTool({
       name: 'create_memory',
-      description: '创建当前群聊/私聊 Session 记忆或用户画像。仅当目标记忆文件不存在时可用，原样写入内容。已存在时请使用 edit_memory。',
+      description: '创建用户画像或会话记忆。用户画像（type=\'user\'）是跨场景的稳定锚点——群聊、私聊共用同一份，记录该用户的全局个人事实与偏好；会话记忆（type=\'session\'）仅当前群/私聊的规则约定。仅当目标记忆文件不存在时可用，原样写入内容；已存在请使用 edit_memory。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'session' 表示创建群聊/私聊约定；'user' 表示创建个人用户画像。",
+          description: "记忆类型：'user' 表示创建该用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则（不跨场景）。",
         },
         content: {
           type: 'string',
@@ -417,13 +417,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     }),
     defineTool({
       name: 'edit_memory',
-      description: '定向修改当前群聊/私聊 Session 记忆或用户画像。通过 old_string 精确匹配并替换为 new_string；若 new_string 为空或省略则删除该片段。要求 old_string 必须在内容中唯一存在。',
+      description: '定向修改用户画像或会话记忆。用户画像（type=\'user\'）跨场景互通（群聊、私聊同一份），修改影响该用户所有场景；会话记忆（type=\'session\'）仅当前会话。通过 old_string 精确匹配替换为 new_string；若 new_string 为空或省略则删除该片段。要求 old_string 必须唯一存在。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'session' 表示修改群聊/私聊约定；'user' 表示修改个人用户画像。",
+          description: "记忆类型：'user' 表示修改用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示修改当前会话专属规则（不跨场景）。",
         },
         old_string: {
           type: 'string',
