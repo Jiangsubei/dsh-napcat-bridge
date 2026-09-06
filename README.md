@@ -6,15 +6,15 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 
 - **QQ 群聊 / 私聊全场景接入**：基于 NapCat（OneBot 11 协议）反向 WebSocket 连接
 - **多轮对话与上下文管理**：每个 QQ 会话（私聊 / 群聊）独立会话上下文
-- **流式回复**：支持 DSH 流式输出实时推送到 QQ
 - **出站消息精准绑定**：@提问者 / 引用原消息，回复不会串到错误的人
 - **串行多题问答**：排队机制确保多条消息按序处理
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接
-- **群聊主动回复**：随机概率唤醒 + 潜水超时冒泡，让机器人更自然地参与群聊
-- **两层记忆体系**：群聊记忆 + 用户画像，Markdown 文件存储，后台自动回顾提炼
+- **群聊主动回复**：随机概率唤醒 + 潜水超时冒泡 + 夜间免打扰，另有「仅回复文本内容」开关（纯文本模型专用）
+- **两层记忆体系**：群聊会话记忆 + 用户画像（跨群互通锚点），Markdown 存储，`read/create/edit` 三工具；后台自动回顾按用户记忆偏好提炼（回顾 Agent 注入既有记忆与画像）
+- **贴表情回应**：`react_message` 工具（仅群聊）给消息贴表情；入站贴表情事件后台落库可审计
 - **文件收发**：私聊文件入站落盘 + 群文件列表查询
-- **斜杠命令**：`/model`、`/clear`、`/help` 等管理员命令，权限白名单控制
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，无需改配置文件
+- **斜杠命令**：`/new`、`/resume`、`/ctx`、`/stop`、`/model`、`/mode`、`/think`、`/help`（`/clear` 为 `/new` 别名），管理员权限白名单控制
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，Tab 分区分组管理
 - **人格与行为定制**：可自定义助手人格设定与行为约束准则
 
 ## 📦 安装
@@ -72,11 +72,18 @@ dsh --profile web
 | `behavior` | 行为约束准则 | 见源码 |
 | `proactive_reply_enabled` | 启用群聊主动回复 | `false` |
 | `proactive_only_text` | 仅回复文本内容（纯文本模型专用） | `false` |
+| `proactive_random_enabled` | 普通消息随机概率唤醒 | `false` |
 | `proactive_random_probability` | 随机唤醒概率 (0~1) | `0.05` |
+| `proactive_idle_enabled` | 潜水超时主动唤醒 | `false` |
 | `proactive_idle_timeout_mins` | 潜水超时阈值（分钟） | `120` |
+| `proactive_cooldown_mins` | 主动回复冷却时间（分钟） | `10` |
+| `proactive_night_dnd` | 夜间免打扰 (23:00-08:00) | `true` |
 | `memory_storage_dir` | 记忆文件存储目录 | `.dsh/napcat/napcat_memory` |
 | `memory_budget_chars` | 用户画像注入字符预算 | `2200` |
 | `review_enabled` | 启用后台自动回顾 | `true` |
+| `review_turns_interval` | 回顾触发轮次间隔 | `10` |
+| `review_tool_calls_interval` | 回顾触发工具调用间隔 | `10` |
+| `review_model` | 后台回顾专用子模型（留空跟随主模型） | `''` |
 
 ## 🛠️ 开发
 
@@ -91,7 +98,7 @@ pnpm build
 
 ## 🧪 测试
 
-本项目采用 TDD 驱动开发，27 套件 240+ 契约测试覆盖：
+本项目采用 TDD 驱动开发，33 套件 338 契约测试覆盖（含记忆工具、贴表情、后台回顾、设置 Tab、唤醒判定等）。
 
 ```bash
 pnpm test          # 完整测试（先 build 再跑）
