@@ -71,6 +71,7 @@ dsh --profile web
 | `persona` | 助手人格设定 | 见源码 |
 | `behavior` | 行为约束准则 | 见源码 |
 | `proactive_reply_enabled` | 启用群聊主动回复 | `false` |
+| `proactive_only_text` | 仅回复文本内容（纯文本模型专用） | `false` |
 | `proactive_random_probability` | 随机唤醒概率 (0~1) | `0.05` |
 | `proactive_idle_timeout_mins` | 潜水超时阈值（分钟） | `120` |
 | `memory_storage_dir` | 记忆文件存储目录 | `.dsh/napcat/napcat_memory` |
