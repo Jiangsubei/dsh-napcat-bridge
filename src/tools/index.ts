@@ -21,7 +21,11 @@ import type {
   ListGroupFilesParams,
   ListGroupFilesResult,
   ForwardNode,
+  ReactMessageParams,
+  ReactMessageResult,
 } from '../types/index.js';
+import { EMOJI_MAP } from '../types/index.js';
+export { EMOJI_MAP };
 import type { MessageDatabase } from '../storage/database.js';
 import { formatDateTime } from '../storage/database.js';
 import type { MediaStorageManager } from '../storage/media.js';
@@ -43,12 +47,18 @@ export interface ToolExecutionContext {
   waitRegistry?: MessageWaitRegistry | null;
   /** EN-005: 当前工具调用的取消信号（Agent 回合中断时中止等待） */
   signal?: AbortSignal;
+  /** 当前回合入站消息 ID 获取器（react_message 省略 message_id 时默认绑定） */
+  inboundMsgIdGetter?: (peer: string) => number | undefined;
 }
 
 let globalToolContext: ToolExecutionContext = {};
 
 export function setGlobalToolContext(context: ToolExecutionContext): void {
   globalToolContext = { ...globalToolContext, ...context };
+}
+
+export function resetGlobalToolContext(): void {
+  globalToolContext = {};
 }
 
 /**
@@ -516,6 +526,77 @@ export function renderWaitResultText(value: WaitForUserMessagesResult): string {
 }
 
 /**
+ * 6.8 贴表情回应工具 (react_message)
+ * 通过 NapCat OneBot 11 扩展接口 set_msg_emoji_like 对群聊消息添加表情回应。
+ */
+export async function reactMessage(
+  params: ReactMessageParams,
+  context?: ToolExecutionContext
+): Promise<ReactMessageResult> {
+  const ctx = { ...globalToolContext, ...context };
+
+  if (!params || !params.emoji || typeof params.emoji !== 'string' || !(params.emoji in EMOJI_MAP)) {
+    return {
+      success: false,
+      error: `未知的表情名 '${params?.emoji}'。请从以下支持的表情中选择: ${Object.keys(EMOJI_MAP).join(', ')}`,
+    };
+  }
+
+  const key = params.emoji;
+  const item = EMOJI_MAP[key];
+
+  let msgId: number | undefined;
+  if (params.message_id !== undefined && params.message_id !== null && String(params.message_id).trim() !== '') {
+    const parsed = Number(params.message_id);
+    if (!Number.isNaN(parsed)) {
+      msgId = parsed;
+    }
+  }
+
+  if (msgId === undefined) {
+    const peer = ctx.peer || '';
+    if (ctx.inboundMsgIdGetter) {
+      msgId = ctx.inboundMsgIdGetter(peer) ?? ctx.inboundMsgIdGetter(normalizePeer(peer));
+    }
+  }
+
+  if (msgId === undefined || Number.isNaN(msgId)) {
+    return {
+      success: false,
+      error: '未提供 message_id 且当前回合无入站消息上下文',
+    };
+  }
+
+  if (!ctx.gateway) {
+    return {
+      success: false,
+      error: 'NapCat 未连接 (gateway 不可用)',
+    };
+  }
+
+  try {
+    const res = await ctx.gateway.setMsgEmojiLike(msgId, item.id);
+    if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
+      return {
+        success: false,
+        error: res.wording || res.message || `NapCat API 调用失败 (retcode: ${res.retcode})`,
+      };
+    }
+    return {
+      success: true,
+      message_id: msgId,
+      emoji: key,
+      emoji_id: item.id,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || '未知错误',
+    };
+  }
+}
+
+/**
  * 注册 Agent 工具集至 DSH 工具运行时 (ctx.tools)
  */
 export function registerAgentTools(
@@ -527,6 +608,7 @@ export function registerAgentTools(
     sender?: SerialSender;
     dshHome?: string;
     waitRegistry?: MessageWaitRegistry;
+    inboundMsgIdGetter?: (peer: string) => number | undefined;
   }
 ): () => void {
   setGlobalToolContext({
@@ -535,6 +617,7 @@ export function registerAgentTools(
     mediaManager: options.mediaManager,
     sender: options.sender,
     waitRegistry: options.waitRegistry,
+    inboundMsgIdGetter: options.inboundMsgIdGetter,
   });
 
   const unregisters: Array<() => void> = [];
@@ -812,6 +895,87 @@ export function registerAgentTools(
               waitRegistry: options.waitRegistry,
               peer,
               signal: exec.signal,
+            })) as any;
+          },
+        })
+      )
+    );
+
+    // 8. react_message
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'react_message',
+          description: '收到消息时可调用本工具，以表情回应。',
+          parameters: {
+            emoji: {
+              type: 'string',
+              required: true,
+              enum: Object.keys(EMOJI_MAP),
+              description:
+                '表情语义键（对应 QQ 群消息回应表情）。可选值与具体语境含义：\n' +
+                '- thumbs_up: 点赞 / 收到 / 认可\n' +
+                '- heart: 爱心 / 喜爱 / 感谢支持\n' +
+                '- laugh: 笑哭 / 搞笑 / 无奈破防\n' +
+                '- grin: 呲牙 / 开心笑 / 友好打招呼\n' +
+                '- snicker: 偷笑 / 窃喜 / 暗爽使坏\n' +
+                '- doge: 狗头 / 滑稽调侃 / 友军反讽防误伤\n' +
+                '- ok: OK / 确认收到 / 没问题\n' +
+                '- cry: 大哭 / 难过 / 心疼太惨了\n' +
+                '- grievance: 委屈 / 可怜巴巴 / 受委屈\n' +
+                '- hug: 抱抱 / 温暖安慰 / 抱团\n' +
+                '- rose: 玫瑰 / 鲜花 / 感谢致意\n' +
+                '- cheer: 打call / 加油应援 / 振奋\n' +
+                '- touch_fish: 摸鱼 / 划水 / 下班偷闲\n' +
+                '- celebrate: 礼花 / 庆祝 / 大吉恭喜\n' +
+                '- cute: 卖萌 / 可爱乖巧\n' +
+                '- thinking: 托腮 / 思考琢磨 / 好奇观望\n' +
+                '- sweat: 辣眼睛 / 尴尬 / 汗颜无语\n' +
+                '- cat: 喵喵 / 猫咪卖萌 / 嗷呜\n' +
+                '- skull: 骷髅头 / 寄了 / 完蛋暴毙 / 吓人\n' +
+                '- poop: 便便 / 恶搞吐槽 / 嫌弃\n' +
+                '- pig: 猪头 / 笨蛋调侃 / 亲切吐槽\n' +
+                '- button: 狂按按钮 / 强烈赞同(+10086) / 疯狂催促\n' +
+                '- hammer: 木槌敲头 / 敲打制裁 / 清醒一下\n' +
+                '- baldy: 头秃 / 掉发 / 码农太难了\n' +
+                '- victim: 大怨种 / 倒霉背锅 / 冤大头\n' +
+                '- rage: 爆筋 / 生气愤怒 / 忍无可忍',
+            },
+            message_id: {
+              type: 'number',
+              description: '要回应的目标消息 ID。可省略，省略时自动绑定当前回合正在回复的入站消息',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (args, value) => {
+              const v = value as any;
+              if (v?.success) {
+                const item = EMOJI_MAP[v.emoji || args?.emoji];
+                const emojiName = item ? item.name : (v?.emoji || args?.emoji);
+                return [
+                  {
+                    type: 'text',
+                    text: `已对消息 ${v.message_id} 贴表情 [${emojiName}]`,
+                  },
+                ];
+              }
+              return [
+                {
+                  type: 'text',
+                  text: `贴表情失败: ${v?.error}`,
+                },
+              ];
+            },
+          },
+          async execute(args, exec) {
+            const session = (exec.agent as any)?.session;
+            const rawPeer = session?.id || '';
+            const peer = normalizePeer(rawPeer);
+            return (await reactMessage(args, {
+              gateway: options.gateway,
+              inboundMsgIdGetter: options.inboundMsgIdGetter,
+              peer,
             })) as any;
           },
         })
