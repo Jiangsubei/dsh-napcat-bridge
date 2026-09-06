@@ -480,10 +480,8 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     });
     const agent = handle.agent || handle;
     const capturedUserMsgs: any[] = [];
-    const origFollowup = agent.followup?.bind(agent);
     agent.followup = (msg: any) => {
       capturedUserMsgs.push(msg);
-      if (origFollowup) origFollowup(msg);
     };
 
     const client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
