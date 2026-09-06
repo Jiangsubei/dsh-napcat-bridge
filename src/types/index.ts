@@ -345,6 +345,8 @@ export interface BridgePluginConfig {
   behavior?: string;
   /** 是否启用群聊主动回复能力 (总开关，关闭时概率唤醒与潜水唤醒全部禁用) */
   proactive_reply_enabled?: boolean;
+  /** 仅回复文本内容（纯文本模型专用）：开启后仅对纯文本消息触发主动回复，视频/图片/表情包等多模态消息一律不主动回复 */
+  proactive_only_text?: boolean;
   /** 是否启用群聊普通消息概率唤醒 */
   proactive_random_enabled?: boolean;
   /** 群聊普通消息概率唤醒几率 (0.01 ~ 1.0) */
