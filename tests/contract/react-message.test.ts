@@ -60,7 +60,7 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
       return origOn(event, listener);
     }) as any;
 
-    apply(ctx, { bot_qq: '12345678' });
+    apply(ctx, { bot_qq: '12345678', ws_port: 29876 });
 
     return {
       ctx,
