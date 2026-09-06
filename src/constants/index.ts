@@ -24,6 +24,7 @@ export const DEFAULT_BEHAVIOR =
   '请勿传 WSL 内部路径（/home/...、/tmp/...），否则 NapCat 无法读取导致发送失败。';
 
 export const DEFAULT_PROACTIVE_REPLY_ENABLED = false;
+export const DEFAULT_PROACTIVE_ONLY_TEXT_ENABLED = false;
 export const DEFAULT_PROACTIVE_RANDOM_ENABLED = false;
 export const DEFAULT_PROACTIVE_RANDOM_PROBABILITY = 0.05;
 export const DEFAULT_PROACTIVE_IDLE_ENABLED = false;
