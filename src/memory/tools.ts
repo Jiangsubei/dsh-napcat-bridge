@@ -105,26 +105,34 @@ export class MemoryTools {
       if (!targetQQ) {
         return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
       }
-      const content = await this.storage.readUserProfileRaw(targetQQ);
+      const rawContent = await this.storage.readUserProfileRaw(targetQQ);
+      const content = rawContent || '';
+      const hasContent = Boolean(content.trim());
       return {
         success: true,
         type: 'user',
         target: targetQQ,
-        content: content || '',
-        message: `成功读取用户画像 (${targetQQ})`,
+        content,
+        message: hasContent
+          ? `成功读取用户画像 (${targetQQ})`
+          : '该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。',
       };
     } else {
       const targetPeer = args.peer?.trim();
       if (!targetPeer || targetPeer === 'default') {
         return { success: false, message: 'session 记忆必须指定 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）。' };
       }
-      const content = await this.storage.readSessionMemoryRaw(targetPeer);
+      const rawContent = await this.storage.readSessionMemoryRaw(targetPeer);
+      const content = rawContent || '';
+      const hasContent = Boolean(content.trim());
       return {
         success: true,
         type: 'session',
         target: targetPeer,
-        content: content || '',
-        message: `成功读取 Session 记忆 (${targetPeer})`,
+        content,
+        message: hasContent
+          ? `成功读取 Session 记忆 (${targetPeer})`
+          : '该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。',
       };
     }
   }
@@ -336,7 +344,9 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
         render: (_args, value: any) => [
           {
             type: 'text',
-            text: value.content ? `${value.message || '读取成功'}\n\n${value.content}` : (value.message || '记忆内容为空'),
+            text: value?.content?.trim()
+              ? `${value.message || '读取成功'}\n\n${value.content}`
+              : (value?.message || '记忆内容为空（当前无内容）'),
           },
         ],
       },
