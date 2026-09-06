@@ -536,10 +536,21 @@ export function parseNormalizedContent(event: OneBotMessageEvent): {
  * 4. 结构化卡片或小组件 (json, xml, share, lightapp, music, location, contact, rps, dice)。
  * 注意：合并转发 (forward)、普通图片 (image)、文字+表情、图文混排、群文件等正常允许主动回复。
  */
-export function isExcludedFromProactive(event: OneBotMessageEvent): boolean {
+export function isExcludedFromProactive(
+  event: OneBotMessageEvent,
+  onlyText = false
+): boolean {
   const segments = Array.isArray(event.message) ? event.message : [];
 
   if (segments.length > 0) {
+    // 0. 仅回复文本内容模式：任何含非文本段的消息一律排除（不主动回复）
+    if (onlyText) {
+      const hasNonTextSegment = segments.some(
+        (seg) => seg && !['text', 'at', 'reply'].includes(seg.type)
+      );
+      if (hasNonTextSegment) return true;
+    }
+
     // 1. 包含视频或语音
     const hasVideoOrRecord = segments.some(
       (seg) => seg && (seg.type === 'video' || seg.type === 'record')
@@ -594,6 +605,23 @@ export function isExcludedFromProactive(event: OneBotMessageEvent): boolean {
 
   // 兜底基于 raw_message 的快速正则过滤
   const raw = (event.raw_message || '').trim();
+
+  // 仅回复文本内容模式：raw_message 包含多模态 CQ 码一律排除
+  if (onlyText) {
+    if (
+      raw.includes('[CQ:image') ||
+      raw.includes('[CQ:face') ||
+      raw.includes('[CQ:mface') ||
+      raw.includes('[CQ:marketface') ||
+      raw.includes('[CQ:file') ||
+      raw.includes('[CQ:video') ||
+      raw.includes('[CQ:record') ||
+      /\[CQ:(?!at\b|reply\b)[^,\]]+/.test(raw)
+    ) {
+      return true;
+    }
+  }
+
   if (raw.includes('[CQ:video') || raw.includes('[CQ:record')) return true;
   if (
     raw.includes('[CQ:json') ||
@@ -863,8 +891,9 @@ export async function shouldWakeup(
     options.proactive?.proactive_reply_enabled &&
     options.proactive?.proactive_random_enabled
   ) {
-    // 消息类型排除检查 (纯单表情、视频、语音、卡片小组件等)
-    if (isExcludedFromProactive(msgEvent)) {
+    // 消息类型排除检查 (纯单表情、视频、语音、卡片小组件等；仅回复文本内容模式下非纯文本一律排除)
+    const onlyText = Boolean(options.proactive?.proactive_only_text);
+    if (isExcludedFromProactive(msgEvent, onlyText)) {
       return { wakeup: false };
     }
 
