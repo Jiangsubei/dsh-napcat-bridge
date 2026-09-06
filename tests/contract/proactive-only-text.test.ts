@@ -344,6 +344,7 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
       const htmlDisabled = renderToStaticMarkup(
         React.createElement(NapCatSettingsCard, {
           initialConfig: { proactive_reply_enabled: false },
+          initialExpanded: true,
         })
       );
       expect(htmlDisabled).toContain('napcat-proactive-only-text');
@@ -353,6 +354,7 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
       const htmlEnabled = renderToStaticMarkup(
         React.createElement(NapCatSettingsCard, {
           initialConfig: { proactive_reply_enabled: true },
+          initialExpanded: true,
         })
       );
       expect(htmlEnabled).toContain('napcat-proactive-only-text');
