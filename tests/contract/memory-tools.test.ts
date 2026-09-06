@@ -47,6 +47,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resSession.type).toBe('session');
     expect(resSession.target).toBe('group_3000000001');
     expect(resSession.content).toBe('群规：禁止水群');
+    expect(resSession.message).toBe('成功读取 Session 记忆 (group_3000000001)');
 
     // 2. 读已存在 user
     const resUser = await tools.readMemory({
@@ -57,8 +58,9 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resUser.type).toBe('user');
     expect(resUser.target).toBe('2000000001');
     expect(resUser.content).toBe('偏好：喜欢 Python 和 TS');
+    expect(resUser.message).toBe('成功读取用户画像 (2000000001)');
 
-    // 3. 读不存在的 session -> 返回 content: ''，不报错
+    // 3. 读不存在的 session -> 返回 content: ''，明确提示不存在或内容为空
     const resEmptySession = await tools.readMemory({
       type: 'session',
       peer: 'group_not_exist',
@@ -67,6 +69,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resEmptySession.type).toBe('session');
     expect(resEmptySession.target).toBe('group_not_exist');
     expect(resEmptySession.content).toBe('');
+    expect(resEmptySession.message).toBe('该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。');
 
     // 4. 读不存在的 user（即使 user/default.md 存在内容，也不回退 default.md）
     await storage.writeUserProfile('default', '默认兜底画像');
@@ -78,6 +81,41 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resEmptyUser.type).toBe('user');
     expect(resEmptyUser.target).toBe('2000000099');
     expect(resEmptyUser.content).toBe('');
+    expect(resEmptyUser.message).toBe('该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。');
+
+    // 5. 验证 read_memory ToolDefinition 的 render 输出
+    const toolDefs = createMemoryToolDefinitions(tools);
+    const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
+    const renderFn = (readTool.output as any)?.render;
+    expect(typeof renderFn).toBe('function');
+
+    // 5.1 有内容分支渲染
+    const renderedNotEmpty = renderFn({}, resSession);
+    expect(renderedNotEmpty[0].text).toContain('成功读取 Session 记忆 (group_3000000001)');
+    expect(renderedNotEmpty[0].text).toContain('群规：禁止水群');
+
+    // 5.2 空文件分支渲染：明确引导使用 create_memory，绝不应显示"成功读取"
+    const renderedEmpty = renderFn({}, resEmptySession);
+    expect(renderedEmpty[0].text).toContain('该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。');
+    expect(renderedEmpty[0].text).not.toContain('成功读取');
+
+    // 5.3 若 message 为空，兜底落到「记忆内容为空（当前无内容）」
+    const renderedFallback = renderFn({}, { content: '', message: '' });
+    expect(renderedFallback[0].text).toContain('记忆内容为空');
+    expect(renderedFallback[0].text).toContain('（当前无内容）');
+    expect(renderedFallback[0].text).not.toContain('成功读取');
+
+    // 6. 读内容全为空白的已存在文件 -> message 同样提示不存在或内容为空
+    await fsp.writeFile(storage.getSessionMemoryPath('group_whitespace'), '   \n\t  \n', 'utf-8');
+    const resWhitespace = await tools.readMemory({
+      type: 'session',
+      peer: 'group_whitespace',
+    });
+    expect(resWhitespace.success).toBe(true);
+    expect(resWhitespace.message).toBe('该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。');
+    const renderedWhitespace = renderFn({}, resWhitespace);
+    expect(renderedWhitespace[0].text).toContain('该记忆文件不存在或内容为空。如需记录，请使用 create_memory 创建。');
+    expect(renderedWhitespace[0].text).not.toContain('成功读取');
   });
 
   it('契约 2: create_memory 仅当文件不存在时原样写入（无时间戳、无头），已存在时拒绝', async () => {
