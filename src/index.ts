@@ -146,6 +146,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger.warn?.('[Plugin] 初始化注册 NapCat 顶级工作区失败:', wsErr);
   });
 
+  let outboundBridge: OutboundStreamBridge | null = null;
+
   // 4. 注册 Agent 工具集与 7 天 TTL 定时清理任务
   const unregisterTools = registerAgentTools(ctx, {
     db,
@@ -154,6 +156,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     sender: serialSender,
     dshHome,
     waitRegistry,
+    inboundMsgIdGetter: (peer: string) => {
+      if (!outboundBridge) return undefined;
+      const inboundCtx =
+        (outboundBridge as any).getInboundContext?.(peer) ??
+        (outboundBridge as any).inboundContexts?.get?.(peer);
+      return inboundCtx?.msg_id;
+    },
   });
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务
@@ -180,6 +189,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'read_memory',
     'create_memory',
     'edit_memory',
+    'react_message',
   ]);
 
   const extractSessionId = (agent: any): string => {
@@ -201,11 +211,22 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       const sessionId = extractSessionId(agent);
       const isQQ = Boolean(
         sessionId &&
-          (sessionManager.isQQSession(sessionId) || sessionId.startsWith('review-'))
+          (sessionManager.isQQSession(sessionId) ||
+            sessionId.startsWith('review-') ||
+            sessionId.startsWith('group_') ||
+            sessionId.startsWith('user_'))
+      );
+      const isQQGroup = Boolean(
+        sessionId &&
+          (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
       );
 
-      if (!isQQ && Array.isArray(res?.tools)) {
-        res.tools = res.tools.filter((t: any) => !NAPCAT_TOOL_NAMES.has(t.name));
+      if (Array.isArray(res?.tools)) {
+        if (!isQQ) {
+          res.tools = res.tools.filter((t: any) => !NAPCAT_TOOL_NAMES.has(t.name));
+        } else if (!isQQGroup) {
+          res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
+        }
       }
       return res;
     }
@@ -219,9 +240,21 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     unregisterToolGuard = toolsSvc.guard((exec: any) => {
       if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
         const sessionId = extractSessionId(exec?.agent);
+        if (exec?.name === 'react_message') {
+          const isQQGroup = Boolean(
+            sessionId &&
+              (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
+          );
+          if (!isQQGroup) {
+            return 'dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行';
+          }
+        }
         const isAllowed = Boolean(
           sessionId &&
-            (sessionManager.isQQSession(sessionId) || sessionId.startsWith('review-'))
+            (sessionManager.isQQSession(sessionId) ||
+              sessionId.startsWith('review-') ||
+              sessionId.startsWith('group_') ||
+              sessionId.startsWith('user_'))
         );
         if (!isAllowed) {
           return 'dsh-napcat-bridge: 该工具仅限 QQ 会话调用，当前会话不可执行';
@@ -236,7 +269,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const stopCleanupTask = startMediaCleanupTask(ctx, mediaManager);
 
   // 5. 挂载出方向事件流桥接器 (过滤 reasoning/tool-call，Markdown Strip 后分段下发)
-  const outboundBridge = new OutboundStreamBridge(ctx, {
+  outboundBridge = new OutboundStreamBridge(ctx, {
     gateway: server,
     sessionManager,
     getConfig: currentConfig,

@@ -435,6 +435,21 @@ export class NapCatGatewayServer {
     }
   }
 
+  /**
+   * OneBot 11 扩展 set_msg_emoji_like: 为消息贴表情回应
+   */
+  async setMsgEmojiLike(
+    messageId: number | string,
+    emojiId: string | number,
+    set = true
+  ): Promise<OneBotActionResponse> {
+    return this.sendAction('set_msg_emoji_like', {
+      message_id: Number(messageId),
+      emoji_id: String(emojiId),
+      set,
+    });
+  }
+
   async restart(options?: Partial<GatewayServerOptions>): Promise<void> {
     await this.stop();
     if (options) {
