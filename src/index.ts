@@ -242,6 +242,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     getConfig: currentConfig,
     logger,
   });
+  sessionManager.setOutboundBridge?.(outboundBridge);
   const stopOutboundBridge = outboundBridge.start();
 
   // 6. 审批 waterfall 响应器（独立于提问 provider，不注册 userQuestions 以避免与官方冲突）
@@ -687,6 +688,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         // at_questioner / quote_original 组装 @提问者 / 引用原消息 前缀 (Spec §7.1 决策 A)
         const payloadPeer = decision.payload.peer;
         const msgIdFromEvent = Number(event.message_id);
+        if (msgIdFromEvent) {
+          (decision.payload as any).msg_id = msgIdFromEvent;
+        }
         const replyContext = (payloadPeer && msgIdFromEvent)
           ? {
               msg_id: msgIdFromEvent,
@@ -839,8 +843,22 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         });
 
         if (decision.wakeup && decision.payload) {
-          logger.info?.(`[Plugin] 戳一戳触发唤醒 (peer: ${decision.payload.peer})`);
-          await sessionManager.dispatchWakeup(decision.payload);
+          const payloadPeer = decision.payload.peer;
+          logger.info?.(`[Plugin] 戳一戳触发唤醒 (peer: ${payloadPeer})`);
+          const blankContext = {
+            msg_id: undefined as any,
+            from_user: '',
+            is_group: isGroup,
+            trigger: 'poke',
+          };
+          outboundBridge.trackInboundContext(payloadPeer, blankContext);
+          await sessionManager.dispatchWakeup(decision.payload, {
+            onMessageCreated: (userMsg) => {
+              if (userMsg?.id) {
+                outboundBridge.trackPendingMessage(userMsg.id, payloadPeer, blankContext);
+              }
+            },
+          });
         }
       } catch (err) {
         logger.error?.('[Plugin] 通知事件处理异常:', err);
@@ -862,7 +880,21 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       config: currentConfig(),
       dispatchWakeup: async (payload) => {
         logger.info?.(`[Plugin] 潜水超时触发主动唤醒 (peer: ${payload.peer})`);
-        await sessionManager.dispatchWakeup(payload);
+        const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');
+        const blankContext = {
+          msg_id: undefined as any,
+          from_user: '',
+          is_group: isGroup,
+          trigger: 'idle',
+        };
+        outboundBridge.trackInboundContext(payload.peer, blankContext);
+        await sessionManager.dispatchWakeup(payload, {
+          onMessageCreated: (userMsg) => {
+            if (userMsg?.id) {
+              outboundBridge.trackPendingMessage(userMsg.id, payload.peer, blankContext);
+            }
+          },
+        });
       },
       knownPeers: () => {
         try {

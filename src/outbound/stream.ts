@@ -62,14 +62,23 @@ export interface OutboundStreamBridgeOptions {
  * 群聊回复按配置 at_questioner / quote_original (Spec §7.1，决策 A) 在首段组装
  * CQ:reply (引用唤醒原消息) 与 CQ:at (@提问者) 前缀；私聊不 @ 不引用。
  */
+export type InboundReplyContextInput =
+  | InboundReplyContext
+  | {
+      msg_id?: number | undefined;
+      from_user?: string;
+      is_group?: boolean;
+      trigger?: string;
+    };
+
 export class OutboundStreamBridge {
   private readonly sender: PerPeerSerialSender;
-  // 保底/兼容单值上下文映射 (peer -> InboundReplyContext)
-  private inboundContexts = new Map<string, InboundReplyContext>();
+  // 保底/兼容单值上下文映射 (peer -> InboundReplyContextInput)
+  private inboundContexts = new Map<string, InboundReplyContextInput>();
   // 待激活消息上下文 (messageId -> { peer, context })
-  private pendingMessageContexts = new Map<string, { peer: string; context: InboundReplyContext }>();
-  // Turn 级精准绑定映射 (peer -> Map<turn, InboundReplyContext>)
-  private turnContexts = new Map<string, Map<number, InboundReplyContext>>();
+  private pendingMessageContexts = new Map<string, { peer: string; context: InboundReplyContextInput }>();
+  // Turn 级精准绑定映射 (peer -> Map<turn, InboundReplyContextInput>)
+  private turnContexts = new Map<string, Map<number, InboundReplyContextInput>>();
   // 当前 peer 正在执行的活跃 Turn (peer -> turn)
   private activeTurns = new Map<string, number>();
   // 记录每个 Turn 是否已经下发过首段前缀 ( `${peer}:${turn}` )
@@ -81,13 +90,16 @@ export class OutboundStreamBridge {
     private readonly options: OutboundStreamBridgeOptions
   ) {
     this.sender = new PerPeerSerialSender();
+    if (typeof (this.options.sessionManager as any)?.setOutboundBridge === 'function') {
+      (this.options.sessionManager as any).setOutboundBridge(this);
+    }
   }
 
   /**
    * 记录某 peer 最近一次唤醒的入站消息上下文（唤醒源 msg_id 与提问者 QQ），
    * 供出方向按开关组装引用/@ 前缀。由入方向消息处理路径在判定唤醒后调用。
    */
-  trackInboundContext(peer: string, context: InboundReplyContext): void {
+  trackInboundContext(peer: string, context: InboundReplyContextInput): void {
     if (!peer || !context) return;
     this.inboundContexts.set(peer, context);
   }
@@ -96,7 +108,7 @@ export class OutboundStreamBridge {
    * 登记一条待触发轮次的 UserMessage 上下文（messageId -> context）。
    * 当 Session 驱动器派发该消息并开启对应 Turn 时，自动锁定绑定至该 Turn。
    */
-  trackPendingMessage(messageId: string, peer: string, context: InboundReplyContext): void {
+  trackPendingMessage(messageId: string, peer: string, context: InboundReplyContextInput): void {
     if (!messageId || !peer || !context) return;
     this.pendingMessageContexts.set(messageId, { peer, context });
   }
@@ -105,7 +117,7 @@ export class OutboundStreamBridge {
    * 动态刷新指定 peer 当前正在活跃轮次的回复上下文。
    * 供工具挂起等待（如 wait_for_user_messages）在当前 Turn 内收集到新消息时刷新回复锚点。
    */
-  updateActiveTurnContext(peer: string, context: InboundReplyContext): void {
+  updateActiveTurnContext(peer: string, context: InboundReplyContextInput): void {
     if (!peer || !context) return;
     this.inboundContexts.set(peer, context);
     const currentTurn = this.activeTurns.get(peer);
@@ -164,6 +176,19 @@ export class OutboundStreamBridge {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.activeTurns.set(peer, turn);
+        // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn
+        for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
+          if (entry.peer === peer) {
+            this.pendingMessageContexts.delete(msgId);
+            let peerMap = this.turnContexts.get(peer);
+            if (!peerMap) {
+              peerMap = new Map();
+              this.turnContexts.set(peer, peerMap);
+            }
+            peerMap.set(turn, entry.context);
+            break;
+          }
+        }
       }
       return;
     }
@@ -172,10 +197,10 @@ export class OutboundStreamBridge {
     if (event.type === 'user/message') {
       const msgId = (event.data as any)?.id;
       if (msgId && this.pendingMessageContexts.has(msgId)) {
-        const { context } = this.pendingMessageContexts.get(msgId)!;
-        this.pendingMessageContexts.delete(msgId);
         const currentTurn = this.activeTurns.get(peer);
         if (currentTurn !== undefined) {
+          const { context } = this.pendingMessageContexts.get(msgId)!;
+          this.pendingMessageContexts.delete(msgId);
           let peerMap = this.turnContexts.get(peer);
           if (!peerMap) {
             peerMap = new Map();
@@ -207,12 +232,13 @@ export class OutboundStreamBridge {
       const contentBlocks: ContentBlock[] = msgData?.message?.content || [];
       const textBlocks = filterAndExtractOutboundBlocks(contentBlocks);
 
-      // 提取针对该 Turn 的上下文 (Turn 级精准绑定优先，回退到 peer 保底)
-      let inbound: InboundReplyContext | undefined;
+      // 提取针对该 Turn 的上下文 (Turn 级精准绑定优先)
+      let inbound: InboundReplyContextInput | undefined;
       if (turn !== undefined) {
         inbound = this.turnContexts.get(peer)?.get(turn);
       }
-      if (!inbound) {
+      // 仅在未带 turn 的非轮次/兼容单值路径下回退到 peer 保底
+      if (!inbound && turn === undefined) {
         inbound = this.inboundContexts.get(peer);
       }
 
@@ -251,7 +277,7 @@ export class OutboundStreamBridge {
   buildMessagePayload(
     peer: string,
     text: string,
-    options?: { withPrefix?: boolean; inbound?: InboundReplyContext }
+    options?: { withPrefix?: boolean; inbound?: InboundReplyContextInput }
   ): string | Array<Record<string, any>> {
     const isGroup = peer.startsWith('group_') || peer.startsWith('qq-group-');
     if (!isGroup) {
@@ -263,8 +289,12 @@ export class OutboundStreamBridge {
       return text;
     }
 
-    const inbound = options?.inbound || this.inboundContexts.get(peer);
-    if (!inbound) {
+    // 跨触发隔离加固：若显式指定了 options（含 options.inbound），以本次 inbound 为准；
+    // 仅在未指定 options.inbound 时回退到 peer 保底。
+    const inbound = (options && 'inbound' in options)
+      ? options.inbound
+      : this.inboundContexts.get(peer);
+    if (!inbound || (!inbound.msg_id && !inbound.from_user)) {
       return text;
     }
 
@@ -291,7 +321,7 @@ export class OutboundStreamBridge {
   async sendSerialized(
     peer: string,
     text: string,
-    options?: { withPrefix?: boolean; inbound?: InboundReplyContext }
+    options?: { withPrefix?: boolean; inbound?: InboundReplyContextInput }
   ): Promise<void> {
     const message = this.buildMessagePayload(peer, text, options);
     await this.sender.enqueue(peer, async () => {
