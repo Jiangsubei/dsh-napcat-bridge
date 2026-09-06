@@ -118,7 +118,7 @@ export interface OneBotNoticeEvent {
   target_id?: number | string;
   group_id?: number | string;
   operator_id?: number | string;
-  message_id?: number;
+  message_id?: number | string;
   file?: {
     id: string;
     name: string;
@@ -127,6 +127,7 @@ export interface OneBotNoticeEvent {
     url?: string;
   };
   raw_info?: any[];
+  likes?: Array<{ emoji_id?: string | number; id?: string | number; count?: number }>;
 }
 
 export interface OneBotMetaEvent {
@@ -202,7 +203,7 @@ export interface ReadChatHistoryParams {
   keyword?: string;
   /**
    * 按消息类型筛选，支持单类型或类型数组:
-   * 'text' | 'image' | 'sticker' | 'file' | 'group_file' | 'forward' | 'record' | 'video' | 'poke' | 'reply'
+   * 'text' | 'image' | 'sticker' | 'file' | 'group_file' | 'forward' | 'record' | 'video' | 'poke' | 'reply' | 'emoji_like'
    */
   type?: string | string[];
   /** 起始时间: 支持毫秒数字、秒级数字、相对时间字符串 ("30m", "2h", "1d", "7d") 或日期时间字符串 ("2026-08-30", "2026-08-30 12:00:00") */

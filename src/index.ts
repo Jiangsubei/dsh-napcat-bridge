@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
-import type { BridgePluginConfig, MessageRecord } from './types/index.js';
+import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
 import { MessageDatabase } from './storage/database.js';
 import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';
 import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
@@ -769,9 +769,66 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     // 撤回处理
     if (event.notice_type === 'group_recall' || event.notice_type === 'friend_recall') {
       if (event.message_id) {
-        db.markRecalled(event.message_id);
+        db.markRecalled(Number(event.message_id));
         logger.info?.(`[Plugin] 标记消息已撤回 (msg_id: ${event.message_id})`);
       }
+      return;
+    }
+
+    // 群消息贴表情事件处理 (group_msg_emoji_like: 纯后台审计落库，绝不唤醒 Agent)
+    if (event.notice_type === 'group_msg_emoji_like') {
+      // 1. 解析目标消息 ID 与群号
+      const targetMsgId = Number(event.message_id);
+      const groupId = event.group_id;
+      if (!groupId || !targetMsgId) return;
+
+      const peer = `group_${groupId}`;
+      const fromUser = String(event.user_id ?? event.operator_id ?? '');
+      const timestamp = event.time
+        ? event.time < 10000000000
+          ? event.time * 1000
+          : event.time
+        : Date.now();
+
+      // 2. 合成稳定正数 msg_id (利用已有的 stableNoticeMsgId 函数)
+      const syntheticMsgId = stableNoticeMsgId(`emoji_like:${groupId}:${targetMsgId}:${timestamp}`);
+
+      // 3. 汇总 likes 列表为易读 content
+      const likesArr = Array.isArray(event.likes) ? event.likes : [];
+      const likesSummary = likesArr.map((l: any) => {
+        const eid = String(l.emoji_id ?? l.id ?? '');
+        // 从 EMOJI_MAP 找匹配的中文名
+        const found = Object.values(EMOJI_MAP).find(e => e.id === eid);
+        const name = found ? `${found.name}(${eid})` : eid;
+        return `${name}x${l.count ?? 1}`;
+      }).join(', ');
+      const content = `[表情回应: ${likesSummary || '无'}]`;
+
+      // 4. 落库保存至 messages 表
+      try {
+        db.saveMessage({
+          msg_id: syntheticMsgId,
+          peer,
+          user_id: fromUser,
+          sender_name: '',
+          time: timestamp,
+          type: 'emoji_like',
+          content,
+          raw: JSON.stringify(event),
+          file_id: null,
+          busid: null,
+          local_path: null,
+          fingerprint: null,
+          recalled: 0,
+          self: 0,
+          reply_to: targetMsgId, // 记录被贴表情的目标消息 ID
+        });
+        logger.info?.(`[Plugin] 群消息贴表情事件已入库 (group: ${groupId}, target_msg: ${targetMsgId}, likes: ${likesSummary})`);
+      } catch (saveErr) {
+        logger.error?.('[Plugin] 群消息贴表情事件入库失败:', saveErr);
+      }
+
+      // 直接 return，绝不流转到唤醒逻辑
       return;
     }
 
@@ -792,7 +849,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             senderName = (await memberResolver.resolve(event.group_id, fromUser)) || '';
           } catch {}
         }
-        const fakeMsgId = event.message_id || stableNoticeMsgId(`group_upload:${event.group_id}:${file.id}:${timestamp}`);
+        const fakeMsgId = Number(event.message_id) || stableNoticeMsgId(`group_upload:${event.group_id}:${file.id}:${timestamp}`);
 
         try {
           db.saveMessage({
@@ -842,7 +899,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
       try {
         db.saveMessage({
-          msg_id: event.message_id || stableNoticeMsgId(`poke:${peer}:${fromUser}:${timestamp}`),
+          msg_id: Number(event.message_id) || stableNoticeMsgId(`poke:${peer}:${fromUser}:${timestamp}`),
           peer,
           user_id: fromUser,
           sender_name: senderName,
