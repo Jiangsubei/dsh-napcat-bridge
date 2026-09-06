@@ -11,6 +11,7 @@ export interface CardProps {
   hasSecret?: boolean;
   revision?: number;
   baseDefaults?: Partial<BridgePluginConfig>;
+  initialExpanded?: boolean;
   onSaveSettings?: (
     values: Partial<BridgePluginConfig>,
     options: { expectedRevision: number }
@@ -29,6 +30,7 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   persona: '',
   behavior: '',
   proactive_reply_enabled: false,
+  proactive_only_text: false,
   proactive_random_enabled: false,
   proactive_random_probability: 0.05,
   proactive_idle_enabled: false,
@@ -57,7 +59,7 @@ function parseStringToArray(str: string): string[] {
 
 export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   injectCardStyles();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(props.initialExpanded ?? false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [, setRerenderKey] = useState(0);
@@ -314,6 +316,21 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('proactive_reply_enabled')}
             onReset={() => handleResetField('proactive_reply_enabled')}
             onChange={(checked) => handleFieldChange('proactive_reply_enabled', checked)}
+          />
+
+          <SwitchField
+            id="napcat-proactive-only-text"
+            label="仅回复文本内容 (proactive_only_text)"
+            hint={
+              draft.proactive_reply_enabled
+                ? '开启后（纯文本模型部署）：只有纯文本消息会触发主动回复；视频/图片/表情包等多模态消息一律不主动回复'
+                : '需先开启上方的「启用群聊主动回复」总开关'
+            }
+            checked={draft.proactive_only_text ?? false}
+            disabled={saving || !draft.proactive_reply_enabled}
+            overridden={model.isOverridden('proactive_only_text')}
+            onReset={() => handleResetField('proactive_only_text')}
+            onChange={(checked) => handleFieldChange('proactive_only_text', checked)}
           />
 
           <SwitchField
