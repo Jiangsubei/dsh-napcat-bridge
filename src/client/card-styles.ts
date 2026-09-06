@@ -48,6 +48,13 @@ const NAPCAT_CARD_CSS = `
 .napcat_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}
 .napcat_checkbox{accent-color:var(--dsw-alias-brand-primary);width:18px;height:18px;cursor:pointer;flex:none}
 .napcat_checkbox:disabled{cursor:default;opacity:.4}
+.napcat_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding:8px 0 0;margin:0;overflow-x:auto}
+.napcat_tab{appearance:none;background:0 0;border:none;border-bottom:2px solid transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;font-weight:500;line-height:1.5;padding:6px 12px 8px;cursor:pointer;border-radius:6px 6px 0 0;transition:color .16s,border-color .16s;white-space:nowrap}
+.napcat_tab:hover:not(:disabled){color:var(--dsw-alias-label-primary)}
+.napcat_tabActive{color:var(--dsw-alias-label-primary);font-weight:600;border-bottom-color:var(--dsw-alias-brand-primary)}
+.napcat_tab:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-1px}
+.napcat_tabPanel{display:flex;flex-direction:column}
+.napcat_tabPanelHidden{display:none !important}
 `;
 
 export function injectCardStyles(): void {
@@ -71,6 +78,11 @@ export const cardStyle = {
   chevronOpen: 'napcat_chevronOpen',
   badgePending: 'napcat_badgePending',
   body: 'napcat_body',
+  tabBar: 'napcat_tabBar',
+  tab: 'napcat_tab',
+  tabActive: 'napcat_tabActive',
+  tabPanel: 'napcat_tabPanel',
+  tabPanelHidden: 'napcat_tabPanelHidden',
   footer: 'napcat_footer',
   failed: 'napcat_failed',
   discard: 'napcat_discard',

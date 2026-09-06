@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives';
 import { NapCatFormModel, SettingsConflictError } from './model.js';
 import { ValueField, TextAreaField, SwitchField } from './fields.js';
@@ -6,12 +6,50 @@ import { cardStyle, injectCardStyles } from './card-styles.js';
 import type { BridgePluginConfig } from '../types/index.js';
 import { DEFAULT_WS_PORT } from '../constants/index.js';
 
+export type SettingsTabId = 'connection' | 'reply' | 'persona' | 'proactive' | 'memory';
+
+export interface TabItem {
+  id: SettingsTabId;
+  label: string;
+}
+
+export const SETTINGS_TABS: readonly TabItem[] = [
+  { id: 'connection', label: '连接身份' },
+  { id: 'reply', label: '回复行为' },
+  { id: 'persona', label: '人格与准则' },
+  { id: 'proactive', label: '主动回复' },
+  { id: 'memory', label: '记忆与回顾' },
+] as const;
+
+export interface CardController {
+  activeTab: SettingsTabId;
+  setActiveTab: (tab: SettingsTabId) => void;
+  model: NapCatFormModel;
+  expanded: boolean;
+  setExpanded: (expanded: boolean) => void;
+  isDirty: boolean;
+  saving: boolean;
+  errorMessage: string | null;
+  handleFieldChange: (key: keyof BridgePluginConfig, val: any) => void;
+  handleAdminsChange: (raw: string) => void;
+  handleAliasesChange: (raw: string) => void;
+  handleResetField: (key: keyof BridgePluginConfig) => void;
+  handleDiscard: () => void;
+  handleSave: () => Promise<void>;
+}
+
 export interface CardProps {
   initialConfig?: Partial<BridgePluginConfig>;
   hasSecret?: boolean;
   revision?: number;
   baseDefaults?: Partial<BridgePluginConfig>;
   initialExpanded?: boolean;
+  initialTab?: SettingsTabId;
+  activeTab?: SettingsTabId;
+  onTabChange?: (tab: SettingsTabId) => void;
+  controllerRef?:
+    | React.MutableRefObject<CardController | null>
+    | ((controller: CardController) => void);
   onSaveSettings?: (
     values: Partial<BridgePluginConfig>,
     options: { expectedRevision: number }
@@ -60,9 +98,30 @@ function parseStringToArray(str: string): string[] {
 export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   injectCardStyles();
   const [expanded, setExpanded] = useState(props.initialExpanded ?? false);
+  const [activeTabState, setActiveTabState] = useState<SettingsTabId>(
+    props.initialTab ?? 'connection'
+  );
+  const activeTab = props.activeTab ?? activeTabState;
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [, setRerenderKey] = useState(0);
+
+  const activeTabRef = useRef<SettingsTabId>(activeTab);
+  activeTabRef.current = activeTab;
+
+  const errRef = useRef<string | null>(errorMessage);
+  errRef.current = errorMessage;
+
+  const savingRef = useRef<boolean>(saving);
+  savingRef.current = saving;
+
+  const expandedRef = useRef<boolean>(expanded);
+  expandedRef.current = expanded;
+
+  const updateError = (msg: string | null) => {
+    errRef.current = msg;
+    setErrorMessage(msg);
+  };
 
   const model = useMemo(() => {
     return new NapCatFormModel({
@@ -95,9 +154,16 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     setRerenderKey((k) => k + 1);
   }, []);
 
+  const handleTabClick = (tabId: SettingsTabId) => {
+    activeTabRef.current = tabId;
+    setActiveTabState(tabId);
+    props.onTabChange?.(tabId);
+    forceUpdate();
+  };
+
   const handleFieldChange = (key: keyof BridgePluginConfig, val: any) => {
     model.setField(key, val);
-    setErrorMessage(null);
+    updateError(null);
     forceUpdate();
   };
 
@@ -105,7 +171,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     setAdminsInput(raw);
     const parsed = parseStringToArray(raw);
     model.setField('admins', parsed);
-    setErrorMessage(null);
+    updateError(null);
     forceUpdate();
   };
 
@@ -113,7 +179,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     setAliasesInput(raw);
     const parsed = parseStringToArray(raw);
     model.setField('aliases', parsed);
-    setErrorMessage(null);
+    updateError(null);
     forceUpdate();
   };
 
@@ -132,14 +198,15 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     model.discard();
     setAdminsInput(formatArrayToString(model.getDraft().admins));
     setAliasesInput(formatArrayToString(model.getDraft().aliases));
-    setErrorMessage(null);
+    updateError(null);
     forceUpdate();
   };
 
   const handleSave = async () => {
     if (!props.onSaveSettings) return;
+    savingRef.current = true;
     setSaving(true);
-    setErrorMessage(null);
+    updateError(null);
 
     try {
       await model.save({
@@ -148,11 +215,12 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
       forceUpdate();
     } catch (err: any) {
       if (err instanceof SettingsConflictError || err?.code === 'SETTINGS_CONFLICT') {
-        setErrorMessage('保存冲突: 配置已被其他标签页修改，请刷新后重试。');
+        updateError('保存冲突: 配置已被其他标签页修改，请刷新后重试。');
       } else {
-        setErrorMessage(err?.message || '保存失败，请检查配置');
+        updateError(err?.message || '保存失败，请检查配置');
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -160,6 +228,44 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const draft = model.getDraft();
   const isDirty = model.isDirty();
   const blocked = !isDirty || saving;
+
+  const controller: CardController = {
+    get activeTab() {
+      return activeTabRef.current;
+    },
+    setActiveTab: handleTabClick,
+    model,
+    get expanded() {
+      return expandedRef.current;
+    },
+    setExpanded: (exp: boolean) => {
+      expandedRef.current = exp;
+      setExpanded(exp);
+    },
+    get isDirty() {
+      return model.isDirty();
+    },
+    get saving() {
+      return savingRef.current;
+    },
+    get errorMessage() {
+      return errRef.current;
+    },
+    handleFieldChange,
+    handleAdminsChange,
+    handleAliasesChange,
+    handleResetField,
+    handleDiscard,
+    handleSave,
+  };
+
+  if (props.controllerRef) {
+    if (typeof props.controllerRef === 'function') {
+      props.controllerRef(controller);
+    } else {
+      props.controllerRef.current = controller;
+    }
+  }
 
   return (
     <div
@@ -187,7 +293,44 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
       {expanded && (
         <div className={cardStyle.body}>
-          <ValueField
+          <div className={cardStyle.tabBar} role="tablist" aria-label="设置分区">
+            {SETTINGS_TABS.map((tab) => {
+              const isSelected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  id={`napcat-tab-${tab.id}`}
+                  data-testid={`napcat-tab-${tab.id}`}
+                  aria-selected={isSelected}
+                  aria-controls={`napcat-tabpanel-${tab.id}`}
+                  tabIndex={isSelected ? 0 : -1}
+                  className={[
+                    cardStyle.tab,
+                    isSelected ? cardStyle.tabActive : '',
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => handleTabClick(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            id="napcat-tabpanel-connection"
+            data-testid="napcat-tabpanel-connection"
+            role="tabpanel"
+            aria-labelledby="napcat-tab-connection"
+            hidden={activeTab !== 'connection'}
+            className={[
+              cardStyle.tabPanel,
+              activeTab !== 'connection' ? cardStyle.tabPanelHidden : '',
+            ].filter(Boolean).join(' ')}
+            style={activeTab !== 'connection' ? { display: 'none' } : undefined}
+          >
+            <ValueField
             id="napcat-ws-port"
             label="WebSocket 监听端口 (ws_port)"
             hint="NapCat 连接的反向 WebSocket 服务端端口 (默认 8080)"
@@ -260,7 +403,20 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('image_ttl_days')}
             onChange={(val) => handleFieldChange('image_ttl_days', parseInt(val, 10) || 7)}
           />
+          </div>
 
+          <div
+            id="napcat-tabpanel-reply"
+            data-testid="napcat-tabpanel-reply"
+            role="tabpanel"
+            aria-labelledby="napcat-tab-reply"
+            hidden={activeTab !== 'reply'}
+            className={[
+              cardStyle.tabPanel,
+              activeTab !== 'reply' ? cardStyle.tabPanelHidden : '',
+            ].filter(Boolean).join(' ')}
+            style={activeTab !== 'reply' ? { display: 'none' } : undefined}
+          >
           <SwitchField
             id="napcat-quote-original"
             label="群聊回复引用原消息 (quote_original)"
@@ -282,7 +438,20 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('at_questioner')}
             onChange={(checked) => handleFieldChange('at_questioner', checked)}
           />
+          </div>
 
+          <div
+            id="napcat-tabpanel-persona"
+            data-testid="napcat-tabpanel-persona"
+            role="tabpanel"
+            aria-labelledby="napcat-tab-persona"
+            hidden={activeTab !== 'persona'}
+            className={[
+              cardStyle.tabPanel,
+              activeTab !== 'persona' ? cardStyle.tabPanelHidden : '',
+            ].filter(Boolean).join(' ')}
+            style={activeTab !== 'persona' ? { display: 'none' } : undefined}
+          >
           <TextAreaField
             id="napcat-persona"
             label="助手人格设定 (persona)"
@@ -306,7 +475,20 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('behavior')}
             onChange={(val) => handleFieldChange('behavior', val)}
           />
+          </div>
 
+          <div
+            id="napcat-tabpanel-proactive"
+            data-testid="napcat-tabpanel-proactive"
+            role="tabpanel"
+            aria-labelledby="napcat-tab-proactive"
+            hidden={activeTab !== 'proactive'}
+            className={[
+              cardStyle.tabPanel,
+              activeTab !== 'proactive' ? cardStyle.tabPanelHidden : '',
+            ].filter(Boolean).join(' ')}
+            style={activeTab !== 'proactive' ? { display: 'none' } : undefined}
+          >
           <SwitchField
             id="napcat-proactive-reply-enabled"
             label="启用群聊主动回复 (proactive_reply_enabled)"
@@ -404,7 +586,20 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('proactive_night_dnd')}
             onChange={(checked) => handleFieldChange('proactive_night_dnd', checked)}
           />
+          </div>
 
+          <div
+            id="napcat-tabpanel-memory"
+            data-testid="napcat-tabpanel-memory"
+            role="tabpanel"
+            aria-labelledby="napcat-tab-memory"
+            hidden={activeTab !== 'memory'}
+            className={[
+              cardStyle.tabPanel,
+              activeTab !== 'memory' ? cardStyle.tabPanelHidden : '',
+            ].filter(Boolean).join(' ')}
+            style={activeTab !== 'memory' ? { display: 'none' } : undefined}
+          >
           <ValueField
             id="napcat-memory-storage-dir"
             label="记忆存储目录 (memory_storage_dir)"
@@ -478,7 +673,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('review_model')}
             onChange={(val) => handleFieldChange('review_model', val)}
           />
-
+          </div>
 
           <div className={cardStyle.footer}>
             {errorMessage && (
