@@ -59,6 +59,11 @@ export function buildSessionId(baseId: string, round: number, version: number): 
   return `${baseId}-r${round}-${version}`;
 }
 
+export interface OutboundBridgeLike {
+  trackInboundContext(peer: string, context: any): void;
+  trackPendingMessage?(messageId: string, peer: string, context: any): void;
+}
+
 export class SessionManager {
   private activeHandles = new Map<string, AgentHandle>();
   private peerCurrentSessionId = new Map<string, string>();
@@ -67,6 +72,15 @@ export class SessionManager {
   private clearedVersions = new Map<string, { round: number; version: number }>();
 
   private napcatDefaultModel?: ModelSelection;
+  private outboundBridge?: OutboundBridgeLike;
+
+  setOutboundBridge(bridge: OutboundBridgeLike): void {
+    this.outboundBridge = bridge;
+  }
+
+  getOutboundBridge(): OutboundBridgeLike | undefined {
+    return this.outboundBridge;
+  }
 
   constructor(
     private readonly ctx: Context,
@@ -821,6 +835,21 @@ export class SessionManager {
       onMessageCreated?: (userMsg: any) => void;
     }
   ): Promise<any> {
+    const isNoMessageWakeup =
+      payload.trigger === 'poke' ||
+      (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') ||
+      (!(payload as any).msg_id && !payload.from_user);
+
+    if (isNoMessageWakeup && this.outboundBridge) {
+      const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');
+      this.outboundBridge.trackInboundContext(payload.peer, {
+        msg_id: undefined,
+        from_user: '',
+        is_group: isGroup,
+        trigger: payload.trigger === 'poke' ? 'poke' : 'idle',
+      });
+    }
+
     const agent = await this.getOrCreateAgent(payload.peer);
     const sessionId = this.peerToSessionId(payload.peer);
 
@@ -837,6 +866,16 @@ export class SessionManager {
       content: [{ type: 'text', text: promptText }],
       source: { kind: 'user' },
     });
+
+    if (isNoMessageWakeup && this.outboundBridge && userMsg?.id) {
+      const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');
+      this.outboundBridge.trackPendingMessage?.(userMsg.id, payload.peer, {
+        msg_id: undefined,
+        from_user: '',
+        is_group: isGroup,
+        trigger: payload.trigger === 'poke' ? 'poke' : 'idle',
+      });
+    }
 
     options?.onMessageCreated?.(userMsg);
 
