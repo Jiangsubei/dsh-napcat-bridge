@@ -18,10 +18,10 @@
 
 ## B. QQ 会话动态段
 
-- [ ] B1 新增动态段（如 napcat:qq_scenario），order 取最低（记忆 40/人格 50 之前，~10），排在动态段最前
-- [ ] B2 仅 QQ 会话（qq-group-*/qq-user-*）返回内容；非 QQ 返回空串
-- [ ] B3 段文本 = 需求文档 §2.2 定稿（"# 如何发送消息…必须调用 send_message 工具"）
-- [ ] B4 不告知 turn/end 兜底（隐形安全网）
+- [x] B1 新增动态段（如 napcat:qq_scenario），order 取最低（记忆 40/人格 50 之前，~10），排在动态段最前
+- [x] B2 仅 QQ 会话（qq-group-*/qq-user-*）返回内容；非 QQ 返回空串
+- [x] B3 段文本 = 需求文档 §2.2 定稿（"# 如何发送消息…必须调用 send_message 工具"）
+- [x] B4 不告知 turn/end 兜底（隐形安全网）
 
 ## C. 出站旁白抑制 + turn/end 兜底
 
@@ -48,7 +48,7 @@
 ## F. 契约测试与收尾
 
 - [ ] F1 send_message：注册范围断言（QQ 会话可见/非 QQ 与沙箱不可见）、空文本/发送失败、成功含 message_id、走串行队列
-- [ ] F2 动态段：QQ 会话出现该段文本 / 非 QQ 为空；order 位于最前
+- [x] F2 动态段：QQ 会话出现该段文本 / 非 QQ 为空；order 位于最前
 - [ ] F3 旁白抑制：带 tool-call 的文本不发出；纯终答发出
 - [ ] F4 兜底：0 次 send → 终答补发；≥1 次 → 不补发
 - [ ] F5 首调引用：同轮多次 send_message 仅首条带引用/艾特
