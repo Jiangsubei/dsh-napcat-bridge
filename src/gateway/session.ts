@@ -19,6 +19,7 @@ import {
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { formatDateTime, type MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
+import { DEFAULT_WORKSPACE_ROOT, resolveDshPath } from '../constants/index.js';
 
 export interface ParsedSessionId {
   peer: string;
@@ -82,12 +83,19 @@ export class SessionManager {
     return this.outboundBridge;
   }
 
+  private readonly dshHome: string;
+
   constructor(
     private readonly ctx: Context,
-    private readonly dshHome: string,
+    dshHome?: string,
     private readonly db?: MessageDatabase
   ) {
+    this.dshHome = path.resolve(dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh'));
     this.loadStateFromDb();
+  }
+
+  public getDshHome(): string {
+    return this.dshHome;
   }
 
   private loadStateFromDb(): void {
@@ -690,7 +698,7 @@ export class SessionManager {
   }
 
   resolveCwd(_peerOrSessionId?: string): string {
-    return path.resolve(this.dshHome, 'workspace/napcat');
+    return resolveDshPath(this.dshHome, undefined, DEFAULT_WORKSPACE_ROOT);
   }
 
   getAgent(peerOrSessionId: string): Agent | undefined {
@@ -703,8 +711,9 @@ export class SessionManager {
     const wsRegistry = this.ctx.get('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
     if (!wsRegistry || typeof wsRegistry.create !== 'function') return;
     try {
-      await fsp.mkdir(cwd, { recursive: true });
-      const ws = await wsRegistry.create(cwd, title);
+      const resolvedCwd = resolveDshPath(this.dshHome, cwd, DEFAULT_WORKSPACE_ROOT);
+      await fsp.mkdir(resolvedCwd, { recursive: true });
+      const ws = await wsRegistry.create(resolvedCwd, title);
       if (ws && sessionId && typeof ws.attachSession === 'function') {
         await ws.attachSession(sessionId).catch(() => {});
       }

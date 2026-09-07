@@ -5,7 +5,7 @@
 
 import * as path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT } from './constants/index.js';
+import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT, DEFAULT_MEMORY_DIR, resolveDshPath } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
 import { MessageDatabase } from './storage/database.js';
@@ -101,6 +101,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             logger.error?.('[Plugin] WS 服务端热重启失败:', err);
           }
         }
+
+        if (active.memory_storage_dir) {
+          const updatedMemoryDir = resolveDshPath(dshHome, active.memory_storage_dir, DEFAULT_MEMORY_DIR);
+          if (memoryService?.storage && memoryService.storage.getBaseDir() !== updatedMemoryDir) {
+            memoryService.storage.setBaseDir(updatedMemoryDir, dshHome);
+          }
+        }
       },
     });
   });
@@ -130,7 +137,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   );
 
   // 3. 初始化存储、媒体管理器与会话管理器
-  const dshHome = process.env.DSH_HOME || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.dsh');
+  const dshHome = path.resolve(
+    process.env.DSH_HOME || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.dsh')
+  );
   const dbPath = path.resolve(dshHome, 'workspace/napcat/messages.sqlite');
   const db = new MessageDatabase(dbPath);
   db.init();
@@ -165,9 +174,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     },
   });
 
-  // 5. 初始化并挂载 Memory 两层记忆体系插件服务
+  // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
+  const rawMemoryDir = currentConfig().memory_storage_dir;
+  const normalizedMemoryDir = resolveDshPath(dshHome, rawMemoryDir, DEFAULT_MEMORY_DIR);
+
   const memoryService = setupMemoryService(ctx, {
-    storageDir: currentConfig().memory_storage_dir,
+    storageDir: normalizedMemoryDir,
+    dshHome,
     budgetChars: currentConfig().memory_budget_chars,
     reviewEnabled: currentConfig().review_enabled,
     reviewTurnsInterval: currentConfig().review_turns_interval,
