@@ -175,10 +175,17 @@ export class OutboundStreamBridge {
   }
 
   /**
-   * 获取指定 peer 和 turn 中 send_message 的调用次数
+   * 获取指定 peer 和 turn 中 send_qq_message 的调用次数
+   */
+  getTurnSendQqMessageCount(peer: string, turn: number): number {
+    return this.turnSendMessageCounts.get(`${peer}:${turn}`) || 0;
+  }
+
+  /**
+   * 获取指定 peer 和 turn 中 send_message 的调用次数 (兼容别名)
    */
   getTurnSendMessageCount(peer: string, turn: number): number {
-    return this.turnSendMessageCounts.get(`${peer}:${turn}`) || 0;
+    return this.getTurnSendQqMessageCount(peer, turn);
   }
 
   /**
@@ -267,10 +274,10 @@ export class OutboundStreamBridge {
       return;
     }
 
-    // 监听 session/event 的 tool/call 事件: 跟踪 send_message 调用次数
+    // 监听 session/event 的 tool/call 事件: 跟踪 send_qq_message / send_message 调用次数
     if (event.type === 'tool/call') {
       const toolName = (event.data as any)?.name;
-      if (toolName === 'send_message') {
+      if (toolName === 'send_qq_message' || toolName === 'send_message') {
         const turn = typeof (event.data as any)?.turn === 'number'
           ? (event.data as any).turn
           : this.activeTurns.get(peer);
@@ -440,14 +447,14 @@ export class OutboundStreamBridge {
   }
 
   /**
-   * 为 send_message 工具构建出站 payload (阶段 5 首调引用规则):
+   * 为 send_qq_message 工具构建出站 payload (阶段 5 首调引用规则):
    * - 若不是群聊（如私聊 user_* / qq-user-*），直接返回纯文本 text；
    * - 仅首个分段 (chunkIndex === 0) 可能携带前缀；
    * - 同一 Turn 内多次调用，仅首次调用携带本轮锚定消息的引用 (reply) 与艾特 (at) 前缀；
    * - 后续调用及后续分段均为纯文本；
    * - 若当前无活跃 Turn（兼容单发），根据 peer 判定首次并记录。
    */
-  buildSendMessagePayload(
+  buildSendQqMessagePayload(
     peer: string,
     text: string,
     chunkIndex = 0
@@ -507,6 +514,17 @@ export class OutboundStreamBridge {
 
     const inbound = this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
     return this.buildMessagePayload(peer, text, { withPrefix: true, inbound });
+  }
+
+  /**
+   * 为 send_message 工具构建出站 payload (兼容别名)
+   */
+  buildSendMessagePayload(
+    peer: string,
+    text: string,
+    chunkIndex = 0
+  ): string | Array<Record<string, any>> {
+    return this.buildSendQqMessagePayload(peer, text, chunkIndex);
   }
 
   /**

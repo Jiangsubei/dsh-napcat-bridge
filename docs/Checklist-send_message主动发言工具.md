@@ -55,3 +55,7 @@
 - [x] F6 锚定修复：emoji_like 事件入站后，回复引用的仍是回合起始消息（真实装配测试）
 - [x] F7 pnpm test 全绿 + pnpm build 通过 + dist 含改动；未引入新 npm 依赖
 - [ ] F8 真机验证项（如实标注未做/待验）：QQ 群实测多次 send 引用行为 + 贴表情后回复引用正常
+
+---
+
+> **注（2026-09-07 工具更名解耦）**：为彻底避免与 DSH 内置子代理工具 `@deepseek-ai/dsh-tool-subagent-control` 的 `send_message` 名称冲突与全局表覆盖风险，根据用户决策，主动发言工具正式命名为 `send_qq_message`（代码中保留 `sendMessage` 别名兼容，契约测试与动态提示词均引导 `send_qq_message`）。
