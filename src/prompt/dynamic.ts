@@ -19,7 +19,8 @@ export const QQ_SCENARIO_PROMPT = `# 如何发送消息
 你正在 QQ 聊天中与用户对话。
 
 【如何把内容送达用户】
-- 想向用户发送文字/答复，必须调用 send_qq_message 工具。`;
+- 想向用户发送文字/答复，必须调用 send_qq_message 工具。
+- 任务完成发送最终答复时，请以 end:true 显式调用 send_qq_message 来结束本轮，而不是自然结束。`;
 
 /**
  * 判断指定 ID 是否为合法普通 QQ 会话标识符（群聊 / 私聊）

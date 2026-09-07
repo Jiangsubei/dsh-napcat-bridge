@@ -324,6 +324,7 @@ export interface SendFileResult {
 
 export interface SendQqMessageParams {
   text: string;
+  end?: boolean;
 }
 export type SendMessageParams = SendQqMessageParams;
 
@@ -332,6 +333,7 @@ export interface SendQqMessageResult {
   message_id?: number;
   sent_preview?: string;
   error?: string;
+  concludesTurn?: boolean;
 }
 export type SendMessageResult = SendQqMessageResult;
 
