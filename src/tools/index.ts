@@ -669,12 +669,7 @@ export async function sendMessage(
     return { success: false, error: 'send_message 需在 QQ 会话中执行' };
   }
 
-  // 3. 网关可用性校验
-  if (!ctx.gateway) {
-    return { success: false, error: '消息发送失败: NapCat 未连接 (gateway 不可用)' };
-  }
-
-  // 4. 超长文本自动分段并经串行队列分批发送
+  // 3. 超长文本自动分段并经串行队列分批发送
   const chunks = splitMessageText(plainText, 1500);
   let lastMessageId: number | undefined;
 

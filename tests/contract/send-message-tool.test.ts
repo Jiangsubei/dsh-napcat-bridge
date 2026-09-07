@@ -358,18 +358,6 @@ describe('契约 3: 网关返回失败或异常时透传报错 (Gateway Error Co
       error: '消息发送失败: WebSocket 连接中断',
     });
   });
-
-  it('缺少 gateway 实例时返回 NapCat 未连接报错', async () => {
-    const res = await sendMessage(
-      { text: '你好' },
-      { gateway: null, peer: 'group_1001' }
-    );
-
-    expect(res).toEqual({
-      success: false,
-      error: '消息发送失败: NapCat 未连接 (gateway 不可用)',
-    });
-  });
 });
 
 describe('契约 4: 成功发送并返回 message_id 与 sent_preview，消息走 stripMarkdown 排版与串行队列 (Success Contract)', () => {
