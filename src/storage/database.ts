@@ -25,6 +25,7 @@ export interface SessionStateRecord {
   updated_at: number;
   model_provider?: string;
   model_name?: string;
+  model_reasoning_effort?: string;
 }
 
 type DatabaseType = any;
@@ -192,6 +193,9 @@ export class MessageDatabase {
     } catch {}
     try {
       this.db.prepare('ALTER TABLE session_states ADD COLUMN model_name TEXT').run();
+    } catch {}
+    try {
+      this.db.prepare('ALTER TABLE session_states ADD COLUMN model_reasoning_effort TEXT').run();
     } catch {}
   }
 
@@ -535,10 +539,10 @@ export class MessageDatabase {
     db.prepare(`
       INSERT OR REPLACE INTO session_states (
         peer, current_session_id, cleared_round, cleared_version, updated_at,
-        model_provider, model_name
+        model_provider, model_name, model_reasoning_effort
       ) VALUES (
         @peer, @current_session_id, @cleared_round, @cleared_version, @updated_at,
-        @model_provider, @model_name
+        @model_provider, @model_name, @model_reasoning_effort
       )
     `).run({
       peer: state.peer,
@@ -548,6 +552,7 @@ export class MessageDatabase {
       updated_at: state.updated_at || Date.now(),
       model_provider: state.model_provider ?? null,
       model_name: state.model_name ?? null,
+      model_reasoning_effort: state.model_reasoning_effort ?? null,
     });
   }
 
@@ -563,6 +568,7 @@ export class MessageDatabase {
       updated_at: Number(row.updated_at),
       model_provider: row.model_provider || undefined,
       model_name: row.model_name || undefined,
+      model_reasoning_effort: row.model_reasoning_effort || undefined,
     };
   }
 
@@ -577,6 +583,7 @@ export class MessageDatabase {
       updated_at: Number(row.updated_at),
       model_provider: row.model_provider || undefined,
       model_name: row.model_name || undefined,
+      model_reasoning_effort: row.model_reasoning_effort || undefined,
     }));
   }
 

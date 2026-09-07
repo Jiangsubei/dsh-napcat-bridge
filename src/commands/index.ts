@@ -62,6 +62,104 @@ export async function getDiscoveredModels(ctx: Context): Promise<DiscoveredModel
 }
 
 /**
+ * 同步宿主会话模型选择 (包含可选 reasoningEffort)，抑制 agentDefaultModel.saveSelection 避免污染 Web UI 全局设置
+ */
+export async function safeSyncSessionModel(
+  ctx: Context,
+  sessionId: string,
+  provider: string,
+  model: string,
+  reasoningEffort?: string
+): Promise<void> {
+  const sessionController = ctx.get('sessionController') || (ctx as any).sessionController;
+  if (!sessionController?.selectModel) return;
+
+  const defaultModelSvc =
+    ctx.get('agentDefaultModel') || (ctx as any).agentDefaultModel;
+  const originalSave = defaultModelSvc?.saveSelection;
+  if (defaultModelSvc) {
+    defaultModelSvc.saveSelection = async () => {};
+  }
+  try {
+    await sessionController.selectModel({
+      sessionId,
+      provider,
+      model,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    });
+  } catch {} finally {
+    if (defaultModelSvc && originalSave) {
+      defaultModelSvc.saveSelection = originalSave;
+    }
+  }
+}
+
+export interface ModelReasoningMetadata {
+  supported: boolean;
+  efforts: Array<{ id: string; name: string; description?: string }>;
+  defaultEffort?: string;
+  currentEffort?: string;
+  isDefault: boolean;
+}
+
+/**
+ * 从 DSH LLM 服务动态获取指定模型的思考深度能力与支持的档位列表
+ */
+export async function getModelReasoningInfo(
+  ctx: Context,
+  provider: string,
+  model: string,
+  explicitEffort?: string
+): Promise<ModelReasoningMetadata> {
+  const llm = ctx.get('llm') || (ctx as any).llm;
+  if (llm && typeof llm.resolveModelInfo === 'function') {
+    try {
+      const info = await llm.resolveModelInfo(provider, model);
+      if (info && info.reasoning && Array.isArray(info.reasoning.efforts) && info.reasoning.efforts.length > 0) {
+        const efforts = info.reasoning.efforts.map((e: any) => ({
+          id: String(e.id),
+          name: String(e.name || e.id),
+          description: e.description ? String(e.description) : undefined,
+        }));
+        const defaultEffort = info.reasoning.defaultEffort
+          ? String(info.reasoning.defaultEffort)
+          : efforts[0]?.id;
+        const currentEffort = explicitEffort || defaultEffort;
+        return {
+          supported: true,
+          efforts,
+          defaultEffort,
+          currentEffort,
+          isDefault: !explicitEffort || explicitEffort === defaultEffort,
+        };
+      } else if (info && info.reasoning === undefined) {
+        // 明确当前模型无思考能力
+        return { supported: false, efforts: [], isDefault: true };
+      }
+    } catch {}
+  }
+
+  // 保底：若为官方 DeepSeek 适配器但 resolveModelInfo 失败或为离线测试桩
+  if (provider === 'deepseek-official') {
+    const efforts = [
+      { id: 'off', name: 'Off', description: '关闭思考' },
+      { id: 'low', name: 'Low', description: '常规或低延迟任务' },
+      { id: 'high', name: 'High', description: '多数任务推荐（默认）' },
+      { id: 'max', name: 'Max', description: '复杂任务深度思考' },
+    ];
+    return {
+      supported: true,
+      efforts,
+      defaultEffort: 'high',
+      currentEffort: explicitEffort || 'high',
+      isDefault: !explicitEffort || explicitEffort === 'high',
+    };
+  }
+
+  return { supported: false, efforts: [], isDefault: true };
+}
+
+/**
  * 格式化 Token 数量为紧凑字符串（对齐 WebUI formatTokens：<1k 直接显示，<1M 显示 XXK，>=1M 显示 XXM）
  */
 export function formatTokens(value: number): string {
@@ -171,32 +269,10 @@ export async function handleSlashCommand(
       const agents = context.ctx.get('agents') || (context.ctx as any).agents;
       const agent = agents?.get(context.session.id);
 
-      // 同步宿主会话模型选择：DSH 0.1.2-rc.1 起 dsh-host-apiproxy 的 ctx.apiProxy 服务已移除，
-      // 官方 Typert Remote 架构下宿主服务键为 sessionController（wire 命名空间 session），
-      // selectModel 直接接收 { sessionId, provider, model } 请求体（无旧版 { rpcId, payload } 信封）。
-      // 同时临时拦截抑制 agentDefaultModel.saveSelection，防止污染 Web UI 宿主全局默认设置。
-      const safeSyncApiProxy = async (sessionId: string, provider: string, model: string) => {
-        const sessionController = context.ctx.get('sessionController');
-        if (!sessionController?.selectModel) return;
-
-        const defaultModelSvc =
-          context.ctx.get('agentDefaultModel') || (context.ctx as any).agentDefaultModel;
-        const originalSave = defaultModelSvc?.saveSelection;
-        if (defaultModelSvc) {
-          defaultModelSvc.saveSelection = async () => {};
-        }
-        try {
-          await sessionController.selectModel({
-            sessionId,
-            provider,
-            model,
-          });
-        } catch {} finally {
-          if (defaultModelSvc && originalSave) {
-            defaultModelSvc.saveSelection = originalSave;
-          }
-        }
-      };
+      // 同步宿主会话模型选择：DSH 0.1.2-rc.1 起统一通过 sessionController.selectModel 同步，
+      // 并临时抑制 agentDefaultModel.saveSelection 避免污染 Web UI 宿主全局设置。
+      const safeSyncApiProxy = (sessionId: string, provider: string, model: string) =>
+        safeSyncSessionModel(context.ctx, sessionId, provider, model);
 
       // 1. 参数拆解：分离 --global / -g 与目标模型参数
       let isGlobal = false;
@@ -379,35 +455,158 @@ export async function handleSlashCommand(
     }
 
     case 'think': {
-      if (!args) {
-        return {
-          handled: true,
-          success: false,
-          error: '请指定思考深度，可选值: off, low, medium, high',
-        };
-      }
-
-      const level = args.toLowerCase();
-      const validLevels = ['off', 'low', 'medium', 'high'];
-      if (!validLevels.includes(level)) {
-        return {
-          handled: true,
-          success: false,
-          error: `无效的思考深度: ${args}，支持: ${validLevels.join(', ')}`,
-        };
-      }
-
-      try {
-        const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
-        const agent = agents?.get(context.session.id);
-        if (agent && (agent as any).modelSelection?.current) {
-          (agent as any).modelSelection.current.reasoningEffort = level;
+      // 1. 参数拆解：分离 --global / -g 与目标思考深度参数
+      let isGlobal = false;
+      const rawArgs = (args || '').trim();
+      const tokens = rawArgs.split(/\s+/).filter(Boolean);
+      const filteredTokens: string[] = [];
+      for (const tok of tokens) {
+        if (tok === '--global' || tok === '-g') {
+          isGlobal = true;
+        } else {
+          filteredTokens.push(tok);
         }
+      }
+      const thinkArg = filteredTokens.join(' ').trim();
+
+      // 2. 获取当前会话生效的模型选择与思考深度
+      const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
+      const agent = agents?.get(context.session.id);
+      const curSel =
+        context.sessionManager?.getModelSelection(context.session.id) ||
+        (agent as any)?.modelSelection?.current;
+      const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
+      const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
+      const explicitEffort = curSel?.reasoningEffort;
+
+      // 3. 从 DSH 动态获取当前模型的思考能力与支持档位
+      const reasoningInfo = await getModelReasoningInfo(context.ctx, curProv, curMod, explicitEffort);
+
+      // 4. 空参数时：展示当前思考强度与该模型实际支持的档位列表
+      if (!thinkArg) {
+        if (!reasoningInfo.supported) {
+          return {
+            handled: true,
+            success: true,
+            reply: [
+              `🤖 当前会话模型: \`${curProv} / ${curMod}\``,
+              '🧠 思考能力: 当前模型不支持思考强度设置（该模型无深度思考能力或被提供商禁用）',
+            ].join('\n'),
+          };
+        }
+
+        const curName =
+          reasoningInfo.efforts.find((e) => e.id === reasoningInfo.currentEffort)?.name ||
+          reasoningInfo.currentEffort;
+        const currentLine = `🧠 当前思考强度: \`${reasoningInfo.currentEffort}\`${
+          curName && curName !== reasoningInfo.currentEffort ? ` (${curName})` : ''
+        }${reasoningInfo.isDefault ? ' [默认]' : ''}`;
+
+        const listLines = reasoningInfo.efforts.map((e) => {
+          const isDef = e.id === reasoningInfo.defaultEffort ? ' [默认]' : '';
+          const isCur = e.id === reasoningInfo.currentEffort ? ' (当前)' : '';
+          const desc = e.description ? ` - ${e.description}` : '';
+          return `• \`${e.id}\` (${e.name})${isDef}${isCur}${desc}`;
+        });
+
+        const reply = [
+          `🤖 当前会话模型: \`${curProv} / ${curMod}\``,
+          currentLine,
+          '',
+          '📋 支持的思考档位:',
+          listLines.join('\n'),
+          '',
+          '💡 切换方法:',
+          '• 仅当前 QQ 会话: /think <档位> (例如: /think low)',
+          '• 恢复模型默认: /think default (或 /think reset)',
+          '• 所有 QQ 会话全局: /think <档位> --global (例如: /think low --global)',
+        ].join('\n');
+
         return {
           handled: true,
           success: true,
-          reply: `当前会话思考深度已设置为: ${level}`,
+          reply,
         };
+      }
+
+      // 5. 有参数时：检查模型是否支持思考能力
+      if (!reasoningInfo.supported) {
+        return {
+          handled: true,
+          success: false,
+          error: `⚠️ 切换失败: 当前模型 [${curProv} / ${curMod}] 不支持思考强度设置`,
+        };
+      }
+
+      // 6. 支持 default / reset 恢复模型默认档位
+      const lowerArg = thinkArg.toLowerCase();
+      let targetEffort: string | undefined;
+      let targetName = '';
+
+      if (lowerArg === 'default' || lowerArg === 'reset') {
+        targetEffort = undefined;
+        targetName = `模型默认 (${reasoningInfo.defaultEffort})`;
+      } else {
+        const matched = reasoningInfo.efforts.find(
+          (e) => e.id.toLowerCase() === lowerArg || e.name.toLowerCase() === lowerArg
+        );
+        if (!matched) {
+          const validList = reasoningInfo.efforts
+            .map((e) => `\`${e.id}\` (${e.name})`)
+            .join(', ');
+          return {
+            handled: true,
+            success: false,
+            error: `⚠️ 无效的思考深度: [${thinkArg}]\n当前模型 [${curProv} / ${curMod}] 实际支持的档位为: ${validList}`,
+          };
+        }
+        targetEffort = matched.id;
+        targetName = `${matched.id} (${matched.name})`;
+      }
+
+      // 7. 执行切换与会话/全局同步
+      try {
+        if (isGlobal) {
+          context.sessionManager?.setNapcatDefaultModel(curProv, curMod, targetEffort);
+          const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
+          for (const sid of allSids) {
+            await safeSyncSessionModel(context.ctx, sid, curProv, curMod, targetEffort);
+          }
+          return {
+            handled: true,
+            success: true,
+            reply: [
+              `✅ NapCat 插件全局 QQ 会话思考深度已切换为: ${targetName}`,
+              `🌐 范围：已同步切换所有 QQ 会话；未来新建立的 QQ 会话也将默认使用此思考深度。`,
+              `🛡️ 隔离：未修改 Web UI 宿主全局设置。`,
+            ].join('\n'),
+          };
+        } else {
+          context.sessionManager?.setModelSelection(
+            context.session.id,
+            curProv,
+            curMod,
+            targetEffort
+          );
+          if (agent && (agent as any).modelSelection?.current) {
+            (agent as any).modelSelection.current.reasoningEffort = targetEffort;
+          }
+          await safeSyncSessionModel(
+            context.ctx,
+            context.session.id,
+            curProv,
+            curMod,
+            targetEffort
+          );
+          return {
+            handled: true,
+            success: true,
+            reply: [
+              `✅ 当前 QQ 会话思考深度已切换为: ${targetName}`,
+              `📌 提示：仅对当前 QQ 会话生效；如需切换所有 QQ 会话请加 --global 参数。`,
+            ].join('\n'),
+          };
+        }
       } catch (err: any) {
         return {
           handled: true,
@@ -632,7 +831,7 @@ export async function handleSlashCommand(
         '【DSH × NapCat 快捷指令】',
         '• /model <model_id> : 切换当前会话 LLM 模型',
         '• /mode <readonly|edit|yolo> : 切换权限模式',
-        '• /think <off|low|medium|high> : 切换思考深度',
+        '• /think [档位] : 查看或切换当前思考深度',
         '• /new (clear) : 开启新会话（原会话保留）',
         '• /resume : 列出并切换历史会话 (/resume <序号>)',
         '• /ctx : 查看当前会话上下文用量',

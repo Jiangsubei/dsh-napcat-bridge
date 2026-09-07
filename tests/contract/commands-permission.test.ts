@@ -626,14 +626,185 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(reply).toContain('【DSH × NapCat 快捷指令】');
     expect(reply).toContain('• /model <model_id> : 切换当前会话 LLM 模型');
     expect(reply).toContain('• /mode <readonly|edit|yolo> : 切换权限模式');
-    expect(reply).toContain('• /think <off|low|medium|high> : 切换思考深度');
+    expect(reply).toContain('• /think [档位] : 查看或切换当前思考深度');
     expect(reply).toContain('• /new (clear) : 开启新会话（原会话保留）');
     expect(reply).toContain('• /resume : 列出并切换历史会话 (/resume <序号>)');
     expect(reply).toContain('• /ctx : 查看当前会话上下文用量');
     expect(reply).toContain('• /stop : 停止当前生成');
     expect(reply).toContain('• /help : 查看帮助');
   });
+
+  it('契约 10: /think 空参数动态读取 DSH 思考能力，展示当前生效档位与实际支持档位（无 medium，包含 max）', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session = booted.ctx.sessions.create('qq-group-1010' as any);
+    const admins = ['2000000001'];
+
+    // 1. 非管理员拒绝
+    const nonAdminRes = await handleSlashCommand('/think', {
+      userId: '1234567890',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(nonAdminRes.handled).toBe(true);
+    expect(nonAdminRes.success).toBe(false);
+    expect(nonAdminRes.error).toContain('权限不足');
+
+    // 2. 管理员执行空参数：查询当前思考深度与 DSH 真实档位
+    const adminRes = await handleSlashCommand('/think', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(adminRes.handled).toBe(true);
+    expect(adminRes.success).toBe(true);
+    const reply = adminRes.reply!;
+    expect(reply).toContain('🤖 当前会话模型');
+    expect(reply).toContain('🧠 当前思考强度');
+    expect(reply).toContain('high');
+    expect(reply).toContain('[默认]');
+    // 验证来自 DSH 的真实档位列表：包含 max，绝不包含不存在的 medium
+    expect(reply).toContain('`off` (Off)');
+    expect(reply).toContain('`low` (Low)');
+    expect(reply).toContain('`high` (High)');
+    expect(reply).toContain('`max` (Max)');
+    expect(reply).not.toContain('`medium`');
+    expect(reply).toContain('/think <档位>');
+    expect(reply).toContain('/think default');
+  });
+
+  it('契约 11: /think 动态校验 DSH 档位：支持 max，拒绝非 DSH 档位（如 medium），支持 per-session 隔离与 default 恢复', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const sessionA = booted.ctx.sessions.create('qq-group-1011a' as any);
+    const sessionB = booted.ctx.sessions.create('qq-group-1011b' as any);
+    const admins = ['2000000001'];
+
+    // 1. 输入非法档位（如旧版写死的 medium，DSH 实际不支持）
+    const invalidRes = await handleSlashCommand('/think medium', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(invalidRes.handled).toBe(true);
+    expect(invalidRes.success).toBe(false);
+    expect(invalidRes.error).toContain('无效的思考深度: [medium]');
+    expect(invalidRes.error).toContain('实际支持的档位为');
+    expect(invalidRes.error).toContain('`max`');
+    expect(invalidRes.error).not.toContain('`medium`');
+
+    // 2. 切换为 DSH 合法档位 max（旧版硬编码曾错误阻断）
+    const validRes = await handleSlashCommand('/think max', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(validRes.handled).toBe(true);
+    expect(validRes.success).toBe(true);
+    expect(validRes.reply).toContain('当前 QQ 会话思考深度已切换为: max (Max)');
+
+    // 3. 验证 Per-Session 隔离：sessionA 为 max，sessionB 保持未覆盖
+    const selA = sessionManager.getModelSelection(sessionA.id);
+    expect(selA?.reasoningEffort).toBe('max');
+    const selB = sessionManager.getModelSelection(sessionB.id);
+    expect(selB?.reasoningEffort).toBeUndefined();
+
+    // 4. 执行 /think default 恢复默认
+    const resetRes = await handleSlashCommand('/think default', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(resetRes.handled).toBe(true);
+    expect(resetRes.success).toBe(true);
+    expect(resetRes.reply).toContain('模型默认 (high)');
+    const selAAfterReset = sessionManager.getModelSelection(sessionA.id);
+    expect(selAAfterReset?.reasoningEffort).toBeUndefined();
+  });
+
+  it('契约 12: /think <档位> --global 批量同步所有 QQ 会话并更新 NapCat 全局默认思考深度', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session1 = booted.ctx.sessions.create('qq-group-1012a' as any);
+    const session2 = booted.ctx.sessions.create('qq-group-1012b' as any);
+    const admins = ['2000000001'];
+
+    // 预先注册这两个 session
+    sessionManager.getOrCreateSelectionRef(session1.id);
+    sessionManager.getOrCreateSelectionRef(session2.id);
+
+    const globalRes = await handleSlashCommand('/think low --global', {
+      userId: '2000000001',
+      admins,
+      session: session1,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(globalRes.handled).toBe(true);
+    expect(globalRes.success).toBe(true);
+    expect(globalRes.reply).toContain('NapCat 插件全局 QQ 会话思考深度已切换为: low (Low)');
+
+    // 验证所有会话都被批量更新为 low
+    expect(sessionManager.getModelSelection(session1.id)?.reasoningEffort).toBe('low');
+    expect(sessionManager.getModelSelection(session2.id)?.reasoningEffort).toBe('low');
+    // 验证 NapCat 全局默认也更新
+    expect(sessionManager.getNapcatDefaultModel()?.reasoningEffort).toBe('low');
+  });
+
+  it('契约 13: /think 针对不支持思考的模型给出明确不可用提示', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session = booted.ctx.sessions.create('qq-group-1013' as any);
+    const admins = ['2000000001'];
+
+    // 设置为无思考能力的 mock 模型
+    sessionManager.setModelSelection(session.id, 'mock-provider', 'no-reason-model');
+
+    const llm = booted.ctx.get('llm');
+    const origResolve = llm.resolveModelInfo;
+    llm.resolveModelInfo = async () => ({
+      provider: 'mock-provider',
+      id: 'no-reason-model',
+      name: 'No Reasoning Model',
+      reasoning: undefined, // 无思考能力
+    });
+
+    try {
+      // 空参数查询
+      const queryRes = await handleSlashCommand('/think', {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+        sessionManager,
+      });
+      expect(queryRes.handled).toBe(true);
+      expect(queryRes.success).toBe(true);
+      expect(queryRes.reply).toContain('当前模型不支持思考强度设置');
+
+      // 带参数切换
+      const setRes = await handleSlashCommand('/think low', {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+        sessionManager,
+      });
+      expect(setRes.handled).toBe(true);
+      expect(setRes.success).toBe(false);
+      expect(setRes.error).toContain('不支持思考强度设置');
+    } finally {
+      llm.resolveModelInfo = origResolve;
+    }
+  });
 });
+
 
 
 
