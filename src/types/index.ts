@@ -322,6 +322,17 @@ export interface SendFileResult {
   error?: string;
 }
 
+export interface SendMessageParams {
+  text: string;
+}
+
+export interface SendMessageResult {
+  success: boolean;
+  message_id?: number;
+  sent_preview?: string;
+  error?: string;
+}
+
 export interface PokeUserParams {
   user_id: string;
 }
