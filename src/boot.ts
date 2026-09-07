@@ -37,10 +37,10 @@ export interface BootedDsh {
 }
 
 export function resolveDshHome(customHome?: string): string {
-  if (customHome) return customHome;
-  if (process.env.DSH_HOME) return process.env.DSH_HOME;
+  if (customHome) return path.resolve(customHome);
+  if (process.env.DSH_HOME) return path.resolve(process.env.DSH_HOME);
   const home = process.env.HOME || process.env.USERPROFILE || '/tmp';
-  return path.join(home, '.dsh');
+  return path.resolve(home, '.dsh');
 }
 
 /**
@@ -55,7 +55,10 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
   try {
     installAnchor = require.resolve('@deepseek-ai/dsh/package.json');
   } catch {
-    installAnchor = path.resolve(process.cwd(), 'node_modules/@deepseek-ai/dsh/package.json');
+    installAnchor = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      '../node_modules/@deepseek-ai/dsh/package.json'
+    );
   }
 
   await healProfilesModuleFallback({ installAnchor, home: dshHome });

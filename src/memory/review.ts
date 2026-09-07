@@ -9,7 +9,6 @@
  */
 
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { promises as fsp } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -21,6 +20,7 @@ import {
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+  resolveDshPath,
 } from '../constants/index.js';
 
 export const ALLOWED_MEMORY_REVIEW_TOOLS: readonly string[] = [
@@ -119,6 +119,7 @@ export interface BackgroundReviewConfig {
   turnsInterval?: number;
   toolCallsInterval?: number;
   storageDir?: string;
+  dshHome?: string;
   reviewModel?: string;
   cancelTimeoutMs?: number;
   maxIterations?: number;
@@ -198,6 +199,7 @@ Do NOT capture (these become persistent self-imposed constraints that bite you l
 
 export class BackgroundReviewManager {
   private config: BackgroundReviewConfig;
+  private readonly dshHome: string;
   private sessionStates: Map<string, SessionReviewState> = new Map();
   private activeReviewRuns: Map<string, BackgroundReviewRun> = new Map();
   private logger: any;
@@ -209,6 +211,7 @@ export class BackgroundReviewManager {
     config: BackgroundReviewConfig = {},
     public storage: MemoryStorage
   ) {
+    this.dshHome = resolveDshPath(config.dshHome);
     this.config = {
       enabled: config.enabled ?? DEFAULT_REVIEW_ENABLED,
       turnsInterval: config.turnsInterval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
@@ -642,9 +645,7 @@ export class BackgroundReviewManager {
       }
 
       if (!sessionPath) {
-        const baseSessionsDir = (this as any).dshHome
-          ? path.join((this as any).dshHome, 'sessions')
-          : path.join(os.homedir(), '.dsh', 'sessions');
+        const baseSessionsDir = path.join(this.dshHome, 'sessions');
         try {
           const dirs = await fsp.readdir(baseSessionsDir).catch(() => [] as string[]);
           for (const d of dirs) {

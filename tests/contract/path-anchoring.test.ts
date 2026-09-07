@@ -23,8 +23,10 @@ import { promises as fsp } from 'node:fs';
 import { MemoryStorage } from '../../src/memory/storage.js';
 import { setupMemoryService } from '../../src/memory/index.js';
 import { SessionManager } from '../../src/gateway/session.js';
-import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
+import { bootDshNapcatBridge, resolveDshHome, type BootedDsh } from '../../src/boot.js';
 import { MessageDatabase } from '../../src/storage/database.js';
+import { MediaStorageManager } from '../../src/storage/media.js';
+import { BackgroundReviewManager } from '../../src/memory/review.js';
 
 describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring Contract)', () => {
   let originalCwd: string;
@@ -213,4 +215,133 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
       expect(fs.existsSync(arbitraryDshDir)).toBe(false);
     });
   });
+
+  describe('契约 4: MediaStorageManager 路径绝对锚定与隔离验证', () => {
+    it('显式传入 dshHome 时 downloadRoot 必须严格基于 dshHome 展开，绝不使用 process.cwd()', () => {
+      const media = new MediaStorageManager({ dshHome: customDshHome });
+      const expectedDir = path.resolve(customDshHome, 'workspace/napcat_download');
+
+      expect(media.downloadRoot).toBe(expectedDir);
+      expect(media.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
+      expect(path.isAbsolute(media.downloadRoot)).toBe(true);
+    });
+
+    it('未显式传参时根据 process.env.DSH_HOME 自动锚定在 customDshHome 下', () => {
+      const media = new MediaStorageManager();
+      const expectedDir = path.resolve(customDshHome, 'workspace/napcat_download');
+
+      expect(media.downloadRoot).toBe(expectedDir);
+      expect(media.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
+      expect(path.isAbsolute(media.downloadRoot)).toBe(true);
+    });
+
+    it('传入相对路径 downloadDir（含 .dsh/ 前缀或普通相对路径）时正确剥离并锚定在 dshHome 下', () => {
+      const media1 = new MediaStorageManager({ downloadDir: '.dsh/custom_download', dshHome: customDshHome });
+      expect(media1.downloadRoot).toBe(path.resolve(customDshHome, 'custom_download'));
+      expect(media1.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
+
+      const media2 = new MediaStorageManager({ downloadDir: 'custom_download', dshHome: customDshHome });
+      expect(media2.downloadRoot).toBe(path.resolve(customDshHome, 'custom_download'));
+      expect(media2.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
+    });
+
+    it('传入绝对路径 downloadDir 时保持该绝对路径', () => {
+      const absPath = path.resolve(os.tmpdir(), 'abs-media-download');
+      const media = new MediaStorageManager({ downloadDir: absPath, dshHome: customDshHome });
+      expect(media.downloadRoot).toBe(absPath);
+    });
+
+    it('saveBuffer 物理落盘严格保存在 dshHome 目录内，进程工作目录绝无污染', async () => {
+      const media = new MediaStorageManager({ dshHome: customDshHome });
+      const testBuffer = Buffer.from('path-anchoring-test-image-content');
+      const result = await media.saveBuffer(testBuffer, {
+        type: 'image',
+        sessionId: 'group_test_anchor',
+        filename: 'test.png',
+      });
+
+      expect(result.localPath.startsWith(customDshHome)).toBe(true);
+      expect(result.localPath.startsWith(arbitraryCwd)).toBe(false);
+      expect(fs.existsSync(result.localPath)).toBe(true);
+      expect(fs.existsSync(path.resolve(arbitraryCwd, '.dsh'))).toBe(false);
+      expect(fs.readdirSync(arbitraryCwd).length).toBe(0);
+    });
+  });
+
+  describe('契约 5: BackgroundReviewManager 物理会话清理与 dshHome 绝对锚定', () => {
+    it('BackgroundReviewManager 构造函数规范化 dshHome 为绝对路径', () => {
+      const mockCtx: any = { logger: () => ({ warn: () => {} }) };
+      const memStorage = new MemoryStorage(undefined, customDshHome);
+      const reviewMgr = new BackgroundReviewManager(mockCtx, { dshHome: customDshHome }, memStorage);
+
+      expect((reviewMgr as any).dshHome).toBe(path.resolve(customDshHome));
+      expect(path.isAbsolute((reviewMgr as any).dshHome)).toBe(true);
+    });
+
+    it('setupMemoryService 初始化时 BackgroundReviewManager 自动继承规范化的 effectiveDshHome', () => {
+      const mockCtx: any = {
+        get: () => undefined,
+        logger: () => ({ warn: () => {} }),
+      };
+      const svc = setupMemoryService(mockCtx, { dshHome: customDshHome });
+
+      expect((svc.reviewManager as any).dshHome).toBe(path.resolve(customDshHome));
+      expect(path.isAbsolute((svc.reviewManager as any).dshHome)).toBe(true);
+      svc.dispose();
+    });
+
+    it('物理会话清理时在 dshHome/sessions 下查找并递归删除，绝不回退到 ~/.dsh/sessions', async () => {
+      const mockCtx: any = {
+        get: () => undefined,
+        logger: () => ({ warn: () => {}, info: () => {}, debug: () => {} }),
+      };
+      const memStorage = new MemoryStorage(undefined, customDshHome);
+      const reviewMgr = new BackgroundReviewManager(mockCtx, { dshHome: customDshHome }, memStorage);
+
+      const targetSessionId = 'review-test-cleanup-sid';
+      const sessionDir = path.resolve(customDshHome, 'sessions', 'subagent-group', targetSessionId);
+      await fsp.mkdir(sessionDir, { recursive: true });
+      await fsp.writeFile(path.join(sessionDir, 'test.log'), 'dummy data', 'utf-8');
+      expect(fs.existsSync(sessionDir)).toBe(true);
+
+      await (reviewMgr as any).cleanupReviewSession(targetSessionId);
+
+      expect(fs.existsSync(sessionDir)).toBe(false);
+      expect(fs.existsSync(path.resolve(arbitraryCwd, '.dsh'))).toBe(false);
+    });
+  });
+
+  describe('契约 6: MessageDatabase 路径防御性绝对化', () => {
+    it('构造函数传入相对路径时自动转换为绝对路径', () => {
+      const dbRel = new MessageDatabase('relative-messages.sqlite');
+      expect(path.isAbsolute(dbRel.dbPath)).toBe(true);
+      expect(dbRel.dbPath).toBe(path.resolve(arbitraryCwd, 'relative-messages.sqlite'));
+    });
+
+    it('传入 customDshHome 下的路径并初始化，物理数据库严格在 dshHome 内', () => {
+      const dbPath = path.resolve(customDshHome, 'workspace/napcat/messages.sqlite');
+      const db = new MessageDatabase(dbPath);
+      expect(db.dbPath).toBe(dbPath);
+
+      db.init();
+      expect(fs.existsSync(dbPath)).toBe(true);
+      expect(fs.existsSync(path.resolve(arbitraryCwd, '.dsh'))).toBe(false);
+      db.close();
+    });
+  });
+
+  describe('契约 7: boot.ts resolveDshHome 规范化与锚定防御', () => {
+    it('resolveDshHome 传入相对路径时返回规范化的绝对路径', () => {
+      const resolvedRel = resolveDshHome('./relative-dsh-home');
+      expect(path.isAbsolute(resolvedRel)).toBe(true);
+      expect(resolvedRel).toBe(path.resolve('./relative-dsh-home'));
+    });
+
+    it('resolveDshHome 在 process.env.DSH_HOME 存在时返回规范化的绝对路径', () => {
+      const resolvedEnv = resolveDshHome();
+      expect(path.isAbsolute(resolvedEnv)).toBe(true);
+      expect(resolvedEnv).toBe(path.resolve(customDshHome));
+    });
+  });
 });
+
