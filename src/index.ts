@@ -5,8 +5,9 @@
 
 import * as path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT, DEFAULT_MEMORY_DIR, resolveDshPath } from './constants/index.js';
+import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT, DEFAULT_MEMORY_DIR } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
+import { resolveDshPath } from './utils/path.js';
 import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
 import { MessageDatabase } from './storage/database.js';
 import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';

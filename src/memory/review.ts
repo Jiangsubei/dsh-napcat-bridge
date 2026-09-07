@@ -20,8 +20,8 @@ import {
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
-  resolveDshPath,
 } from '../constants/index.js';
+import { resolveDshPath } from '../utils/path.js';
 
 export const ALLOWED_MEMORY_REVIEW_TOOLS: readonly string[] = [
   'read_memory',
