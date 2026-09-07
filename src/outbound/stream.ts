@@ -85,6 +85,8 @@ export class OutboundStreamBridge {
   private activeTurns = new Map<string, number>();
   // 记录每个 Turn 是否已经下发过首段前缀 ( `${peer}:${turn}` )
   private turnFirstSent = new Set<string>();
+  // 记录每个 Turn 中 send_message 的调用次数 ( `${peer}:${turn}` -> count )
+  private turnSendMessageCounts = new Map<string, number>();
   private unlisten: (() => void) | null = null;
 
   constructor(
@@ -173,6 +175,13 @@ export class OutboundStreamBridge {
   }
 
   /**
+   * 获取指定 peer 和 turn 中 send_message 的调用次数
+   */
+  getTurnSendMessageCount(peer: string, turn: number): number {
+    return this.turnSendMessageCounts.get(`${peer}:${turn}`) || 0;
+  }
+
+  /**
    * 启动出站事件流监听
    */
   start(): () => void {
@@ -217,6 +226,7 @@ export class OutboundStreamBridge {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.activeTurns.set(peer, turn);
+        this.turnSendMessageCounts.set(`${peer}:${turn}`, 0);
         // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn
         for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
           if (entry.peer === peer) {
@@ -257,11 +267,27 @@ export class OutboundStreamBridge {
       return;
     }
 
+    // 监听 session/event 的 tool/call 事件: 跟踪 send_message 调用次数
+    if (event.type === 'tool/call') {
+      const toolName = (event.data as any)?.name;
+      if (toolName === 'send_message') {
+        const turn = typeof (event.data as any)?.turn === 'number'
+          ? (event.data as any).turn
+          : this.activeTurns.get(peer);
+        if (turn !== undefined) {
+          const key = `${peer}:${turn}`;
+          this.turnSendMessageCounts.set(key, (this.turnSendMessageCounts.get(key) || 0) + 1);
+        }
+      }
+      return;
+    }
+
     // 3. 轮次结束: 清理当前 Turn 的绑定映射与首段标记
     if (event.type === 'turn/end') {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.turnFirstSent.delete(`${peer}:${turn}`);
+        this.turnSendMessageCounts.delete(`${peer}:${turn}`);
         if (this.activeTurns.get(peer) === turn) {
           this.activeTurns.delete(peer);
         }
@@ -273,8 +299,29 @@ export class OutboundStreamBridge {
     // 4. 仅针对 assistant/message 事件提取正文回复
     if (event.type === 'assistant/message') {
       const msgData = event.data as any;
-      const turn = typeof msgData?.turn === 'number' ? msgData.turn : undefined;
+      const turn = typeof msgData?.turn === 'number' ? msgData.turn : this.activeTurns.get(peer);
       const contentBlocks: ContentBlock[] = msgData?.message?.content || [];
+
+      // 旁白结构性抑制（Checklist C1）：
+      // 若 content 中包含任何 tool-call 块，说明此条消息伴随工具调用，
+      // 其中的文本块纯属模型思考旁白或工具间隙溢出，结构性抑制，绝对不向 QQ 发送。
+      const hasToolCall = contentBlocks.some((block) => block && (block as any).type === 'tool-call');
+      if (hasToolCall) {
+        return;
+      }
+
+      const turnKey = turn !== undefined ? `${peer}:${turn}` : undefined;
+
+      // turn/end 兜底机制（Checklist C2, C3, C4）：
+      // 当 assistant/message 不包含任何 tool-call 时（即纯文本回复）：
+      // 检查当前 turn 的 sendCount
+      const sendCount = turnKey ? (this.turnSendMessageCounts.get(turnKey) || 0) : 0;
+      // 分支 B: sendCount >= 1 -> 模型已通过 send_message 主动发过言，信任模型自管理输出，末尾纯文本回复不发送（仅留存 Web UI，防重复打扰）
+      if (sendCount >= 1) {
+        return;
+      }
+
+      // 分支 A: sendCount === 0 -> 模型未主动调用 send_message，触发安全兜底，将纯文本回复发送给 QQ Peer
       const textBlocks = filterAndExtractOutboundBlocks(contentBlocks);
 
       // 提取针对该 Turn 的上下文 (Turn 级精准绑定优先)
@@ -286,8 +333,6 @@ export class OutboundStreamBridge {
       if (!inbound && turn === undefined) {
         inbound = this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
       }
-
-      const turnKey = turn !== undefined ? `${peer}:${turn}` : undefined;
 
       for (let i = 0; i < textBlocks.length; i++) {
         const block = textBlocks[i];
@@ -410,6 +455,7 @@ export class OutboundStreamBridge {
     this.turnContexts.clear();
     this.activeTurns.clear();
     this.turnFirstSent.clear();
+    this.turnSendMessageCounts.clear();
   }
 }
 

@@ -25,10 +25,10 @@
 
 ## C. 出站旁白抑制 + turn/end 兜底
 
-- [ ] C1 与 tool-call 同条 assistant/message 的文本块**永不自动发送**（结构抑制，只留 Web UI）
-- [ ] C2 每轮跟踪 send_message 调用次数；**0 次** → turn/end 自动补发终答（路径与现状一致）
-- [ ] C3 **≥1 次** → 不自动补发，模型自管理输出
-- [ ] C4 取舍接受：先 send 报进度后纯文本写终答 → 末尾文字不补发（Web UI 保留）
+- [x] C1 与 tool-call 同条 assistant/message 的文本块**永不自动发送**（结构抑制，只留 Web UI）
+- [x] C2 每轮跟踪 send_message 调用次数；**0 次** → turn/end 自动补发终答（路径与现状一致）
+- [x] C3 **≥1 次** → 不自动补发，模型自管理输出
+- [x] C4 取舍接受：先 send 报进度后纯文本写终答 → 末尾文字不补发（Web UI 保留）
 - [x] C5 实现前已核实：agent-loop 无工具文本=回合结束？终答取法；send_message 计数事件类型
 
 ## D. send_message 首调引用/艾特规则（本批新增）
@@ -49,8 +49,8 @@
 
 - [x] F1 send_message：注册范围断言（QQ 会话可见/非 QQ 与沙箱不可见）、空文本/发送失败、成功含 message_id、走串行队列
 - [x] F2 动态段：QQ 会话出现该段文本 / 非 QQ 为空；order 位于最前
-- [ ] F3 旁白抑制：带 tool-call 的文本不发出；纯终答发出
-- [ ] F4 兜底：0 次 send → 终答补发；≥1 次 → 不补发
+- [x] F3 旁白抑制：带 tool-call 的文本不发出；纯终答发出
+- [x] F4 兜底：0 次 send → 终答补发；≥1 次 → 不补发
 - [ ] F5 首调引用：同轮多次 send_message 仅首条带引用/艾特
 - [x] F6 锚定修复：emoji_like 事件入站后，回复引用的仍是回合起始消息（真实装配测试）
 - [ ] F7 pnpm test 全绿 + pnpm build 通过 + dist 含改动；未引入新 npm 依赖
