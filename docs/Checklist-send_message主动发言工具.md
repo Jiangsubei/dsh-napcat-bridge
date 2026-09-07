@@ -9,12 +9,12 @@
 
 ## A. send_message 工具
 
-- [ ] A1 新增 `send_message { text: string }`（v1 仅单文本参数）
-- [ ] A2 注册范围：**仅普通 QQ 会话**（qq-group-*/qq-user-*）；非 QQ 会话（WebUI）、Background Review、加好友专用 Session **不注册**
-- [ ] A3 群聊 + 私聊均可使用（区别于 react_message 仅群聊）
-- [ ] A4 走现有串行队列 + stripMarkdown；超长自动分段；成功返回 message_id
-- [ ] A5 报错分支：空文本→"发送内容不能为空。"；NapCat 发送失败→"消息发送失败: {retcode/wording}"；无 QQ 会话→防御守卫；成功→{success, message_id, sent_preview}
-- [ ] A6 工具描述按需求文档 §1.5
+- [x] A1 新增 `send_message { text: string }`（v1 仅单文本参数）
+- [x] A2 注册范围：**仅普通 QQ 会话**（qq-group-*/qq-user-*）；非 QQ 会话（WebUI）、Background Review、加好友专用 Session **不注册**
+- [x] A3 群聊 + 私聊均可使用（区别于 react_message 仅群聊）
+- [x] A4 走现有串行队列 + stripMarkdown；超长自动分段；成功返回 message_id
+- [x] A5 报错分支：空文本→"发送内容不能为空。"；NapCat 发送失败→"消息发送失败: {retcode/wording}"；无 QQ 会话→防御守卫；成功→{success, message_id, sent_preview}
+- [x] A6 工具描述按需求文档 §1.5
 
 ## B. QQ 会话动态段
 
@@ -47,7 +47,7 @@
 
 ## F. 契约测试与收尾
 
-- [ ] F1 send_message：注册范围断言（QQ 会话可见/非 QQ 与沙箱不可见）、空文本/发送失败、成功含 message_id、走串行队列
+- [x] F1 send_message：注册范围断言（QQ 会话可见/非 QQ 与沙箱不可见）、空文本/发送失败、成功含 message_id、走串行队列
 - [x] F2 动态段：QQ 会话出现该段文本 / 非 QQ 为空；order 位于最前
 - [ ] F3 旁白抑制：带 tool-call 的文本不发出；纯终答发出
 - [ ] F4 兜底：0 次 send → 终答补发；≥1 次 → 不补发

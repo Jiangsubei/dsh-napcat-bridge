@@ -56,6 +56,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   //         等待期间同 peer 入站消息经 index.ts 门控转发给收集器并抑制唤醒）
   const waitRegistry = new MessageWaitRegistry();
 
+  let memoryService: any = null;
 
   // C2: Notice 事件 (group_upload / poke) 无真实 message_id 时的稳定正数主键策略
   //     FNV-1a 32-bit，避免 -Date.now() 负数假 id 在极高并发下撞主键
@@ -187,7 +188,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const rawMemoryDir = currentConfig().memory_storage_dir;
   const normalizedMemoryDir = resolveDshPath(dshHome, rawMemoryDir, DEFAULT_MEMORY_DIR);
 
-  const memoryService = setupMemoryService(ctx, {
+  memoryService = setupMemoryService(ctx, {
     storageDir: normalizedMemoryDir,
     dshHome,
     budgetChars: currentConfig().memory_budget_chars,
@@ -212,6 +213,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'create_memory',
     'edit_memory',
     'react_message',
+    'send_message',
   ]);
 
   const extractSessionId = (agent: any): string => {
@@ -242,12 +244,26 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         sessionId &&
           (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
       );
+      const isQQChat = Boolean(
+        sessionId &&
+          !sessionId.startsWith('review-') &&
+          !sessionId.startsWith('friend-request-') &&
+          (sessionId.startsWith('qq-group-') ||
+            sessionId.startsWith('qq-user-') ||
+            sessionId.startsWith('group_') ||
+            sessionId.startsWith('user_'))
+      );
 
       if (Array.isArray(res?.tools)) {
         if (!isQQ) {
           res.tools = res.tools.filter((t: any) => !NAPCAT_TOOL_NAMES.has(t.name));
-        } else if (!isQQGroup) {
-          res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
+        } else {
+          if (!isQQGroup) {
+            res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
+          }
+          if (!isQQChat) {
+            res.tools = res.tools.filter((t: any) => t.name !== 'send_message');
+          }
         }
       }
       return res;
@@ -262,6 +278,20 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     unregisterToolGuard = toolsSvc.guard((exec: any) => {
       if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
         const sessionId = extractSessionId(exec?.agent);
+        if (exec?.name === 'send_message') {
+          const isQQChat = Boolean(
+            sessionId &&
+              !sessionId.startsWith('review-') &&
+              !sessionId.startsWith('friend-request-') &&
+              (sessionId.startsWith('qq-group-') ||
+                sessionId.startsWith('qq-user-') ||
+                sessionId.startsWith('group_') ||
+                sessionId.startsWith('user_'))
+          );
+          if (!isQQChat) {
+            return 'dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用，当前会话不可执行';
+          }
+        }
         if (exec?.name === 'react_message') {
           const isQQGroup = Boolean(
             sessionId &&
