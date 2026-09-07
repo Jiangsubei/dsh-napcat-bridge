@@ -331,7 +331,7 @@ describe('契约 6: 真实生产装配闭环 (Real Assembly Contract via bootDsh
   let tmpHome: string;
   let booted: BootedDsh;
   let client: WebSocket;
-  const WS_PORT = 29891;
+  const WS_PORT = 29892;
   const BOT_QQ = '1000000001';
   const GROUP_ID = 888777;
   const USER_QQ = '2000000008';

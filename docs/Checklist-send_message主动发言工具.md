@@ -53,5 +53,5 @@
 - [x] F4 兜底：0 次 send → 终答补发；≥1 次 → 不补发
 - [x] F5 首调引用：同轮多次 send_message 仅首条带引用/艾特
 - [x] F6 锚定修复：emoji_like 事件入站后，回复引用的仍是回合起始消息（真实装配测试）
-- [ ] F7 pnpm test 全绿 + pnpm build 通过 + dist 含改动；未引入新 npm 依赖
+- [x] F7 pnpm test 全绿 + pnpm build 通过 + dist 含改动；未引入新 npm 依赖
 - [ ] F8 真机验证项（如实标注未做/待验）：QQ 群实测多次 send 引用行为 + 贴表情后回复引用正常
