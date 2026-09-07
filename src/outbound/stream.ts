@@ -69,6 +69,8 @@ export type InboundReplyContextInput =
       from_user?: string;
       is_group?: boolean;
       trigger?: string;
+      is_synthetic?: boolean;
+      synthetic?: boolean;
     };
 
 export class OutboundStreamBridge {
@@ -119,6 +121,10 @@ export class OutboundStreamBridge {
    */
   updateActiveTurnContext(peer: string, context: InboundReplyContextInput): void {
     if (!peer || !context) return;
+    // 防御保护：若 context 标记为合成/notice，严禁更新活跃 Turn 的真实锚点
+    if ((context as any).is_synthetic || (context as any).synthetic) {
+      return;
+    }
     this.inboundContexts.set(peer, context);
     const currentTurn = this.activeTurns.get(peer);
     if (currentTurn !== undefined) {
@@ -129,6 +135,41 @@ export class OutboundStreamBridge {
       }
       peerMap.set(currentTurn, context);
     }
+  }
+
+  /**
+   * 获取指定 peer 当前活跃回合的回复上下文锚点。
+   * 优先从当前活跃 Turn 获取；若当前无活跃 Turn，回退至 peer 级保底上下文。
+   */
+  getActiveTurnContext(peer: string): InboundReplyContextInput | undefined {
+    if (!peer) return undefined;
+
+    const normalized = typeof (this.options.sessionManager as any)?.sessionIdToPeer === 'function'
+      ? (this.options.sessionManager as any).sessionIdToPeer(peer)
+      : peer;
+
+    const candidates = [peer, normalized];
+    for (const p of candidates) {
+      const activeTurn = this.activeTurns.get(p);
+      if (activeTurn !== undefined) {
+        const turnCtx = this.turnContexts.get(p)?.get(activeTurn);
+        if (turnCtx) return turnCtx;
+      }
+    }
+
+    for (const p of candidates) {
+      const fallback = this.inboundContexts.get(p);
+      if (fallback) return fallback;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * 兼容方法：获取 peer 的回复上下文 (等同于 getActiveTurnContext)
+   */
+  getInboundContext(peer: string): InboundReplyContextInput | undefined {
+    return this.getActiveTurnContext(peer);
   }
 
   /**
@@ -185,7 +226,9 @@ export class OutboundStreamBridge {
               peerMap = new Map();
               this.turnContexts.set(peer, peerMap);
             }
-            peerMap.set(turn, entry.context);
+            if (!peerMap.has(turn)) {
+              peerMap.set(turn, entry.context);
+            }
             break;
           }
         }
@@ -206,7 +249,9 @@ export class OutboundStreamBridge {
             peerMap = new Map();
             this.turnContexts.set(peer, peerMap);
           }
-          peerMap.set(currentTurn, context);
+          if (!peerMap.has(currentTurn)) {
+            peerMap.set(currentTurn, context);
+          }
         }
       }
       return;
@@ -216,11 +261,11 @@ export class OutboundStreamBridge {
     if (event.type === 'turn/end') {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
-        this.turnContexts.get(peer)?.delete(turn);
         this.turnFirstSent.delete(`${peer}:${turn}`);
         if (this.activeTurns.get(peer) === turn) {
           this.activeTurns.delete(peer);
         }
+        this.turnContexts.get(peer)?.delete(turn);
       }
       return;
     }
@@ -239,7 +284,7 @@ export class OutboundStreamBridge {
       }
       // 仅在未带 turn 的非轮次/兼容单值路径下回退到 peer 保底
       if (!inbound && turn === undefined) {
-        inbound = this.inboundContexts.get(peer);
+        inbound = this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
       }
 
       const turnKey = turn !== undefined ? `${peer}:${turn}` : undefined;
@@ -290,11 +335,28 @@ export class OutboundStreamBridge {
     }
 
     // 跨触发隔离加固：若显式指定了 options（含 options.inbound），以本次 inbound 为准；
-    // 仅在未指定 options.inbound 时回退到 peer 保底。
+    // 仅在未指定 options.inbound 时回退到当前活跃 Turn 锚点或 peer 保底。
     const inbound = (options && 'inbound' in options)
       ? options.inbound
-      : this.inboundContexts.get(peer);
-    if (!inbound || (!inbound.msg_id && !inbound.from_user)) {
+      : this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
+    if (!inbound) {
+      return text;
+    }
+
+    // 防御保护：若 inbound 被标记为合成/notice，严禁生成 reply 段，出站自动降级为纯文本
+    const isSynthetic =
+      Boolean((inbound as any).is_synthetic) ||
+      Boolean((inbound as any).synthetic) ||
+      (inbound as any).trigger === 'poke' ||
+      (inbound as any).trigger === 'idle' ||
+      (inbound as any).trigger === 'notice' ||
+      (inbound as any).notice_type !== undefined;
+
+    if (isSynthetic) {
+      return text;
+    }
+
+    if (!inbound.msg_id && !inbound.from_user) {
       return text;
     }
 
@@ -302,8 +364,14 @@ export class OutboundStreamBridge {
     const quoteOriginal = config.quote_original !== false;
     const atQuestioner = config.at_questioner === true;
 
+    // 校验 msg_id 是否为合法的真实入站消息 ID (正整数且非合成)
+    const isValidReplyMsgId =
+      typeof inbound.msg_id === 'number' &&
+      Number.isSafeInteger(inbound.msg_id) &&
+      inbound.msg_id > 0;
+
     const segments: Array<Record<string, any>> = [];
-    if (quoteOriginal && inbound.msg_id) {
+    if (quoteOriginal && isValidReplyMsgId) {
       segments.push({ type: 'reply', data: { id: inbound.msg_id } });
     }
     if (atQuestioner && inbound.from_user) {
