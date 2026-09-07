@@ -7,20 +7,25 @@ import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-import { DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_BUDGET_CHARS } from '../constants/index.js';
+import { DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_BUDGET_CHARS, resolveDshPath } from '../constants/index.js';
 import type { ActiveUserInfo } from './types.js';
 
 export class MemoryStorage {
   private baseDir: string;
+  private dshHome?: string;
   private sessionCache: Map<string, string> = new Map();
   private userCache: Map<string, string> = new Map();
 
-  constructor(storageDir?: string) {
-    this.baseDir = storageDir ? path.resolve(storageDir) : path.resolve(DEFAULT_MEMORY_DIR);
+  constructor(storageDir?: string, dshHome?: string) {
+    this.dshHome = dshHome;
+    this.baseDir = resolveDshPath(this.dshHome, storageDir, DEFAULT_MEMORY_DIR);
   }
 
-  public setBaseDir(storageDir?: string): void {
-    this.baseDir = storageDir ? path.resolve(storageDir) : path.resolve(DEFAULT_MEMORY_DIR);
+  public setBaseDir(storageDir?: string, dshHome?: string): void {
+    if (dshHome) {
+      this.dshHome = dshHome;
+    }
+    this.baseDir = resolveDshPath(this.dshHome, storageDir, DEFAULT_MEMORY_DIR);
     this.invalidateCache();
   }
 

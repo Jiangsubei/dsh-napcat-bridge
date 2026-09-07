@@ -10,7 +10,6 @@ import { MemoryStorage } from './storage.js';
 import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } from './tools.js';
 import { BackgroundReviewManager } from './review.js';
 import {
-  DEFAULT_MEMORY_DIR,
   DEFAULT_MEMORY_BUDGET_CHARS,
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
@@ -24,6 +23,7 @@ export * from './review.js';
 
 export interface MemoryServiceOptions {
   storageDir?: string;
+  dshHome?: string;
   budgetChars?: number;
   reviewEnabled?: boolean;
   reviewTurnsInterval?: number;
@@ -95,7 +95,7 @@ export function setupMemoryService(
   reviewManager: BackgroundReviewManager;
   dispose: () => void;
 } {
-  const storage = new MemoryStorage(options.storageDir || DEFAULT_MEMORY_DIR);
+  const storage = new MemoryStorage(options.storageDir, options.dshHome);
   const tools = new MemoryTools(storage, ctx);
   const reviewManager = new BackgroundReviewManager(
     ctx,
@@ -103,7 +103,7 @@ export function setupMemoryService(
       enabled: options.reviewEnabled ?? DEFAULT_REVIEW_ENABLED,
       turnsInterval: options.reviewTurnsInterval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
       toolCallsInterval: options.reviewToolCallsInterval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
-      storageDir: options.storageDir || DEFAULT_MEMORY_DIR,
+      storageDir: storage.getBaseDir(),
       reviewModel: options.reviewModel,
       db: options.db,
       sessionManager: options.sessionManager,
