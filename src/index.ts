@@ -169,8 +169,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     inboundMsgIdGetter: (peer: string) => {
       if (!outboundBridge) return undefined;
       const inboundCtx =
+        outboundBridge.getActiveTurnContext?.(peer) ??
         (outboundBridge as any).getInboundContext?.(peer) ??
         (outboundBridge as any).inboundContexts?.get?.(peer);
+      if (inboundCtx && ((inboundCtx as any).is_synthetic || (inboundCtx as any).synthetic)) {
+        return undefined;
+      }
       return inboundCtx?.msg_id;
     },
   });
@@ -954,6 +958,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             from_user: '',
             is_group: isGroup,
             trigger: 'poke',
+            is_synthetic: true,
           };
           outboundBridge.trackInboundContext(payloadPeer, blankContext);
           await sessionManager.dispatchWakeup(decision.payload, {
@@ -990,6 +995,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           from_user: '',
           is_group: isGroup,
           trigger: 'idle',
+          is_synthetic: true,
         };
         outboundBridge.trackInboundContext(payload.peer, blankContext);
         await sessionManager.dispatchWakeup(payload, {
