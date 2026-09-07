@@ -4,6 +4,20 @@
  */
 
 /**
+ * 判断字符串是否"确凿地"像一个 URL（用于链接剥离前甄别，避免误伤字面文本）。
+ * 识别：scheme://、scheme: 协议、www. 前缀、以及带顶级域的域名（可含端口/路径）。
+ */
+function looksLikeUrl(value: string): boolean {
+  return (
+    /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s)]*$/i.test(value) ||
+    /^[a-z][a-z0-9+.-]*:[^\s)]*$/i.test(value) ||
+    /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:\/[^\s)]*)?$/i.test(
+      value
+    )
+  );
+}
+
+/**
  * 剥离 Markdown 格式符号，转换为适合 QQ 客户端阅读的整洁纯文本排版。
  * 遵循规格 §7.2：
  * 1. 标题: #+ Title -> 【Title】
@@ -12,6 +26,13 @@
  * 4. 超链接: [title](url) -> title (url)
  * 5. 表格: 移除 |---| 分隔线，归一化单元格
  * 6. 引用与分割线等语法符号剥离
+ *
+ * 误伤防护（宁可少剥不可误伤）：
+ * - 斜体/粗体的 `*`/`_` 强调符号两侧须紧贴非空白、非数字文字（`3 * 4`、`2 * 3` 不受影响）；
+ * - `*`/`_` 不在单词/标识符内部开强调（`a_b_c`、`read_memory`、`foo_bar_baz` 不受影响）；
+ * - `#` 仅当行首且后跟空白才算标题（`C#` 不受影响）；
+ * - `[text](url)` 仅当 url 确凿为 URL 才展开（字面 `[标题](url)` 文本不受影响）；
+ * - 无闭合的孤立符号（如列表项 `* foo`、`*单独行`）原样保留。
  */
 export function stripMarkdown(markdown: string): string {
   if (!markdown || typeof markdown !== 'string') {
@@ -31,36 +52,39 @@ export function stripMarkdown(markdown: string): string {
   text = text.replace(/`([^`\r\n]+)`/g, '$1');
   text = text.replace(/`/g, '');
 
-  // 3. 处理标题 #+ Title -> 【Title】
-  text = text.replace(/^(\s*)#{1,6}\s+(.+?)(?:\s+#+)?$/gm, '$1【$2】');
+  // 3. 处理标题 #+ Title -> 【Title】；仅行首且 # 后紧跟空白，避免误伤 C#/#tag
+  text = text.replace(/^(\s*)#{1,6}[ \t]+(.+?)(?:\s+#+)?$/gm, '$1【$2】');
 
   // 4. 处理图片链接 ![alt](url) -> [图片: url]
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '[图片: $2]');
 
   // 5. 处理超链接 [text](url) -> text (url)
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+  // 仅当目标确凿为 URL 才展开，字面 [标题](url) 文本原样保留
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (whole, label, url) => {
+    return looksLikeUrl(url) ? `${label} (${url})` : whole;
+  });
 
-  // 6. 处理粗体与斜体
+  // 6. 处理粗体与斜体（两侧约束：非空白、非数字、不跨单词字符，宁可少剥不可误伤）
   // 粗斜体 ***text*** 或 ___text___
-  text = text.replace(/\*\*\*([^*\n]+)\*\*\*/g, '$1');
-  text = text.replace(/___([^_]+)___/g, '$1');
+  text = text.replace(/(?<!\w)\*\*\*(?![\s\d])([^*\n]+?)(?<![\s\d])\*\*\*(?!\w)/g, '$1');
+  text = text.replace(/(?<!\w)___(?!\s)([^_\n]+?)(?<!\s)___(?!\w)/g, '$1');
   // 粗体 **text** 或 __text__
-  text = text.replace(/\*\*([^*\n]+)\*\*/g, '$1');
-  text = text.replace(/__([^_]+)__/g, '$1');
+  text = text.replace(/(?<!\w)\*\*(?![\s\d])([^*\n]+?)(?<![\s\d])\*\*(?!\w)/g, '$1');
+  text = text.replace(/(?<!\w)__(?!\s)([^_\n]+?)(?<!\s)__(?!\w)/g, '$1');
   // 斜体 *text*
-  text = text.replace(/\*([^*\n]+)\*/g, '$1');
+  text = text.replace(/(?<!\w)\*(?![\s\d])([^*\n]+?)(?<![\s\d])\*(?!\w)/g, '$1');
   // 斜体 _text_
-  text = text.replace(/_([^_]+)_/g, '$1');
+  text = text.replace(/(?<!\w)_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)/g, '$1');
 
-  // 7. 处理删除线 ~~text~~ -> text
-  text = text.replace(/~~([^~\n]+)~~/g, '$1');
+  // 7. 处理删除线 ~~text~~ -> text（两侧约束：非空白）
+  text = text.replace(/(?<!\s)~~(?!\s)([^~\n]+?)(?<!\s)~~(?!\s)/g, '$1');
 
-  // 8. 处理表格
+  // 8. 处理表格（仅用 [ \t]，避免 \s 吞换行造成表格行粘连）
   // 移除表格表头分隔线 |---|---| 或 |:---|---:|
-  text = text.replace(/^\s*\|?(\s*:?-+:?\s*\|)+\s*(:?-+:?\s*)?\|?\s*$/gm, '');
+  text = text.replace(/^[ \t]*\|?([ \t]*:?-+:?[ \t]*\|)+[ \t]*(:?-+:?[ \t]*)?\|?[ \t]*$/gm, '');
 
   // 格式化普通表格数据行 | a | b | -> a | b
-  text = text.replace(/^\s*\|\s*(.*?)\s*\|\s*$/gm, (_match, rowContent) => {
+  text = text.replace(/^[ \t]*\|[ \t]*(.*?)[ \t]*\|[ \t]*$/gm, (_match, rowContent) => {
     const cells = rowContent
       .split('|')
       .map((c: string) => c.trim())
@@ -68,8 +92,8 @@ export function stripMarkdown(markdown: string): string {
     return cells.join(' | ');
   });
 
-  // 9. 处理引用块 > text -> text
-  text = text.replace(/^(\s*)>\s?/gm, '$1');
+  // 9. 处理引用块 > text -> text（仅当 > 后紧跟空格/Tab，避免误伤行首比较式）
+  text = text.replace(/^(\s*)>[ \t]/gm, '$1');
 
   // 10. 去除行尾多余空白，收缩多余空行 (至多保留连续两换行)
   text = text.replace(/[ \t]+$/gm, '');
