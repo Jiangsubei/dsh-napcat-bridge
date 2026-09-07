@@ -16,7 +16,7 @@ import { SessionManager } from './gateway/session.js';
 import { shouldWakeup, parseNormalizedContent, resolveAtNicknames } from './gateway/wakeup.js';
 import { CachedGroupMemberResolver } from './gateway/members.js';
 import { ProactiveManager } from './gateway/proactive.js';
-import { registerAgentTools } from './tools/index.js';
+import { registerAgentTools, setGlobalToolContext } from './tools/index.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
@@ -182,6 +182,11 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       }
       return inboundCtx?.msg_id;
     },
+    formatOutboundPayload: (peer: string, text: string, chunkIndex: number) => {
+      return outboundBridge
+        ? outboundBridge.buildSendMessagePayload(peer, text, chunkIndex)
+        : text;
+    },
   });
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
@@ -328,6 +333,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger,
   });
   sessionManager.setOutboundBridge?.(outboundBridge);
+  setGlobalToolContext({ outboundBridge });
   const stopOutboundBridge = outboundBridge.start();
 
   // 6. 审批 waterfall 响应器（独立于提问 provider，不注册 userQuestions 以避免与官方冲突）
