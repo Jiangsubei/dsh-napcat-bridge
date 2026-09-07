@@ -37,6 +37,7 @@ import type { SerialSender } from '../types/index.js';
 import { classifySendFileSource, detectSendFileType } from './file-source.js';
 import { downloadPrivateFile } from './private-file.js';
 import { stripMarkdown } from '../outbound/render.js';
+import type { OutboundStreamBridge } from '../outbound/stream.js';
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -52,6 +53,10 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
   /** 当前回合入站消息 ID 获取器（react_message 省略 message_id 时默认绑定） */
   inboundMsgIdGetter?: (peer: string) => number | undefined;
+  /** 出站流桥接器 (阶段 5 首调引用规则) */
+  outboundBridge?: OutboundStreamBridge | null;
+  /** 自定义出站载荷格式化器 (可选透传) */
+  formatOutboundPayload?: (peer: string, text: string, chunkIndex: number) => string | Array<Record<string, any>>;
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -674,8 +679,13 @@ export async function sendMessage(
   let lastMessageId: number | undefined;
 
   try {
-    for (const chunk of chunks) {
-      const sendTask = () => ctx.gateway!.sendMsg(peer, chunk);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const payload =
+        ctx.formatOutboundPayload?.(peer, chunk, i) ??
+        ctx.outboundBridge?.buildSendMessagePayload?.(peer, chunk, i) ??
+        chunk;
+      const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
       const res = ctx.sender
         ? await ctx.sender.enqueue(peer, sendTask)
         : await sendTask();
@@ -719,6 +729,8 @@ export function registerAgentTools(
     dshHome?: string;
     waitRegistry?: MessageWaitRegistry;
     inboundMsgIdGetter?: (peer: string) => number | undefined;
+    outboundBridge?: OutboundStreamBridge | null;
+    formatOutboundPayload?: (peer: string, text: string, chunkIndex: number) => string | Array<Record<string, any>>;
   }
 ): () => void {
   setGlobalToolContext({
@@ -728,6 +740,8 @@ export function registerAgentTools(
     sender: options.sender,
     waitRegistry: options.waitRegistry,
     inboundMsgIdGetter: options.inboundMsgIdGetter,
+    outboundBridge: options.outboundBridge,
+    formatOutboundPayload: options.formatOutboundPayload,
   });
 
   const unregisters: Array<() => void> = [];
@@ -1148,6 +1162,8 @@ export function registerAgentTools(
             gateway: options.gateway,
             sender: options.sender,
             peer,
+            outboundBridge: options.outboundBridge,
+            formatOutboundPayload: options.formatOutboundPayload,
           })) as any;
         },
       })
