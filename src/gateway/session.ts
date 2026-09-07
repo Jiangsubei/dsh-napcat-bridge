@@ -119,7 +119,11 @@ export class SessionManager {
           });
           if (rec.model_provider && rec.model_name) {
             this.selectionMap.set(rec.current_session_id, {
-              current: { provider: rec.model_provider, model: rec.model_name },
+              current: {
+                provider: rec.model_provider,
+                model: rec.model_name,
+                ...(rec.model_reasoning_effort ? { reasoningEffort: rec.model_reasoning_effort as any } : {}),
+              },
               assembled: undefined,
             });
           }
@@ -204,6 +208,7 @@ export class SessionManager {
       for (const st of allStates) {
         st.model_provider = provider;
         st.model_name = model;
+        st.model_reasoning_effort = reasoningEffort ?? undefined;
         this.db.saveSessionState(st);
       }
     }
@@ -265,6 +270,7 @@ export class SessionManager {
       if (state) {
         state.model_provider = provider;
         state.model_name = model;
+        state.model_reasoning_effort = reasoningEffort ?? undefined;
         this.db.saveSessionState(state);
       }
     }
