@@ -23,6 +23,8 @@ import type {
   ForwardNode,
   ReactMessageParams,
   ReactMessageResult,
+  SendMessageParams,
+  SendMessageResult,
 } from '../types/index.js';
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
@@ -34,6 +36,7 @@ import type { MessageWaitRegistry, WaitCollectedMessage } from '../gateway/serve
 import type { SerialSender } from '../types/index.js';
 import { classifySendFileSource, detectSendFileType } from './file-source.js';
 import { downloadPrivateFile } from './private-file.js';
+import { stripMarkdown } from '../outbound/render.js';
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -597,6 +600,113 @@ export async function reactMessage(
 }
 
 /**
+ * 将文本按最大长度分段（默认 1500 字符），优先在换行处断句，其次在空格处断句。
+ */
+export function splitMessageText(text: string, maxLength = 1500): string[] {
+  if (!text) return [];
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    let splitIdx = remaining.lastIndexOf('\n', maxLength);
+    if (splitIdx < Math.floor(maxLength * 0.5)) {
+      splitIdx = remaining.lastIndexOf(' ', maxLength);
+    }
+    if (splitIdx < Math.floor(maxLength * 0.5)) {
+      splitIdx = maxLength;
+    }
+    const chunk = remaining.slice(0, splitIdx).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitIdx).trim();
+  }
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+  return chunks;
+}
+
+/**
+ * 6.9 主动发言工具 (send_message)
+ * 大模型向当前普通 QQ 会话（群聊/私聊）主动发送文本消息。
+ *
+ * 走现有共享 per-peer 串行队列 + stripMarkdown 转换为纯文本；超长文本自动分段；
+ * 成功返回 message_id 与 sent_preview。
+ */
+export async function sendMessage(
+  params: SendMessageParams,
+  context?: ToolExecutionContext
+): Promise<SendMessageResult> {
+  const ctx = { ...globalToolContext, ...context };
+
+  // 1. 参数非空校验（空文本/纯空白/stripMarkdown 后为空）
+  if (!params || typeof params.text !== 'string') {
+    return { success: false, error: '发送内容不能为空。' };
+  }
+  const plainText = stripMarkdown(params.text).trim();
+  if (!plainText) {
+    return { success: false, error: '发送内容不能为空。' };
+  }
+
+  // 2. 防御守卫：校验 QQ 会话上下文（隔离 WebUI、review 沙箱、加好友 session 等）
+  const rawPeer = ctx.peer || '';
+  const peer = normalizePeer(rawPeer);
+  const isQQ =
+    Boolean(rawPeer) &&
+    !rawPeer.startsWith('review-') &&
+    !rawPeer.startsWith('friend-request-') &&
+    !rawPeer.startsWith('web-') &&
+    (peer.startsWith('group_') || peer.startsWith('user_'));
+
+  if (!isQQ) {
+    return { success: false, error: 'send_message 需在 QQ 会话中执行' };
+  }
+
+  // 3. 网关可用性校验
+  if (!ctx.gateway) {
+    return { success: false, error: '消息发送失败: NapCat 未连接 (gateway 不可用)' };
+  }
+
+  // 4. 超长文本自动分段并经串行队列分批发送
+  const chunks = splitMessageText(plainText, 1500);
+  let lastMessageId: number | undefined;
+
+  try {
+    for (const chunk of chunks) {
+      const sendTask = () => ctx.gateway!.sendMsg(peer, chunk);
+      const res = ctx.sender
+        ? await ctx.sender.enqueue(peer, sendTask)
+        : await sendTask();
+
+      if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
+        const detail = res.wording || res.message || res.retcode;
+        return { success: false, error: `消息发送失败: ${detail}` };
+      }
+
+      const mid = res?.data?.message_id;
+      if (mid !== undefined && mid !== null && mid !== '') {
+        lastMessageId = Number(mid);
+      }
+    }
+  } catch (err: any) {
+    return { success: false, error: `消息发送失败: ${err?.message || '未知错误'}` };
+  }
+
+  if (lastMessageId === undefined || Number.isNaN(lastMessageId)) {
+    return { success: false, error: '消息发送失败: 未返回 message_id' };
+  }
+
+  const sent_preview = plainText.length > 60 ? `${plainText.slice(0, 60)}...` : plainText;
+  return {
+    success: true,
+    message_id: lastMessageId,
+    sent_preview,
+  };
+}
+
+/**
  * 注册 Agent 工具集至 DSH 工具运行时 (ctx.tools)
  */
 export function registerAgentTools(
@@ -981,6 +1091,77 @@ export function registerAgentTools(
         })
       )
     );
+
+    // 9. send_message
+    // 若系统已存在全局 send_message (如 @deepseek-ai/dsh-tool-subagent-control)，
+    // 先暂存并从 global layer 移除，以便注册 NapCat 的 send_message 工具；
+    // unregister 时还原，确保优雅卸载。
+    let previousEntry: any = undefined;
+    const globalToolsTable = (tools as any)?.layers?.global?.tools;
+    if (globalToolsTable && typeof globalToolsTable.has === 'function' && globalToolsTable.has('send_message')) {
+      previousEntry = globalToolsTable.get('send_message');
+      if (globalToolsTable.data && typeof globalToolsTable.data.delete === 'function') {
+        globalToolsTable.data.delete('send_message');
+      }
+    }
+
+    const unregSendMessage = tools.register(
+      defineTool({
+        name: 'send_message',
+        description:
+          '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
+          '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
+          '- 任务完成时：发送最终答复（务必用本工具发）\n' +
+          '- 每条 text 为一条独立 QQ 消息，过长自动分段',
+        parameters: {
+          text: {
+            type: 'string',
+            required: true,
+            description: '要发送给用户的文本内容',
+          },
+        },
+        output: {
+          schema: { type: 'json' },
+          render: (_args, value) => {
+            const v = value as any;
+            if (v?.success) {
+              return [
+                {
+                  type: 'text',
+                  text: `消息发送成功 (message_id: ${v.message_id})${v.sent_preview ? `\n预览: ${v.sent_preview}` : ''}`,
+                },
+              ];
+            }
+            return [
+              {
+                type: 'text',
+                text: `消息发送失败: ${v?.error}`,
+              },
+            ];
+          },
+        },
+        async execute(args, exec) {
+          const session = (exec.agent as any)?.session;
+          const rawPeer = session?.id || (exec.agent as any)?.sessionId || (exec.agent as any)?.id || '';
+          const peer = normalizePeer(rawPeer);
+          return (await sendMessage(args, {
+            gateway: options.gateway,
+            sender: options.sender,
+            peer,
+          })) as any;
+        },
+      })
+    );
+
+    unregisters.push(() => {
+      try {
+        unregSendMessage();
+      } finally {
+        if (previousEntry && globalToolsTable?.data) {
+          globalToolsTable.data.set('send_message', previousEntry);
+        }
+      }
+    });
   };
 
   const initialTools = ctx.get('tools') || (ctx as any).tools;
