@@ -19,7 +19,8 @@ import {
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { formatDateTime, type MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
-import { DEFAULT_WORKSPACE_ROOT, resolveDshPath } from '../constants/index.js';
+import { DEFAULT_WORKSPACE_ROOT } from '../constants/index.js';
+import { resolveDshPath } from '../utils/path.js';
 
 export interface ParsedSessionId {
   peer: string;

@@ -7,7 +7,8 @@ import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-import { DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_BUDGET_CHARS, resolveDshPath } from '../constants/index.js';
+import { DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_BUDGET_CHARS } from '../constants/index.js';
+import { resolveDshPath } from '../utils/path.js';
 import type { ActiveUserInfo } from './types.js';
 
 export class MemoryStorage {
