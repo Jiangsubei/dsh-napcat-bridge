@@ -21,7 +21,7 @@ const EXPECTED_PROMPT_TEXT = `# 如何发送消息
 你正在 QQ 聊天中与用户对话。
 
 【如何把内容送达用户】
-- 想向用户发送文字/答复，必须调用 send_qq_message 工具。请勿直接在回复正文中回复，写在回复正文里的文字不会发送给用户。`;
+- 想向用户发送文字/答复，必须调用 send_qq_message 工具。`;
 
 describe('契约测试: QQ 会话专属动态提示词段 (QQ Scenario Dynamic Prompt)', () => {
   let tmpHome: string;
@@ -59,7 +59,6 @@ describe('契约测试: QQ 会话专属动态提示词段 (QQ Scenario Dynamic P
     expect(qqScenarioCtx?.text).toBe(EXPECTED_PROMPT_TEXT);
     expect(qqScenarioCtx?.text).toContain('# 如何发送消息');
     expect(qqScenarioCtx?.text).toContain('必须调用 send_qq_message 工具');
-    expect(qqScenarioCtx?.text).toContain('写在回复正文里的文字不会发送给用户');
     // 严禁告知 turn/end 兜底机制（隐形安全网）
     expect(qqScenarioCtx?.text).not.toContain('turn/end');
     expect(qqScenarioCtx?.text).not.toContain('兜底');
