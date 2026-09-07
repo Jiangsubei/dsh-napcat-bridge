@@ -22,7 +22,7 @@ import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
-import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
+import { registerNapCatDynamicPrompt, registerQQScenarioDynamicPrompt } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
 
 export * from './memory/index.js';
@@ -130,7 +130,11 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   // EN-001: 群成员昵称解析器（at 段被@者昵称，TTL 缓存避免每条消息多次 get_group_member_info）
   const memberResolver = new CachedGroupMemberResolver(server);
 
-  // 2. 注册 System Prompt 动态上下文段 (仅对 QQ 会话注入助手人格与行为准则，保护静态 KV 缓存)
+  // 2. 注册 System Prompt 动态上下文段
+  // 2.1 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario, order: 10，最前，引导 send_message 主动发言)
+  const unregisterQQScenarioPrompt = registerQQScenarioDynamicPrompt(ctx);
+
+  // 2.2 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
   const unregisterDynamicPrompt = registerNapCatDynamicPrompt(
     ctx,
     () => currentConfig().persona || '',
@@ -1045,6 +1049,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
     if (typeof unregisterQuestionChannel === 'function') {
       unregisterQuestionChannel();
+    }
+    if (typeof unregisterQQScenarioPrompt === 'function') {
+      unregisterQQScenarioPrompt();
     }
     if (typeof unregisterDynamicPrompt === 'function') {
       unregisterDynamicPrompt();
