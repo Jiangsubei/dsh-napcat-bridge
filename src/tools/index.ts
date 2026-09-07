@@ -23,11 +23,19 @@ import type {
   ForwardNode,
   ReactMessageParams,
   ReactMessageResult,
+  SendQqMessageParams,
+  SendQqMessageResult,
   SendMessageParams,
   SendMessageResult,
 } from '../types/index.js';
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
+export type {
+  SendQqMessageParams,
+  SendQqMessageResult,
+  SendMessageParams,
+  SendMessageResult,
+};
 import type { MessageDatabase } from '../storage/database.js';
 import { formatDateTime } from '../storage/database.js';
 import type { MediaStorageManager } from '../storage/media.js';
@@ -634,16 +642,16 @@ export function splitMessageText(text: string, maxLength = 1500): string[] {
 }
 
 /**
- * 6.9 主动发言工具 (send_message)
+ * 6.9 主动发言工具 (send_qq_message)
  * 大模型向当前普通 QQ 会话（群聊/私聊）主动发送文本消息。
  *
  * 走现有共享 per-peer 串行队列 + stripMarkdown 转换为纯文本；超长文本自动分段；
  * 成功返回 message_id 与 sent_preview。
  */
-export async function sendMessage(
-  params: SendMessageParams,
+export async function sendQqMessage(
+  params: SendQqMessageParams,
   context?: ToolExecutionContext
-): Promise<SendMessageResult> {
+): Promise<SendQqMessageResult> {
   const ctx = { ...globalToolContext, ...context };
 
   // 1. 参数非空校验（空文本/纯空白/stripMarkdown 后为空）
@@ -666,7 +674,7 @@ export async function sendMessage(
     (peer.startsWith('group_') || peer.startsWith('user_'));
 
   if (!isQQ) {
-    return { success: false, error: 'send_message 需在 QQ 会话中执行' };
+    return { success: false, error: 'send_qq_message 需在 QQ 会话中执行' };
   }
 
   // 3. 超长文本自动分段并经串行队列分批发送
@@ -678,6 +686,7 @@ export async function sendMessage(
       const chunk = chunks[i];
       const payload =
         ctx.formatOutboundPayload?.(peer, chunk, i) ??
+        ctx.outboundBridge?.buildSendQqMessagePayload?.(peer, chunk, i) ??
         ctx.outboundBridge?.buildSendMessagePayload?.(peer, chunk, i) ??
         chunk;
       const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
@@ -710,6 +719,8 @@ export async function sendMessage(
     sent_preview,
   };
 }
+
+export const sendMessage = sendQqMessage;
 
 /**
  * 注册 Agent 工具集至 DSH 工具运行时 (ctx.tools)
@@ -1101,78 +1112,58 @@ export function registerAgentTools(
       )
     );
 
-    // 9. send_message
-    // 若系统已存在全局 send_message (如 @deepseek-ai/dsh-tool-subagent-control)，
-    // 先暂存并从 global layer 移除，以便注册 NapCat 的 send_message 工具；
-    // unregister 时还原，确保优雅卸载。
-    let previousEntry: any = undefined;
-    const globalToolsTable = (tools as any)?.layers?.global?.tools;
-    if (globalToolsTable && typeof globalToolsTable.has === 'function' && globalToolsTable.has('send_message')) {
-      previousEntry = globalToolsTable.get('send_message');
-      if (globalToolsTable.data && typeof globalToolsTable.data.delete === 'function') {
-        globalToolsTable.data.delete('send_message');
-      }
-    }
-
-    const unregSendMessage = tools.register(
-      defineTool({
-        name: 'send_message',
-        description:
-          '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
-          '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
-          '- 任务完成时：发送最终答复（务必用本工具发）\n' +
-          '- 每条 text 为一条独立 QQ 消息，过长自动分段',
-        parameters: {
-          text: {
-            type: 'string',
-            required: true,
-            description: '要发送给用户的文本内容',
+    // 9. send_qq_message
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'send_qq_message',
+          description:
+            '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
+            '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
+            '- 任务完成时：发送最终答复（务必用本工具发）\n' +
+            '- 每条 text 为一条独立 QQ 消息，过长自动分段',
+          parameters: {
+            text: {
+              type: 'string',
+              required: true,
+              description: '要发送给用户的文本内容',
+            },
           },
-        },
-        output: {
-          schema: { type: 'json' },
-          render: (_args, value) => {
-            const v = value as any;
-            if (v?.success) {
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => {
+              const v = value as any;
+              if (v?.success) {
+                return [
+                  {
+                    type: 'text',
+                    text: `消息发送成功 (message_id: ${v.message_id})${v.sent_preview ? `\n预览: ${v.sent_preview}` : ''}`,
+                  },
+                ];
+              }
               return [
                 {
                   type: 'text',
-                  text: `消息发送成功 (message_id: ${v.message_id})${v.sent_preview ? `\n预览: ${v.sent_preview}` : ''}`,
+                  text: `消息发送失败: ${v?.error}`,
                 },
               ];
-            }
-            return [
-              {
-                type: 'text',
-                text: `消息发送失败: ${v?.error}`,
-              },
-            ];
+            },
           },
-        },
-        async execute(args, exec) {
-          const session = (exec.agent as any)?.session;
-          const rawPeer = session?.id || (exec.agent as any)?.sessionId || (exec.agent as any)?.id || '';
-          const peer = normalizePeer(rawPeer);
-          return (await sendMessage(args, {
-            gateway: options.gateway,
-            sender: options.sender,
-            peer,
-            outboundBridge: options.outboundBridge,
-            formatOutboundPayload: options.formatOutboundPayload,
-          })) as any;
-        },
-      })
+          async execute(args, exec) {
+            const session = (exec.agent as any)?.session;
+            const rawPeer = session?.id || (exec.agent as any)?.sessionId || (exec.agent as any)?.id || '';
+            const peer = normalizePeer(rawPeer);
+            return (await sendQqMessage(args, {
+              gateway: options.gateway,
+              sender: options.sender,
+              peer,
+              outboundBridge: options.outboundBridge,
+              formatOutboundPayload: options.formatOutboundPayload,
+            })) as any;
+          },
+        })
+      )
     );
-
-    unregisters.push(() => {
-      try {
-        unregSendMessage();
-      } finally {
-        if (previousEntry && globalToolsTable?.data) {
-          globalToolsTable.data.set('send_message', previousEntry);
-        }
-      }
-    });
   };
 
   const initialTools = ctx.get('tools') || (ctx as any).tools;

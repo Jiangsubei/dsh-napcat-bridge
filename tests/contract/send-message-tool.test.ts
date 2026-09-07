@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Context } from '@deepseek-ai/cordis';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import {
+  sendQqMessage,
   sendMessage,
   splitMessageText,
   registerAgentTools,
@@ -70,7 +71,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     };
   }
 
-  it('1.1 QQ 群聊 Session (qq-group-* / group_*) 下 prompt 装配保留 send_message，guard 放行', async () => {
+  it('1.1 QQ 群聊 Session (qq-group-* / group_*) 下 prompt 装配保留 send_qq_message，guard 放行', async () => {
     const { getAssembleHandler, getGuardFn } = setupTestApp();
     const handler = getAssembleHandler()!;
     expect(handler).toBeDefined();
@@ -78,7 +79,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     const mockNext = async () => ({
       tools: [
         { name: 'read_chat_history' },
-        { name: 'send_message' },
+        { name: 'send_qq_message' },
         { name: 'react_message' },
       ],
     });
@@ -89,7 +90,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       { agent: { session: { id: 'qq-group-10001' } } },
       mockNext
     );
-    expect(res1.tools.map((t: any) => t.name)).toContain('send_message');
+    expect(res1.tools.map((t: any) => t.name)).toContain('send_qq_message');
 
     // 1.1.2 group_ 前缀
     const res2 = await handler(
@@ -97,22 +98,22 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       { agent: { session: { id: 'group_10001' } } },
       mockNext
     );
-    expect(res2.tools.map((t: any) => t.name)).toContain('send_message');
+    expect(res2.tools.map((t: any) => t.name)).toContain('send_qq_message');
 
     // guard 校验放行
     const guard = getGuardFn()!;
-    expect(guard({ name: 'send_message', agent: { session: { id: 'qq-group-10001' } } })).toBeUndefined();
-    expect(guard({ name: 'send_message', agent: { session: { id: 'group_10001' } } })).toBeUndefined();
+    expect(guard({ name: 'send_qq_message', agent: { session: { id: 'qq-group-10001' } } })).toBeUndefined();
+    expect(guard({ name: 'send_qq_message', agent: { session: { id: 'group_10001' } } })).toBeUndefined();
   });
 
-  it('1.2 QQ 私聊 Session (qq-user-* / user_*) 下 prompt 装配保留 send_message，guard 放行（与 react_message 仅群聊不同）', async () => {
+  it('1.2 QQ 私聊 Session (qq-user-* / user_*) 下 prompt 装配保留 send_qq_message，guard 放行（与 react_message 仅群聊不同）', async () => {
     const { getAssembleHandler, getGuardFn } = setupTestApp();
     const handler = getAssembleHandler()!;
 
     const mockNext = async () => ({
       tools: [
         { name: 'read_chat_history' },
-        { name: 'send_message' },
+        { name: 'send_qq_message' },
         { name: 'react_message' },
       ],
     });
@@ -124,7 +125,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       mockNext
     );
     const toolNames1 = res1.tools.map((t: any) => t.name);
-    expect(toolNames1).toContain('send_message');
+    expect(toolNames1).toContain('send_qq_message');
     expect(toolNames1).not.toContain('react_message'); // react_message 私聊应被过滤
 
     // 1.2.2 user_ 前缀
@@ -134,22 +135,22 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       mockNext
     );
     const toolNames2 = res2.tools.map((t: any) => t.name);
-    expect(toolNames2).toContain('send_message');
+    expect(toolNames2).toContain('send_qq_message');
     expect(toolNames2).not.toContain('react_message');
 
     // guard 校验放行
     const guard = getGuardFn()!;
-    expect(guard({ name: 'send_message', agent: { session: { id: 'qq-user-20002' } } })).toBeUndefined();
-    expect(guard({ name: 'send_message', agent: { session: { id: 'user_20002' } } })).toBeUndefined();
+    expect(guard({ name: 'send_qq_message', agent: { session: { id: 'qq-user-20002' } } })).toBeUndefined();
+    expect(guard({ name: 'send_qq_message', agent: { session: { id: 'user_20002' } } })).toBeUndefined();
   });
 
-  it('1.3 非 QQ 会话 (Web UI web-*) 下 prompt 装配过滤 send_message，guard 拦截拒执行', async () => {
+  it('1.3 非 QQ 会话 (Web UI web-*) 下 prompt 装配过滤 send_qq_message，guard 拦截拒执行', async () => {
     const { getAssembleHandler, getGuardFn } = setupTestApp();
     const handler = getAssembleHandler()!;
 
     const mockNext = async () => ({
       tools: [
-        { name: 'send_message' },
+        { name: 'send_qq_message' },
         { name: 'other_tool' },
       ],
     });
@@ -159,22 +160,22 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       { agent: { session: { id: 'web-session-test' } } },
       mockNext
     );
-    expect(res.tools.map((t: any) => t.name)).not.toContain('send_message');
+    expect(res.tools.map((t: any) => t.name)).not.toContain('send_qq_message');
     expect(res.tools.map((t: any) => t.name)).toContain('other_tool');
 
     const guard = getGuardFn()!;
-    const decision = guard({ name: 'send_message', agent: { session: { id: 'web-session-test' } } });
-    expect(decision).toBe('dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
+    const decision = guard({ name: 'send_qq_message', agent: { session: { id: 'web-session-test' } } });
+    expect(decision).toBe('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
   });
 
-  it('1.4 Background Review 沙箱 (review-*) 下严禁注册 send_message，guard 拦截拒执行', async () => {
+  it('1.4 Background Review 沙箱 (review-*) 下严禁注册 send_qq_message，guard 拦截拒执行', async () => {
     const { getAssembleHandler, getGuardFn } = setupTestApp();
     const handler = getAssembleHandler()!;
 
     const mockNext = async () => ({
       tools: [
         { name: 'read_memory' },
-        { name: 'send_message' },
+        { name: 'send_qq_message' },
       ],
     });
 
@@ -183,21 +184,21 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       { agent: { session: { id: 'review-group_10001' } } },
       mockNext
     );
-    expect(res.tools.map((t: any) => t.name)).not.toContain('send_message');
+    expect(res.tools.map((t: any) => t.name)).not.toContain('send_qq_message');
     expect(res.tools.map((t: any) => t.name)).toContain('read_memory');
 
     const guard = getGuardFn()!;
-    const decision = guard({ name: 'send_message', agent: { session: { id: 'review-group_10001' } } });
-    expect(decision).toBe('dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
+    const decision = guard({ name: 'send_qq_message', agent: { session: { id: 'review-group_10001' } } });
+    expect(decision).toBe('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
   });
 
-  it('1.5 加好友专用 Session (friend-request-*) 下严禁注册 send_message，guard 拦截拒执行', async () => {
+  it('1.5 加好友专用 Session (friend-request-*) 下严禁注册 send_qq_message，guard 拦截拒执行', async () => {
     const { getAssembleHandler, getGuardFn } = setupTestApp();
     const handler = getAssembleHandler()!;
 
     const mockNext = async () => ({
       tools: [
-        { name: 'send_message' },
+        { name: 'send_qq_message' },
       ],
     });
 
@@ -206,11 +207,11 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
       { agent: { session: { id: 'friend-request-30003' } } },
       mockNext
     );
-    expect(res.tools.map((t: any) => t.name)).not.toContain('send_message');
+    expect(res.tools.map((t: any) => t.name)).not.toContain('send_qq_message');
 
     const guard = getGuardFn()!;
-    const decision = guard({ name: 'send_message', agent: { session: { id: 'friend-request-30003' } } });
-    expect(decision).toBe('dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
+    const decision = guard({ name: 'send_qq_message', agent: { session: { id: 'friend-request-30003' } } });
+    expect(decision).toBe('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用，当前会话不可执行');
   });
 
   it('1.6 defineTool 声明工具名、参数与描述完全对齐需求规范 §1.5', () => {
@@ -219,7 +220,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     ctx.provide('tools');
     ctx.set('tools', {
       register: (tool: any) => {
-        if (tool.name === 'send_message') {
+        if (tool.name === 'send_qq_message') {
           registeredTool = tool;
         }
         return () => {};
@@ -233,7 +234,7 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     });
 
     expect(registeredTool).toBeDefined();
-    expect(registeredTool.name).toBe('send_message');
+    expect(registeredTool.name).toBe('send_qq_message');
     expect(registeredTool.description).toBe(
       '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
       '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
@@ -436,7 +437,7 @@ describe('契约 4: 成功发送并返回 message_id 与 sent_preview，消息�
     ctx.provide('tools');
     ctx.set('tools', {
       register: (tool: any) => {
-        if (tool.name === 'send_message') {
+        if (tool.name === 'send_qq_message') {
           registeredTool = tool;
         }
         return () => {};
@@ -526,14 +527,14 @@ describe('契约 6: 防御守卫：缺少 peer/会话上下文时安全报错拦
     const mockSendMsg = vi.fn();
     const gateway = { sendMsg: mockSendMsg } as any;
 
-    const res = await sendMessage(
+    const res = await sendQqMessage(
       { text: '测试文本' },
       { gateway, peer: undefined }
     );
 
     expect(res).toEqual({
       success: false,
-      error: 'send_message 需在 QQ 会话中执行',
+      error: 'send_qq_message 需在 QQ 会话中执行',
     });
     expect(mockSendMsg).not.toHaveBeenCalled();
   });
@@ -542,14 +543,14 @@ describe('契约 6: 防御守卫：缺少 peer/会话上下文时安全报错拦
     const mockSendMsg = vi.fn();
     const gateway = { sendMsg: mockSendMsg } as any;
 
-    const res = await sendMessage(
+    const res = await sendQqMessage(
       { text: '测试文本' },
       { gateway, peer: 'web-session-123' }
     );
 
     expect(res).toEqual({
       success: false,
-      error: 'send_message 需在 QQ 会话中执行',
+      error: 'send_qq_message 需在 QQ 会话中执行',
     });
     expect(mockSendMsg).not.toHaveBeenCalled();
   });
@@ -558,14 +559,14 @@ describe('契约 6: 防御守卫：缺少 peer/会话上下文时安全报错拦
     const mockSendMsg = vi.fn();
     const gateway = { sendMsg: mockSendMsg } as any;
 
-    const res = await sendMessage(
+    const res = await sendQqMessage(
       { text: '测试文本' },
       { gateway, peer: 'review-group_1001' }
     );
 
     expect(res).toEqual({
       success: false,
-      error: 'send_message 需在 QQ 会话中执行',
+      error: 'send_qq_message 需在 QQ 会话中执行',
     });
     expect(mockSendMsg).not.toHaveBeenCalled();
   });
@@ -574,14 +575,14 @@ describe('契约 6: 防御守卫：缺少 peer/会话上下文时安全报错拦
     const mockSendMsg = vi.fn();
     const gateway = { sendMsg: mockSendMsg } as any;
 
-    const res = await sendMessage(
+    const res = await sendQqMessage(
       { text: '测试文本' },
       { gateway, peer: 'friend-request-1001' }
     );
 
     expect(res).toEqual({
       success: false,
-      error: 'send_message 需在 QQ 会话中执行',
+      error: 'send_qq_message 需在 QQ 会话中执行',
     });
     expect(mockSendMsg).not.toHaveBeenCalled();
   });
@@ -613,7 +614,7 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     }
   });
 
-  it('真实装配下：QQ 群聊与私聊包含 send_message，WebUI 与沙箱排除，且 guard 拦截非法调用', async () => {
+  it('真实装配下：QQ 群聊与私聊包含 send_qq_message，WebUI 与沙箱排除，且 guard 拦截非法调用', async () => {
     const ctx = booted.ctx;
     const tools: any = ctx.get('tools');
 
@@ -626,7 +627,7 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     const qqGroupAgent = qqGroupHandle.agent || qqGroupHandle;
     const asmGroup = await ctx.systemPrompt.assemble({ scope: qqGroupAgent, agent: qqGroupAgent } as any);
     const groupToolNames = (asmGroup.tools as any[]).map((t) => t.name);
-    expect(groupToolNames).toContain('send_message');
+    expect(groupToolNames).toContain('send_qq_message');
 
     // 2. QQ 私聊 Agent
     const qqUserHandle = await ctx.agents.create({
@@ -637,7 +638,7 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     const qqUserAgent = qqUserHandle.agent || qqUserHandle;
     const asmUser = await ctx.systemPrompt.assemble({ scope: qqUserAgent, agent: qqUserAgent } as any);
     const userToolNames = (asmUser.tools as any[]).map((t) => t.name);
-    expect(userToolNames).toContain('send_message');
+    expect(userToolNames).toContain('send_qq_message');
 
     // 3. Web UI Agent (隔离)
     const webHandle = await ctx.agents.create({
@@ -648,17 +649,17 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     const webAgent = webHandle.agent || webHandle;
     const asmWeb = await ctx.systemPrompt.assemble({ scope: webAgent, agent: webAgent } as any);
     const webToolNames = (asmWeb.tools as any[]).map((t) => t.name);
-    expect(webToolNames).not.toContain('send_message');
+    expect(webToolNames).not.toContain('send_qq_message');
 
-    // Web 会话调用 send_message 被 tools.guard 拒绝
+    // Web 会话调用 send_qq_message 被 tools.guard 拒绝
     const webExec = await tools.execute({
-      name: 'send_message',
+      name: 'send_qq_message',
       arguments: { text: 'test' },
       agent: webAgent,
       signal: new AbortController().signal,
     });
     expect(webExec.isError).toBe(true);
-    expect((webExec as any).error?.message).toContain('dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用');
+    expect((webExec as any).error?.message).toContain('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用');
 
     // 4. Review 沙箱 Agent (隔离)
     const reviewHandle = await ctx.agents.create({
@@ -669,16 +670,16 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     const reviewAgent = reviewHandle.agent || reviewHandle;
     const asmReview = await ctx.systemPrompt.assemble({ scope: reviewAgent, agent: reviewAgent } as any);
     const reviewToolNames = (asmReview.tools as any[]).map((t) => t.name);
-    expect(reviewToolNames).not.toContain('send_message');
+    expect(reviewToolNames).not.toContain('send_qq_message');
 
-    // Review 会话调用 send_message 被 tools.guard 拒绝
+    // Review 会话调用 send_qq_message 被 tools.guard 拒绝
     const reviewExec = await tools.execute({
-      name: 'send_message',
+      name: 'send_qq_message',
       arguments: { text: 'test' },
       agent: reviewAgent,
       signal: new AbortController().signal,
     });
     expect(reviewExec.isError).toBe(true);
-    expect((reviewExec as any).error?.message).toContain('dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用');
+    expect((reviewExec as any).error?.message).toContain('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用');
   });
 });
