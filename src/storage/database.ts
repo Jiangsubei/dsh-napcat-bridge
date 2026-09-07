@@ -129,9 +129,12 @@ export function parseTimeValue(val: number | string | undefined | null, isEnd = 
 }
 
 export class MessageDatabase {
+  public readonly dbPath: string;
   private db: DatabaseType | null = null;
 
-  constructor(public readonly dbPath: string) {}
+  constructor(dbPath: string) {
+    this.dbPath = path.resolve(dbPath);
+  }
 
   init(): void {
     const dir = path.dirname(this.dbPath);

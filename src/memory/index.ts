@@ -14,6 +14,7 @@ import {
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+  resolveDshPath,
 } from '../constants/index.js';
 
 export * from './types.js';
@@ -95,7 +96,8 @@ export function setupMemoryService(
   reviewManager: BackgroundReviewManager;
   dispose: () => void;
 } {
-  const storage = new MemoryStorage(options.storageDir, options.dshHome);
+  const effectiveDshHome = resolveDshPath(options.dshHome);
+  const storage = new MemoryStorage(options.storageDir, effectiveDshHome);
   const tools = new MemoryTools(storage, ctx);
   const reviewManager = new BackgroundReviewManager(
     ctx,
@@ -104,6 +106,7 @@ export function setupMemoryService(
       turnsInterval: options.reviewTurnsInterval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
       toolCallsInterval: options.reviewToolCallsInterval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
       storageDir: storage.getBaseDir(),
+      dshHome: effectiveDshHome,
       reviewModel: options.reviewModel,
       db: options.db,
       sessionManager: options.sessionManager,

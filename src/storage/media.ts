@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from './database.js';
+import { resolveDshPath, DEFAULT_DOWNLOAD_ROOT } from '../constants/index.js';
 
 export interface MediaStorageOptions {
   dshHome?: string;
@@ -92,11 +93,8 @@ export class MediaStorageManager {
   private db: MessageDatabase | null;
 
   constructor(options: MediaStorageOptions = {}) {
-    const dshHome =
-      options.dshHome ||
-      process.env.DSH_HOME ||
-      path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.dsh');
-    this.downloadRoot = options.downloadDir || path.resolve(dshHome, 'workspace/napcat_download');
+    const dshHome = resolveDshPath(options.dshHome || process.env.DSH_HOME, undefined, '');
+    this.downloadRoot = resolveDshPath(dshHome, options.downloadDir, DEFAULT_DOWNLOAD_ROOT);
     this.ttlDays = options.ttlDays ?? 7;
     this.db = options.db || null;
   }
