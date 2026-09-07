@@ -677,35 +677,56 @@ export async function sendQqMessage(
     return { success: false, error: 'send_qq_message 需在 QQ 会话中执行' };
   }
 
-  // 3. 超长文本自动分段并经串行队列分批发送
+  // 3. end 信号：非 true 即 false，不隐式推断
+  const isEnd = (params as any)?.end === true;
+
+  // 4. 超长文本自动分段并经串行队列分批发送（含透明重试：最多 5 次 × 500ms）
   const chunks = splitMessageText(plainText, 1500);
   let lastMessageId: number | undefined;
 
-  try {
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const payload =
-        ctx.formatOutboundPayload?.(peer, chunk, i) ??
-        ctx.outboundBridge?.buildSendQqMessagePayload?.(peer, chunk, i) ??
-        ctx.outboundBridge?.buildSendMessagePayload?.(peer, chunk, i) ??
-        chunk;
-      const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
-      const res = ctx.sender
-        ? await ctx.sender.enqueue(peer, sendTask)
-        : await sendTask();
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const payload =
+      ctx.formatOutboundPayload?.(peer, chunk, i) ??
+      ctx.outboundBridge?.buildSendQqMessagePayload?.(peer, chunk, i) ??
+      ctx.outboundBridge?.buildSendMessagePayload?.(peer, chunk, i) ??
+      chunk;
+    const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
 
-      if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
-        const detail = res.wording || res.message || res.retcode;
-        return { success: false, error: `消息发送失败: ${detail}` };
+    let chunkSuccess = false;
+    let lastError = '';
+
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const res = ctx.sender
+          ? await ctx.sender.enqueue(peer, sendTask)
+          : await sendTask();
+
+        if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
+          const detail = res.wording || res.message || res.retcode;
+          lastError = `消息发送失败: ${detail}`;
+        } else {
+          const mid = res?.data?.message_id;
+          if (mid !== undefined && mid !== null && mid !== '') {
+            lastMessageId = Number(mid);
+            chunkSuccess = true;
+            break;
+          } else {
+            lastError = '消息发送失败: 未返回 message_id';
+          }
+        }
+      } catch (err: any) {
+        lastError = `消息发送失败: ${err?.message || '未知错误'}`;
       }
 
-      const mid = res?.data?.message_id;
-      if (mid !== undefined && mid !== null && mid !== '') {
-        lastMessageId = Number(mid);
+      if (attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
-  } catch (err: any) {
-    return { success: false, error: `消息发送失败: ${err?.message || '未知错误'}` };
+
+    if (!chunkSuccess) {
+      return { success: false, error: lastError || '消息发送失败' };
+    }
   }
 
   if (lastMessageId === undefined || Number.isNaN(lastMessageId)) {
@@ -717,6 +738,7 @@ export async function sendQqMessage(
     success: true,
     message_id: lastMessageId,
     sent_preview,
+    ...(isEnd ? { concludesTurn: true } : {}),
   };
 }
 
@@ -1119,14 +1141,19 @@ export function registerAgentTools(
           name: 'send_qq_message',
           description:
             '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
-            '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
-            '- 任务完成时：发送最终答复（务必用本工具发）\n' +
+            '- 长任务进行中：向用户汇报进度（end:false 或省略，任务继续）\n' +
+            '- 任务完成发送最终答复：请以 end:true 调用，成功后本轮结束，无需再产出总结文本；收尾的 end:true 尽量单独一条消息调用\n' +
             '- 每条 text 为一条独立 QQ 消息，过长自动分段',
           parameters: {
             text: {
               type: 'string',
               required: true,
               description: '要发送给用户的文本内容',
+            },
+            end: {
+              type: 'boolean',
+              description:
+                '是否为本轮任务的最后一条答复。任务完成发送最终答复时务必设为 true，发送成功后将直接结束本轮对话，无需再产出总结文本；若中途汇报进度请设为 false 或省略。',
             },
           },
           output: {
@@ -1153,13 +1180,19 @@ export function registerAgentTools(
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || (exec.agent as any)?.sessionId || (exec.agent as any)?.id || '';
             const peer = normalizePeer(rawPeer);
-            return (await sendQqMessage(args, {
+            const res = (await sendQqMessage(args, {
               gateway: options.gateway,
               sender: options.sender,
               peer,
               outboundBridge: options.outboundBridge,
               formatOutboundPayload: options.formatOutboundPayload,
             })) as any;
+
+            if (res?.success && res?.concludesTurn) {
+              exec?.concludeTurn?.();
+            }
+
+            return res;
           },
         })
       )

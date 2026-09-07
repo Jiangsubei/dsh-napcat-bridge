@@ -14,6 +14,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { WebSocket } from 'ws';
 import { Context } from '@deepseek-ai/cordis';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import {
@@ -237,8 +238,8 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     expect(registeredTool.name).toBe('send_qq_message');
     expect(registeredTool.description).toBe(
       '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
-      '- 长任务进行中：向用户汇报进度或说明需要等待\n' +
-      '- 任务完成时：发送最终答复（务必用本工具发）\n' +
+      '- 长任务进行中：向用户汇报进度（end:false 或省略，任务继续）\n' +
+      '- 任务完成发送最终答复：请以 end:true 调用，成功后本轮结束，无需再产出总结文本；收尾的 end:true 尽量单独一条消息调用\n' +
       '- 每条 text 为一条独立 QQ 消息，过长自动分段'
     );
     expect(registeredTool.parameters).toEqual({
@@ -247,6 +248,11 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
         text: {
           type: 'string',
           description: '要发送给用户的文本内容',
+        },
+        end: {
+          type: 'boolean',
+          description:
+            '是否为本轮任务的最后一条答复。任务完成发送最终答复时务必设为 true，发送成功后将直接结束本轮对话，无需再产出总结文本；若中途汇报进度请设为 false 或省略。',
         },
       },
       required: ['text'],
@@ -683,3 +689,254 @@ describe('契约 7: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     expect((reviewExec as any).error?.message).toContain('dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用');
   });
 });
+
+describe('契约 7: send_qq_message 回合终止与重试机制 (End Signal, Retry & ConcludesTurn Contract)', () => {
+  let tmpHome: string;
+  let booted: BootedDsh;
+  let client: WebSocket;
+  const TEST_PORT = 29899;
+  const BOT_QQ = '1000000001';
+  const GROUP_ID = '888888';
+
+  // 辅助函数：启动真实装配并连接真实 WS 网关
+  async function setupRealBridge(onActionHandler?: (frame: any, client: WebSocket) => void) {
+    tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-napcat-end-turn-'));
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpHome,
+      mountPlugin: true,
+      config: {
+        bot_qq: BOT_QQ,
+        ws_port: TEST_PORT,
+      },
+    });
+
+    client = new WebSocket(`ws://127.0.0.1:${TEST_PORT}`);
+    await new Promise<void>((resolve, reject) => {
+      client.on('open', resolve);
+      client.on('error', reject);
+    });
+
+    client.on('message', (data) => {
+      const frame = JSON.parse(data.toString());
+      if (onActionHandler) {
+        onActionHandler(frame, client);
+      } else if (frame.echo) {
+        client.send(
+          JSON.stringify({
+            echo: frame.echo,
+            status: 'ok',
+            retcode: 0,
+            data: { message_id: 99001 },
+          })
+        );
+      }
+    });
+
+    // 握手包以激活 NapCatGateway
+    client.send(
+      JSON.stringify({
+        post_type: 'meta_event',
+        meta_event_type: 'lifecycle',
+        sub_type: 'connect',
+        self_id: BOT_QQ,
+      })
+    );
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ctx = booted.ctx;
+    const tools: any = ctx.get('tools');
+    const qqGroupHandle = await ctx.agents.create({
+      sessionId: `qq-group-${GROUP_ID}`,
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      meta: { cwd: path.join(tmpHome, 'qq-ws-group') },
+    });
+    const agent = qqGroupHandle.agent || qqGroupHandle;
+
+    return { ctx, tools, agent };
+  }
+
+  afterEach(async () => {
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.close();
+    }
+    if (booted) {
+      await booted.dispose().catch(() => {});
+    }
+    if (tmpHome) {
+      await fsp.rm(tmpHome, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('契约 7.1: end:true + 发送成功 → 真实装配下返回结果顶层带 concludesTurn: true，结束当前回合', async () => {
+    const { tools, agent } = await setupRealBridge();
+
+    const res = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: '本轮最终任务完成，汇报如下。', end: true },
+      agent,
+      signal: new AbortController().signal,
+    });
+
+    expect(res.isError).toBe(false);
+    expect(res.value?.success).toBe(true);
+    expect(res.value?.message_id).toBe(99001);
+    expect(res.value?.concludesTurn).toBe(true);
+    // 关键核心契约：顶层 concludesTurn 必须为 true（经 dsh-tools materializeFinalResult 物化）
+    expect((res as any).concludesTurn).toBe(true);
+  });
+
+  it('契约 7.2: end:false / 不传 → 正常发送，结果与顶层无 concludesTurn，loop 继续', async () => {
+    const { tools, agent } = await setupRealBridge();
+
+    // 1. end: false
+    const res1 = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: '正在处理中，请稍候...', end: false },
+      agent,
+      signal: new AbortController().signal,
+    });
+    expect(res1.isError).toBe(false);
+    expect(res1.value?.success).toBe(true);
+    expect(res1.value?.concludesTurn).toBeUndefined();
+    expect((res1 as any).concludesTurn).toBeUndefined();
+
+    // 2. 省略 end
+    const res2 = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: '正在读取文件...' },
+      agent,
+      signal: new AbortController().signal,
+    });
+    expect(res2.isError).toBe(false);
+    expect(res2.value?.success).toBe(true);
+    expect(res2.value?.concludesTurn).toBeUndefined();
+    expect((res2 as any).concludesTurn).toBeUndefined();
+  });
+
+  it('契约 7.3: 重试期内成功 → 仅重试成功即止并按 end 返回；全失败 → 返回错误、无 concludesTurn、不结束', async () => {
+    let attempts = 0;
+    const { tools, agent } = await setupRealBridge((frame, ws) => {
+      if (frame.action === 'send_group_msg' || frame.action === 'send_msg') {
+        attempts++;
+        if (attempts <= 2) {
+          // 前 2 次模拟网关失败
+          ws.send(
+            JSON.stringify({
+              echo: frame.echo,
+              status: 'failed',
+              retcode: 10001,
+              message: 'Temporary network glitch',
+            })
+          );
+        } else {
+          // 第 3 次成功
+          ws.send(
+            JSON.stringify({
+              echo: frame.echo,
+              status: 'ok',
+              retcode: 0,
+              data: { message_id: 99003 },
+            })
+          );
+        }
+      }
+    });
+
+    // 7.3.1 重试期第 3 次成功 + end: true
+    const resSuccess = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: '经历重试后成功的最终答复', end: true },
+      agent,
+      signal: new AbortController().signal,
+    });
+
+    expect(resSuccess.isError).toBe(false);
+    expect(resSuccess.value?.success).toBe(true);
+    expect(resSuccess.value?.message_id).toBe(99003);
+    expect(resSuccess.value?.concludesTurn).toBe(true);
+    expect((resSuccess as any).concludesTurn).toBe(true);
+    expect(attempts).toBe(3); // 成功即止，不继续尝试第 4、5 次
+
+    // 7.3.2 连续 5 次全失败
+    let failAttempts = 0;
+    client.removeAllListeners('message');
+    client.on('message', (data) => {
+      const frame = JSON.parse(data.toString());
+      if (frame.action === 'send_group_msg' || frame.action === 'send_msg') {
+        failAttempts++;
+        client.send(
+          JSON.stringify({
+            echo: frame.echo,
+            status: 'failed',
+            retcode: 500,
+            message: 'Gateway completely unreachable',
+          })
+        );
+      }
+    });
+
+    const resFail = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: '一条必然发送失败的消息', end: true },
+      agent,
+      signal: new AbortController().signal,
+    });
+
+    expect(resFail.value?.success).toBe(false);
+    expect(resFail.value?.error).toContain('Gateway completely unreachable');
+    // 全失败时绝不能有 concludesTurn
+    expect(resFail.value?.concludesTurn).toBeUndefined();
+    expect((resFail as any).concludesTurn).toBeUndefined();
+    expect(failAttempts).toBe(5); // 完整重试 5 次
+  });
+
+  it('契约 7.4: end 非 true（false / 省略 / 字符串 "true" / 数字 / null）一律视为 false', async () => {
+    const { tools, agent } = await setupRealBridge();
+
+    // 7.4.1 单元级强校验：非 boolean true 的任何非法或假值
+    const testCases = [
+      false,
+      undefined,
+      null,
+      'true',
+      'false',
+      1,
+      0,
+      {},
+      [],
+    ];
+
+    for (const testVal of testCases) {
+      const res = await sendQqMessage(
+        { text: '测试非 true end 参数', end: testVal as any },
+        {
+          gateway: {
+            sendMsg: async () => ({ status: 'ok', retcode: 0, data: { message_id: 1111 } }),
+          } as any,
+          peer: 'group_888888',
+        }
+      );
+      expect(res.success).toBe(true);
+      expect(res.concludesTurn).toBeUndefined();
+    }
+  });
+
+  it('契约 7.5: 契约回归防护：正常出站分段与 sent_preview 在新逻辑下保持稳定', async () => {
+    const { tools, agent } = await setupRealBridge();
+
+    const longText = 'A'.repeat(2000);
+    const res = await tools.execute({
+      name: 'send_qq_message',
+      arguments: { text: longText, end: true },
+      agent,
+      signal: new AbortController().signal,
+    });
+
+    expect(res.isError).toBe(false);
+    expect(res.value?.success).toBe(true);
+    expect(res.value?.sent_preview).toHaveLength(63); // 60 + '...'
+    expect(res.value?.concludesTurn).toBe(true);
+    expect((res as any).concludesTurn).toBe(true);
+  });
+});
+
