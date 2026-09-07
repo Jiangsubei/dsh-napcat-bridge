@@ -10,7 +10,7 @@ import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR } from '../constants/index.js';
 /**
  * 定稿 QQ 会话专属动态段提示词内容 (需求 B §2.2)
  *
- * 引导大模型在 QQ 会话中主动调用 send_message 工具回复用户。
+ * 引导大模型在 QQ 会话中主动调用 send_qq_message 工具回复用户。
  * 口径要求：只提如何回复，必须调用该工具，请勿直接在回复正文中回复；
  * 不提 Web UI，严禁告知 turn/end 兜底机制（隐形安全网）。
  */
@@ -19,7 +19,7 @@ export const QQ_SCENARIO_PROMPT = `# 如何发送消息
 你正在 QQ 聊天中与用户对话。
 
 【如何把内容送达用户】
-- 想向用户发送文字/答复，必须调用 send_message 工具。请勿直接在回复正文中回复，写在回复正文里的文字不会发送给用户。`;
+- 想向用户发送文字/答复，必须调用 send_qq_message 工具。请勿直接在回复正文中回复，写在回复正文里的文字不会发送给用户。`;
 
 /**
  * 判断指定 ID 是否为合法普通 QQ 会话标识符（群聊 / 私聊）

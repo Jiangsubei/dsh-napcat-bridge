@@ -132,7 +132,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const memberResolver = new CachedGroupMemberResolver(server);
 
   // 2. 注册 System Prompt 动态上下文段
-  // 2.1 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario, order: 10，最前，引导 send_message 主动发言)
+  // 2.1 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario, order: 10，最前，引导 send_qq_message 主动发言)
   const unregisterQQScenarioPrompt = registerQQScenarioDynamicPrompt(ctx);
 
   // 2.2 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
@@ -218,7 +218,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'create_memory',
     'edit_memory',
     'react_message',
-    'send_message',
+    'send_qq_message',
   ]);
 
   const extractSessionId = (agent: any): string => {
@@ -267,7 +267,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
           }
           if (!isQQChat) {
-            res.tools = res.tools.filter((t: any) => t.name !== 'send_message');
+            res.tools = res.tools.filter((t: any) => t.name !== 'send_qq_message');
           }
         }
       }
@@ -283,7 +283,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     unregisterToolGuard = toolsSvc.guard((exec: any) => {
       if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
         const sessionId = extractSessionId(exec?.agent);
-        if (exec?.name === 'send_message') {
+        if (exec?.name === 'send_qq_message') {
           const isQQChat = Boolean(
             sessionId &&
               !sessionId.startsWith('review-') &&
@@ -294,7 +294,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
                 sessionId.startsWith('user_'))
           );
           if (!isQQChat) {
-            return 'dsh-napcat-bridge: send_message 工具仅限 QQ 聊天会话调用，当前会话不可执行';
+            return 'dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用，当前会话不可执行';
           }
         }
         if (exec?.name === 'react_message') {

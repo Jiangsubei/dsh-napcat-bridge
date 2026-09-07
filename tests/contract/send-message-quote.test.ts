@@ -443,9 +443,9 @@ describe('契约 6: 真实生产装配闭环 (Real Assembly Contract via bootDsh
       data: capturedUserMsgs[0],
     });
 
-    // 3. 模型第 1 次调用 send_message 工具 (汇报进度)
+    // 3. 模型第 1 次调用 send_qq_message 工具 (汇报进度)
     const execRes1 = await tools.execute({
-      name: 'send_message',
+      name: 'send_qq_message',
       arguments: { text: '正在生成报表，请稍等片刻...' },
       agent,
       signal: new AbortController().signal,
@@ -470,9 +470,9 @@ describe('契约 6: 真实生产装配闭环 (Real Assembly Contract via bootDsh
     const textSeg1 = frame1.params.message.find((s: any) => s.type === 'text');
     expect(textSeg1.data.text).toBe('正在生成报表，请稍等片刻...');
 
-    // 4. 模型第 2 次调用 send_message 工具 (发送终答报表)
+    // 4. 模型第 2 次调用 send_qq_message 工具 (发送终答报表)
     const execRes2 = await tools.execute({
-      name: 'send_message',
+      name: 'send_qq_message',
       arguments: { text: '报表已生成完毕，今日总访问量 1024。' },
       agent,
       signal: new AbortController().signal,

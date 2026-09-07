@@ -229,7 +229,7 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
       data: { id: 'msg_fallback_b', content: [{ type: 'text', text: '帮我发消息' }] },
     } as any);
 
-    // Step 1: 模型调用了 send_message
+    // Step 1: 模型调用了 send_qq_message
     // 1) assistant/message 带 tool-call
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
@@ -238,8 +238,8 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
         step: 1,
         message: {
           content: [
-            { type: 'text', text: '准备调用 send_message 工具主动发言...' },
-            { type: 'tool-call', id: 'call_send', name: 'send_message', arguments: '{"text":"主动内容"}' },
+            { type: 'text', text: '准备调用 send_qq_message 工具主动发言...' },
+            { type: 'tool-call', id: 'call_send', name: 'send_qq_message', arguments: '{"text":"主动内容"}' },
           ],
         },
       },
@@ -253,10 +253,11 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
         turn: 1,
         step: 1,
         callId: 'call_send',
-        name: 'send_message',
+        name: 'send_qq_message',
         arguments: '{"text":"主动内容"}',
       },
     } as any);
+    expect(bridge.getTurnSendQqMessageCount('group_10001', 1)).toBe(1);
     expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(1);
 
     // Step 2: 模型在末尾输出了纯文本（仅留存 Web UI，不向 QQ 发送）
@@ -575,11 +576,11 @@ describe('契约 6: 真实生产装配闭环验证 (Real Assembly via bootDshNap
       data: capturedUserMsgs[1],
     });
 
-    // 模型在轮次 2 中调用了 send_message
+    // 模型在轮次 2 中调用了 send_qq_message
     (booted.ctx as any).emit('session/event', session, {
       seq: seq++,
       type: 'tool/call',
-      data: { turn: 2, step: 1, callId: 'call_send_2', name: 'send_message', arguments: '{"text":"主动发出的测试"}' },
+      data: { turn: 2, step: 1, callId: 'call_send_2', name: 'send_qq_message', arguments: '{"text":"主动发出的测试"}' },
     });
 
     // 随后模型输出末尾纯文本回复
