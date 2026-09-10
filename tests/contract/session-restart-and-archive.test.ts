@@ -241,4 +241,55 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
     const aReset = await sessionManagerRestarted.getOrCreateAgent('user_2000000001');
     expect(aReset.session.id).toBe('qq-user-2000000001');
   });
+
+  it('契约 6: DSH 关闭重启后，QQ 会话与 NapCat 全局设定的模型与思考档位能从 SQLite 完整恢复，且恢复的 Agent 携带正确思考档位', async () => {
+    const dbPath = path.resolve(tmpHome, 'workspace/napcat/messages.sqlite');
+    db = new MessageDatabase(dbPath);
+    db.init();
+
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpHome,
+      mountPlugin: false,
+    });
+
+    const sessionManager1 = new SessionManager(booted.ctx, tmpHome, db);
+    const peer = 'user_2000000006';
+
+    // 1. 设置 NapCat 全局默认模型与思考档位为 deepseek-v4-pro / low
+    sessionManager1.setNapcatDefaultModel('deepseek-official', 'deepseek-v4-pro', 'low');
+
+    // 2. 创建特定会话并单独覆盖为 max 档位
+    const agent1 = await sessionManager1.getOrCreateAgent(peer);
+    sessionManager1.setModelSelection(agent1.session.id, 'deepseek-official', 'deepseek-v4-pro', 'max');
+    await booted.ctx.sessions.flush(agent1.session);
+
+    // 3. 关闭 DSH (模拟关闭退出)
+    await booted.dispose();
+    booted = null;
+
+    // 4. 重启 DSH
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpHome,
+      mountPlugin: false,
+    });
+
+    const sessionManager2 = new SessionManager(booted.ctx, tmpHome, db);
+
+    // 5. 验证 NapCat 全局默认模型与思考档位恢复成功
+    const restoredDefault = sessionManager2.getNapcatDefaultModel();
+    expect(restoredDefault.provider).toBe('deepseek-official');
+    expect(restoredDefault.model).toBe('deepseek-v4-pro');
+    expect(restoredDefault.reasoningEffort).toBe('low');
+
+    // 6. 验证特定会话的模型与思考档位 max 恢复成功
+    const restoredAgent = await sessionManager2.getOrCreateAgent(peer);
+    expect(restoredAgent.session.id).toBe('qq-user-2000000006');
+    const restoredSel = sessionManager2.getModelSelection(restoredAgent.session.id);
+    expect(restoredSel?.provider).toBe('deepseek-official');
+    expect(restoredSel?.model).toBe('deepseek-v4-pro');
+    expect(restoredSel?.reasoningEffort).toBe('max');
+
+    // 7. 验证挂载在恢复后的 Agent 上的 modelSelection.current 也完整保留
+    expect((restoredAgent as any).modelSelection?.current?.reasoningEffort).toBe('max');
+  });
 });
