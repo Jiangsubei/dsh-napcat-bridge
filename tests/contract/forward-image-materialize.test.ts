@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { expandForwardMessage } from '../../src/tools/index.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  expandForwardMessage,
+  registerAgentTools,
+  resetGlobalToolContext,
+} from '../../src/tools/index.js';
 
 /**
  * 契约测试: 合并转发内层图片即时落盘 (FC-1: Forward Image Materialization)
@@ -197,5 +201,72 @@ describe('契约测试: 合并转发内层图片即时落盘 (FC-1)', () => {
     expect(res.messages![0].sender_name).toBe('Cerium');
     expect(res.messages![0].user_id).toBe('1094950020');
     expect(res.messages![0].time).toBe(1788999540000);
+  });
+});
+
+describe('契约测试: 转发展开工具的 peer 接线 (FC-1 注册层装配契约)', () => {
+  afterEach(() => {
+    resetGlobalToolContext();
+  });
+
+  function fakeRegistry() {
+    const registered: any[] = [];
+    const registry = {
+      register: (tool: any) => {
+        registered.push(tool);
+        return () => {};
+      },
+    };
+    return { registry, registered };
+  }
+
+  it('FC-1 装配契约 1: execute 从 exec.agent.session.id 归一化 peer，落盘目录为 image/<peer>/ 而非 common', async () => {
+    const { registry, registered } = fakeRegistry();
+    const ctx = {
+      get: (key: string) => (key === 'tools' ? registry : undefined),
+      on: () => {},
+    } as any;
+    const gateway = stubGateway([node([imgSeg({ url: REAL_URL })])]);
+    const { mediaManager, calls } = stubMedia();
+
+    const unregister = registerAgentTools(ctx, { db: {} as any, gateway, mediaManager });
+
+    const tool = registered.find((t: any) => t.name === 'expand_forward_message');
+    expect(tool).toBeDefined();
+    expect(typeof tool.execute).toBe('function');
+
+    // 会话 id 带轮次后缀，必须归一化为 group_<id>
+    const res = await tool.execute(
+      { forward_id: 'fwd_wire' },
+      { agent: { session: { id: 'qq-group-3000000001-2' } } }
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.sessionId).toBe('group_3000000001');
+    expect(res.images_downloaded).toBe(1);
+    expect(JSON.parse(res.messages[0].content)[0].data.local_path).toBeDefined();
+
+    unregister();
+  });
+
+  it('FC-1 装配契约 2: execute 携带 mediaManager，无 peer 时回退 common 不报错', async () => {
+    const { registry, registered } = fakeRegistry();
+    const ctx = {
+      get: (key: string) => (key === 'tools' ? registry : undefined),
+      on: () => {},
+    } as any;
+    const gateway = stubGateway([node([imgSeg({ url: REAL_URL })])]);
+    const { mediaManager, calls } = stubMedia();
+
+    const unregister = registerAgentTools(ctx, { db: {} as any, gateway, mediaManager });
+    const tool = registered.find((t: any) => t.name === 'expand_forward_message');
+
+    const res = await tool.execute({ forward_id: 'fwd_wire_2' }, { agent: { session: { id: '' } } });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].opts.sessionId).toBe('common');
+    expect(res.images_downloaded).toBe(1);
+
+    unregister();
   });
 });

@@ -876,8 +876,15 @@ export function registerAgentTools(
               },
             ],
           },
-          async execute(args, _exec) {
-            return (await expandForwardMessage(args, { gateway: options.gateway })) as any;
+          async execute(args, exec) {
+            // FC-1: 传入 peer，内层图片落盘到 image/<peer>/ 而非 common（对齐入站图片与 Spec §4.1.1）
+            const session = (exec.agent as any)?.session;
+            const peer = normalizePeer(session?.id || '');
+            return (await expandForwardMessage(args, {
+              gateway: options.gateway,
+              mediaManager: options.mediaManager,
+              ...(peer ? { peer } : {}),
+            })) as any;
           },
         })
       )
