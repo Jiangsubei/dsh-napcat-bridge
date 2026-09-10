@@ -21,7 +21,8 @@ const EXPECTED_PROMPT_TEXT = `# 如何发送消息
 你正在 QQ 聊天中与用户对话。
 
 【如何把内容送达用户】
-- 想向用户发送文字/答复，必须调用 send_qq_message 工具。
+- 想向用户发送文字/答复，必须调用 send_qq_message 工具。除工具调用外不要输出任何回复文本。
+- 多步长任务进行中，若有阶段性进展需告知用户，请以 end:false（或省略 end）调用 send_qq_message 汇报进度，发完继续执行后续工具。
 - 任务完成发送最终答复时，请以 end:true 显式调用 send_qq_message 来结束本轮，而不是自然结束。`;
 
 describe('契约测试: QQ 会话专属动态提示词段 (QQ Scenario Dynamic Prompt)', () => {
@@ -60,6 +61,8 @@ describe('契约测试: QQ 会话专属动态提示词段 (QQ Scenario Dynamic P
     expect(qqScenarioCtx?.text).toBe(EXPECTED_PROMPT_TEXT);
     expect(qqScenarioCtx?.text).toContain('# 如何发送消息');
     expect(qqScenarioCtx?.text).toContain('必须调用 send_qq_message 工具');
+    expect(qqScenarioCtx?.text).toContain('除工具调用外不要输出任何回复文本');
+    expect(qqScenarioCtx?.text).toContain('多步长任务进行中，若有阶段性进展需告知用户');
     // 严禁告知 turn/end 兜底机制（隐形安全网）
     expect(qqScenarioCtx?.text).not.toContain('turn/end');
     expect(qqScenarioCtx?.text).not.toContain('兜底');
