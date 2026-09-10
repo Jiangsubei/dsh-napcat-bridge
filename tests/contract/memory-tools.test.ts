@@ -464,5 +464,71 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resInvalid.peer).toBe('default');
     expect(resInvalid.qq).toBe('default');
   });
+
+  it('契约 10: 写入端容量硬上限门禁 (user <= 1500, session <= 2200 超限拒绝并提示精简)', async () => {
+    // 1. create_memory 超出 user 上限 (1500 字符)
+    const longUserContent = 'A'.repeat(1501);
+    const resOverUser = await tools.createMemory({
+      type: 'user',
+      qq: '123456789',
+      content: longUserContent,
+    });
+    expect(resOverUser.success).toBe(false);
+    expect(resOverUser.message).toContain('超出上限 (1500 字符)');
+    expect(resOverUser.message).toContain('edit_memory 精简合并');
+    expect(await storage.existsUserProfile('123456789')).toBe(false);
+
+    // 2. create_memory 超出 session 上限 (2200 字符)
+    const longSessionContent = 'B'.repeat(2201);
+    const resOverSession = await tools.createMemory({
+      type: 'session',
+      peer: 'group_overflow',
+      content: longSessionContent,
+    });
+    expect(resOverSession.success).toBe(false);
+    expect(resOverSession.message).toContain('超出上限 (2200 字符)');
+    expect(await storage.existsSessionMemory('group_overflow')).toBe(false);
+
+    // 3. 上限内正常创建
+    const normalUser = await tools.createMemory({
+      type: 'user',
+      qq: '123456789',
+      content: '偏好：日常使用 Linux，喜欢简短回答',
+    });
+    expect(normalUser.success).toBe(true);
+
+    // 4. edit_memory 替换后超出上限 -> 拒绝修改并保持原样
+    const resEditOver = await tools.editMemory({
+      type: 'user',
+      qq: '123456789',
+      old_string: '喜欢简短回答',
+      new_string: 'C'.repeat(1500),
+    });
+    expect(resEditOver.success).toBe(false);
+    expect(resEditOver.message).toContain('超出上限 (1500 字符)');
+    const keptContent = await storage.readUserProfile('123456789');
+    expect(keptContent).toContain('喜欢简短回答');
+  });
+
+  it('契约 11: 工具定义描述 (Tool Definitions) 包含 Compact、容量限制与禁流水账指导', () => {
+    const toolDefs = createMemoryToolDefinitions(tools);
+    const createTool = toolDefs.find((t) => t.name === 'create_memory')!;
+    const editTool = toolDefs.find((t) => t.name === 'edit_memory')!;
+    const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
+
+    // create_memory 描述
+    expect(createTool.description).toContain('Compact');
+    expect(createTool.description).toContain('1500');
+    expect(createTool.description).toContain('2200');
+    expect(createTool.description).toContain('严禁');
+
+    // edit_memory 描述
+    expect(editTool.description).toContain('Consolidation');
+    expect(editTool.description).toContain('1500');
+    expect(editTool.description).toContain('2200');
+
+    // read_memory 描述
+    expect(readTool.description).toContain('old_string');
+  });
 });
 

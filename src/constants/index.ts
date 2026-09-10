@@ -30,6 +30,8 @@ export const DEFAULT_PROACTIVE_NIGHT_DND = true;
 
 export const DEFAULT_MEMORY_DIR = '.dsh/napcat/napcat_memory';
 export const DEFAULT_MEMORY_BUDGET_CHARS = 2200;
+export const DEFAULT_USER_PROFILE_CHAR_LIMIT = 1500;
+export const DEFAULT_SESSION_MEMORY_CHAR_LIMIT = 2200;
 export const DEFAULT_REVIEW_ENABLED = true;
 export const DEFAULT_REVIEW_TURNS_INTERVAL = 10;
 export const DEFAULT_REVIEW_TOOL_CALLS_INTERVAL = 10;
