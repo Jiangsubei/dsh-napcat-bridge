@@ -143,6 +143,15 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(prompt).not.toContain('update_memory');
     expect(prompt).toContain('session');
     expect(prompt).toContain('user');
+
+    // 4. 严格对齐 Hermes 记忆原则：去除催促词，增加 Compact & High-Signal、群梗文化与 Consolidation
+    expect(prompt).not.toContain('should NOT be the default');
+    expect(prompt).not.toContain('produced no new technique');
+    expect(prompt.toLowerCase()).toContain('compact');
+    expect(prompt.toLowerCase()).toContain('high-signal');
+    expect(prompt.toLowerCase()).toContain('consolidation');
+    expect(prompt).toContain('长期稳定');
+    expect(prompt).toContain('单行');
   });
 
   it('契约 5: 回顾变更汇总与通知事件 (memory/review/notify)', async () => {

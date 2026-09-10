@@ -7,6 +7,10 @@ import type { Context } from '@deepseek-ai/cordis';
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { MemoryStorage } from './storage.js';
 import type { MemoryOperationResult, MemoryType } from './types.js';
+import {
+  DEFAULT_USER_PROFILE_CHAR_LIMIT,
+  DEFAULT_SESSION_MEMORY_CHAR_LIMIT,
+} from '../constants/index.js';
 
 export interface ReadMemoryArgs {
   type?: MemoryType;
@@ -155,6 +159,17 @@ export class MemoryTools {
       return { success: false, message: '创建内容不能为空。' };
     }
 
+    const limit =
+      type === 'user'
+        ? DEFAULT_USER_PROFILE_CHAR_LIMIT
+        : DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+    if (content.length > limit) {
+      return {
+        success: false,
+        message: `${type === 'user' ? '用户画像' : 'Session 记忆'}内容长度 (${content.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`,
+      };
+    }
+
     if (type === 'user') {
       const targetQQ = this.resolveUserTarget(args);
       if (!targetQQ) {
@@ -288,6 +303,17 @@ export class MemoryTools {
     const newContent =
       currentContent.slice(0, firstIndex) + newStr + currentContent.slice(firstIndex + oldStr.length);
 
+    const limit =
+      type === 'user'
+        ? DEFAULT_USER_PROFILE_CHAR_LIMIT
+        : DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+    if (newContent.length > limit) {
+      return {
+        success: false,
+        message: `${type === 'user' ? '用户画像' : 'Session 记忆'}总长度 (${newContent.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`,
+      };
+    }
+
     if (type === 'user') {
       await this.storage.writeUserProfile(target, newContent);
     } else {
@@ -329,13 +355,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
   return [
     defineTool({
       name: 'read_memory',
-      description: '读取当前群聊/私聊的 Session 记忆规则或特定用户的个人画像与偏好。目标文件不存在或内容为空时不报错，并提示可用 create_memory 创建。',
+      description: '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。在需要修改、合并或精简记忆前调用，以获取最新内容与唯一 old_string。目标文件不存在或内容为空时不报错。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'session' 表示读取群聊/私聊规则；'user' 表示读取个人用户画像。",
+          description: "记忆类型：'session' 表示读取群聊/私聊规则与文化；'user' 表示读取个人用户画像。",
         },
         peer: {
           type: 'string',
@@ -371,18 +397,22 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     }),
     defineTool({
       name: 'create_memory',
-      description: '创建用户画像或会话记忆。用户画像（type=\'user\'）是跨场景的稳定锚点——群聊、私聊共用同一份，记录该用户的全局个人事实与偏好；会话记忆（type=\'session\'）仅当前群/私聊的规则约定。仅当目标记忆文件不存在时可用，原样写入内容；已存在请使用 edit_memory。',
+      description:
+        '创建用户持久画像（type=\'user\'，跨群聊私聊通用）或会话专属规则/长期群文化（type=\'session\'，仅当前群或私聊）。记忆每轮对话均会全量注入，必须保持极度紧凑（Compact）与高信号（High-signal）。\n' +
+        '【WHEN 记录项】：仅记录跨会话持久有效的人设、偏好、工作风格、通用群规，或长期稳定的群梗/代号/固定互动剧本。\n' +
+        '【SKIP 忽略项】：严禁记录单次技术排查流水账、一次性跑分测试、临时报错、日常琐碎寒暄、一过性玩笑或易重新获取的信息。\n' +
+        '【FORMAT 格式】：必须为精简单行的原子事实（建议 <80 字，如 "- 偏好：xxx" 或 "- 梗/互动：xxx"），严禁长篇大论或附带背景。设有严格容量硬上限（用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝。仅当文件不存在时可用，文件已存在时必须用 edit_memory。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'user' 表示创建该用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则（不跨场景）。",
+          description: "记忆类型：'user' 表示创建该用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则与文化（不跨场景）。",
         },
         content: {
           type: 'string',
           required: true,
-          description: '要写入的完整记忆内容（原样写入，不自动追加时间戳或标题头）。',
+          description: '要写入的完整记忆内容。必须为简练的 Markdown 条目（建议单条 <80 字），原样写入，严禁流水账叙事。',
         },
         peer: {
           type: 'string',
@@ -417,7 +447,10 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     }),
     defineTool({
       name: 'edit_memory',
-      description: '定向修改用户画像或会话记忆。用户画像（type=\'user\'）跨场景互通（群聊、私聊同一份），修改影响该用户所有场景；会话记忆（type=\'session\'）仅当前会话。通过 old_string 精确匹配替换为 new_string；若 new_string 为空或省略则删除该片段。要求 old_string 必须唯一存在。',
+      description:
+        '定向修改或删减已有记忆。通过 old_string 精确匹配替换为 new_string；若 new_string 省略或为空则直接删除该片段。\n' +
+        '【核心用途】：优先用于合并相似事实、精简过长条目、更新偏好或删除过时无用的琐碎记忆（Consolidation），使记忆文件保持短小精炼。\n' +
+        '【约束】：禁止拼接入大段叙事，修改后同样受容量硬上限约束（用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限拒绝写入。要求 old_string 在目标文件中必须唯一存在。',
       parameters: {
         type: {
           type: 'string',
@@ -428,11 +461,11 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
         old_string: {
           type: 'string',
           required: true,
-          description: '待替换/删除的原文字符串，必须在文件中唯一出现。',
+          description: '待替换或删除的既有内容片段，必须在目标文件中唯一出现。',
         },
         new_string: {
           type: 'string',
-          description: '替换后的新字符串。若省略或为空字符串，则删除匹配的 old_string 片段。',
+          description: '替换后的新内容（保持精炼）。若省略或为空字符串，则删除匹配的 old_string 片段。',
         },
         peer: {
           type: 'string',
