@@ -22,7 +22,7 @@ import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
-import { registerNapCatDynamicPrompt, registerQQScenarioDynamicPrompt } from './prompt/dynamic.js';
+import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
 
 export * from './memory/index.js';
@@ -132,10 +132,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const memberResolver = new CachedGroupMemberResolver(server);
 
   // 2. 注册 System Prompt 动态上下文段
-  // 2.1 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario, order: 10，最前，引导 send_qq_message 主动发言)
-  const unregisterQQScenarioPrompt = registerQQScenarioDynamicPrompt(ctx);
-
-  // 2.2 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
+  // 2.1 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
   const unregisterDynamicPrompt = registerNapCatDynamicPrompt(
     ctx,
     () => currentConfig().persona || '',
@@ -218,7 +215,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'create_memory',
     'edit_memory',
     'react_message',
-    'send_qq_message',
   ]);
 
   const extractSessionId = (agent: any): string => {
@@ -249,15 +245,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         sessionId &&
           (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
       );
-      const isQQChat = Boolean(
-        sessionId &&
-          !sessionId.startsWith('review-') &&
-          !sessionId.startsWith('friend-request-') &&
-          (sessionId.startsWith('qq-group-') ||
-            sessionId.startsWith('qq-user-') ||
-            sessionId.startsWith('group_') ||
-            sessionId.startsWith('user_'))
-      );
 
       if (Array.isArray(res?.tools)) {
         if (!isQQ) {
@@ -265,9 +252,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         } else {
           if (!isQQGroup) {
             res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
-          }
-          if (!isQQChat) {
-            res.tools = res.tools.filter((t: any) => t.name !== 'send_qq_message');
           }
         }
       }
@@ -283,20 +267,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     unregisterToolGuard = toolsSvc.guard((exec: any) => {
       if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
         const sessionId = extractSessionId(exec?.agent);
-        if (exec?.name === 'send_qq_message') {
-          const isQQChat = Boolean(
-            sessionId &&
-              !sessionId.startsWith('review-') &&
-              !sessionId.startsWith('friend-request-') &&
-              (sessionId.startsWith('qq-group-') ||
-                sessionId.startsWith('qq-user-') ||
-                sessionId.startsWith('group_') ||
-                sessionId.startsWith('user_'))
-          );
-          if (!isQQChat) {
-            return 'dsh-napcat-bridge: send_qq_message 工具仅限 QQ 聊天会话调用，当前会话不可执行';
-          }
-        }
         if (exec?.name === 'react_message') {
           const isQQGroup = Boolean(
             sessionId &&
@@ -1085,9 +1055,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
     if (typeof unregisterQuestionChannel === 'function') {
       unregisterQuestionChannel();
-    }
-    if (typeof unregisterQQScenarioPrompt === 'function') {
-      unregisterQQScenarioPrompt();
     }
     if (typeof unregisterDynamicPrompt === 'function') {
       unregisterDynamicPrompt();
