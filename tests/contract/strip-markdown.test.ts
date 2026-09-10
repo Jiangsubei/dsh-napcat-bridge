@@ -129,4 +129,21 @@ pnpm test
     expect(plain).toContain('服务 | 状态');
     expect(plain).toContain('Gateway | 在线');
   });
+
+  describe('契约测试: 代码块与正文中的 <think> 技术示例完整保留不被误伤 (Preserve Technical Examples)', () => {
+    it('代码块中的 <think>...</think> 示例完整保留，不被误伤清空', () => {
+      const input = '这是一个示例：\n```xml\n<think>\n示例内部推理\n</think>\n```';
+      const plain = stripMarkdown(input);
+      expect(plain).toContain('<think>');
+      expect(plain).toContain('示例内部推理');
+      expect(plain).toContain('</think>');
+    });
+
+    it('行内提及未闭合的 <think> 标签时，后续正文不被吞噬', () => {
+      const input = 'Prompt 中你可以使用 `<think>` 标签作为思考标记，后续输出正式答复。';
+      const plain = stripMarkdown(input);
+      expect(plain).toContain('<think>');
+      expect(plain).toContain('后续输出正式答复。');
+    });
+  });
 });

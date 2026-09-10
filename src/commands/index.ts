@@ -271,8 +271,12 @@ export async function handleSlashCommand(
 
       // 同步宿主会话模型选择：DSH 0.1.2-rc.1 起统一通过 sessionController.selectModel 同步，
       // 并临时抑制 agentDefaultModel.saveSelection 避免污染 Web UI 宿主全局设置。
-      const safeSyncApiProxy = (sessionId: string, provider: string, model: string) =>
-        safeSyncSessionModel(context.ctx, sessionId, provider, model);
+      const safeSyncApiProxy = (
+        sessionId: string,
+        provider: string,
+        model: string,
+        reasoningEffort?: string
+      ) => safeSyncSessionModel(context.ctx, sessionId, provider, model, reasoningEffort);
 
       // 1. 参数拆解：分离 --global / -g 与目标模型参数
       let isGlobal = false;
@@ -293,6 +297,7 @@ export async function handleSlashCommand(
         (agent as any)?.modelSelection?.current;
       const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
       const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
+      const curEffort = curSel?.reasoningEffort;
       const napcatDefault = context.sessionManager?.getNapcatDefaultModel() || {
         provider: curProv,
         model: curMod,
@@ -407,14 +412,42 @@ export async function handleSlashCommand(
         };
       }
 
+      // 动态获取目标模型的思考能力与当前思考档位继承/适配
+      const targetReasoning = await getModelReasoningInfo(
+        context.ctx,
+        targetProvider,
+        targetModel,
+        curEffort
+      );
+
+      let targetEffort: string | undefined;
+      let effortDesc = '';
+      if (targetReasoning.supported) {
+        const effortMatched =
+          curEffort && targetReasoning.efforts.some((e) => e.id === curEffort);
+        targetEffort = effortMatched ? curEffort : targetReasoning.defaultEffort;
+        const effortObj = targetReasoning.efforts.find((e) => e.id === targetEffort);
+        const effortLabel = effortObj ? `${effortObj.id} (${effortObj.name})` : targetEffort;
+        effortDesc = `\n🧠 思考深度：已自动对齐为 \`${effortLabel}\`${
+          effortMatched ? ' (继承前序设置)' : ' (模型默认)'
+        }`;
+      } else {
+        targetEffort = undefined;
+        effortDesc = '\n🧠 思考能力：当前目标模型不支持深度思考（思考已关闭）';
+      }
+
       try {
         if (isGlobal) {
           // NapCat 插件全局模式：更新插件全局默认模型，并批量同步已知的所有 QQ 会话
-          context.sessionManager?.setNapcatDefaultModel(targetProvider, targetModel);
+          context.sessionManager?.setNapcatDefaultModel(
+            targetProvider,
+            targetModel,
+            targetEffort
+          );
 
           const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
           for (const sid of allSids) {
-            await safeSyncApiProxy(sid, targetProvider, targetModel);
+            await safeSyncApiProxy(sid, targetProvider, targetModel, targetEffort);
           }
 
           return {
@@ -424,17 +457,29 @@ export async function handleSlashCommand(
               `✅ NapCat 插件全局 QQ 会话模型已切换为: ${targetProvider} / ${targetModel}`,
               `🌐 范围：已同步切换所有 QQ 会话；未来新建立的 QQ 会话也将默认使用此模型。`,
               `🛡️ 隔离：未修改 Web UI 宿主全局设置。`,
-            ].join('\n'),
+            ].join('\n') + effortDesc,
           };
         } else {
           // 仅当前 QQ 会话模式：仅落位本会话，不修改插件全局默认，亦不污染宿主全局设置
           context.sessionManager?.setModelSelection(
             context.session.id,
             targetProvider,
-            targetModel
+            targetModel,
+            targetEffort
           );
 
-          await safeSyncApiProxy(context.session.id, targetProvider, targetModel);
+          if (agent && (agent as any).modelSelection?.current) {
+            (agent as any).modelSelection.current.provider = targetProvider;
+            (agent as any).modelSelection.current.model = targetModel;
+            (agent as any).modelSelection.current.reasoningEffort = targetEffort;
+          }
+
+          await safeSyncApiProxy(
+            context.session.id,
+            targetProvider,
+            targetModel,
+            targetEffort
+          );
 
           return {
             handled: true,
@@ -442,7 +487,7 @@ export async function handleSlashCommand(
             reply: [
               `✅ 当前 QQ 会话模型已切换为: ${targetProvider} / ${targetModel}`,
               `📌 提示：仅对当前 QQ 会话生效；如需切换所有 QQ 会话请加 --global 参数。`,
-            ].join('\n'),
+            ].join('\n') + effortDesc,
           };
         }
       } catch (err: any) {
