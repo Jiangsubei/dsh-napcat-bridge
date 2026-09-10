@@ -83,8 +83,25 @@ export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: 
   return { peer, qq };
 }
 
+export interface MemoryToolsLimits {
+  getUserLimit?: () => number;
+  getSessionLimit?: () => number;
+}
+
 export class MemoryTools {
-  constructor(private storage: MemoryStorage, private ctx?: Context) {}
+  constructor(
+    private storage: MemoryStorage,
+    private ctx?: Context,
+    private limits?: MemoryToolsLimits
+  ) {}
+
+  private getUserLimit(): number {
+    return this.limits?.getUserLimit?.() ?? DEFAULT_USER_PROFILE_CHAR_LIMIT;
+  }
+
+  private getSessionLimit(): number {
+    return this.limits?.getSessionLimit?.() ?? DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+  }
 
   /**
    * 归一化 user 类型的记忆 identity（QQ 号）。
@@ -161,8 +178,8 @@ export class MemoryTools {
 
     const limit =
       type === 'user'
-        ? DEFAULT_USER_PROFILE_CHAR_LIMIT
-        : DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+        ? this.getUserLimit()
+        : this.getSessionLimit();
     if (content.length > limit) {
       return {
         success: false,
@@ -305,8 +322,8 @@ export class MemoryTools {
 
     const limit =
       type === 'user'
-        ? DEFAULT_USER_PROFILE_CHAR_LIMIT
-        : DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+        ? this.getUserLimit()
+        : this.getSessionLimit();
     if (newContent.length > limit) {
       return {
         success: false,

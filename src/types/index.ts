@@ -407,7 +407,11 @@ export interface BridgePluginConfig {
   proactive_night_dnd?: boolean;
   /** 记忆 Markdown 文件存储根目录 (默认 .dsh/napcat/napcat_memory) */
   memory_storage_dir?: string;
-  /** 群聊用户画像注入总字符预算上限 (默认 2200) */
+  /** 群聊会话规则与多活跃用户画像注入总字符预算上限 (默认 2200) */
+  group_memory_budget_chars?: number;
+  /** 私聊会话规则与单用户画像注入总字符预算上限 (默认 1500) */
+  private_memory_budget_chars?: number;
+  /** 兼容旧配置：群聊用户画像注入总字符预算上限 (默认 2200) */
   memory_budget_chars?: number;
   /** 是否启用后台自动回顾 (默认 true) */
   review_enabled?: boolean;

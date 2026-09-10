@@ -179,4 +179,34 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     // A3: profile 无 # 标题时补充 ### Name (QQ) 标识
     expect(snapshot).toContain('### 李四 (10002)\n无标题旧格式画像');
   });
+
+  it('契约 8: 私聊与群聊解耦预算 — 私聊支持独立 privateBudget 截断保护，群聊支持独立 groupBudget', () => {
+    // 1. 私聊独立预算截断保护 (如设定预算为 300 字符，画像有 800 字符)
+    const longPrivateProfile = '# 用户画像（9999）\n' + 'D'.repeat(800);
+    storage.writeUserProfileSync('9999', longPrivateProfile);
+
+    const snapshotPrivate = storage.getPromptSnapshotSync(
+      'user_9999',
+      [{ qq: '9999', name: 'UserPrivate' }],
+      300 // 传入私聊预算 300
+    );
+    expect(snapshotPrivate.length).toBeLessThanOrEqual(300);
+    expect(snapshotPrivate).toContain('...(超预算截断)');
+
+    // 2. 群聊独立预算截断 (设定群聊预算为 500 字符)
+    storage.writeSessionMemorySync('group_custom_budget', '群规');
+    storage.writeUserProfileSync('u1', 'A'.repeat(300));
+    storage.writeUserProfileSync('u2', 'B'.repeat(300));
+
+    const snapshotGroup = storage.getPromptSnapshotSync(
+      'group_custom_budget',
+      [
+        { qq: 'u1', name: 'User1' },
+        { qq: 'u2', name: 'User2' },
+      ],
+      250 // 群聊预算设为 250，u1(300)+群规(2)放完后，u2 必须被舍弃
+    );
+    expect(snapshotGroup).toContain('User1');
+    expect(snapshotGroup).not.toContain('User2');
+  });
 });

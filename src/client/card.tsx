@@ -77,6 +77,8 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   proactive_night_dnd: true,
   memory_storage_dir: '.dsh/napcat/napcat_memory',
   memory_budget_chars: 2200,
+  group_memory_budget_chars: 2200,
+  private_memory_budget_chars: 1500,
   review_enabled: true,
   review_turns_interval: 10,
   review_tool_calls_interval: 10,
@@ -613,16 +615,29 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
           />
 
           <ValueField
-            id="napcat-memory-budget-chars"
-            label="群聊用户画像预算字符上限 (memory_budget_chars)"
-            hint="注入 System Prompt 的群聊用户画像总字符预算，超出时放完整当前用户画像并舍弃后续用户 (默认 2200)"
+            id="napcat-group-memory-budget-chars"
+            label="群聊记忆预算字符上限 (group_memory_budget_chars)"
+            hint="群聊会话规则与多位活跃群友画像注入 Prompt 的字符预算上限，兼单群规则写入物理上限 (默认 2200)"
             placeholder="2200"
             numeric
-            value={String(draft.memory_budget_chars ?? 2200)}
+            value={String(draft.group_memory_budget_chars ?? draft.memory_budget_chars ?? 2200)}
             disabled={saving}
-            overridden={model.isOverridden('memory_budget_chars')}
-            onReset={() => handleResetField('memory_budget_chars')}
-            onChange={(val) => handleFieldChange('memory_budget_chars', parseInt(val, 10) || 2200)}
+            overridden={model.isOverridden('group_memory_budget_chars')}
+            onReset={() => handleResetField('group_memory_budget_chars')}
+            onChange={(val) => handleFieldChange('group_memory_budget_chars', parseInt(val, 10) || 2200)}
+          />
+
+          <ValueField
+            id="napcat-private-memory-budget-chars"
+            label="私聊记忆预算字符上限 (private_memory_budget_chars)"
+            hint="私聊单用户画像及私聊规则注入与存储的字符预算上限 (默认 1500)"
+            placeholder="1500"
+            numeric
+            value={String(draft.private_memory_budget_chars ?? 1500)}
+            disabled={saving}
+            overridden={model.isOverridden('private_memory_budget_chars')}
+            onReset={() => handleResetField('private_memory_budget_chars')}
+            onChange={(val) => handleFieldChange('private_memory_budget_chars', parseInt(val, 10) || 1500)}
           />
 
           <SwitchField

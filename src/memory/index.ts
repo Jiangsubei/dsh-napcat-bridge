@@ -11,6 +11,8 @@ import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } fro
 import { BackgroundReviewManager } from './review.js';
 import {
   DEFAULT_MEMORY_BUDGET_CHARS,
+  DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
+  DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
@@ -22,10 +24,19 @@ export * from './storage.js';
 export * from './tools.js';
 export * from './review.js';
 
+export interface MemoryBudgetOptions {
+  getGroupBudget?: () => number;
+  getPrivateBudget?: () => number;
+}
+
 export interface MemoryServiceOptions {
   storageDir?: string;
   dshHome?: string;
   budgetChars?: number;
+  groupBudgetChars?: number;
+  privateBudgetChars?: number;
+  getGroupBudgetChars?: () => number;
+  getPrivateBudgetChars?: () => number;
   reviewEnabled?: boolean;
   reviewTurnsInterval?: number;
   reviewToolCallsInterval?: number;
@@ -38,7 +49,7 @@ export function registerMemoryPromptContext(
   ctx: Context,
   storage: MemoryStorage,
   db?: MessageDatabase,
-  getBudget: () => number = () => DEFAULT_MEMORY_BUDGET_CHARS
+  budgetInput: (() => number) | MemoryBudgetOptions = () => DEFAULT_MEMORY_BUDGET_CHARS
 ): () => void {
   const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
   if (!systemPrompt || typeof systemPrompt.context !== 'function') {
@@ -66,7 +77,14 @@ export function registerMemoryPromptContext(
       }
 
       const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-      const budget = getBudget() || DEFAULT_MEMORY_BUDGET_CHARS;
+      let budget: number;
+      if (typeof budgetInput === 'function') {
+        budget = budgetInput() || DEFAULT_MEMORY_BUDGET_CHARS;
+      } else {
+        budget = isPrivate
+          ? (budgetInput.getPrivateBudget?.() ?? DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS)
+          : (budgetInput.getGroupBudget?.() ?? DEFAULT_GROUP_MEMORY_BUDGET_CHARS);
+      }
 
       if (isPrivate) {
         // 私聊：直接传入单用户，无 7 天活跃限制
@@ -98,7 +116,24 @@ export function setupMemoryService(
 } {
   const effectiveDshHome = resolveDshPath(options.dshHome);
   const storage = new MemoryStorage(options.storageDir, effectiveDshHome);
-  const tools = new MemoryTools(storage, ctx);
+
+  const getGroupBudget = () =>
+    options.getGroupBudgetChars?.() ??
+    options.groupBudgetChars ??
+    options.budgetChars ??
+    DEFAULT_GROUP_MEMORY_BUDGET_CHARS;
+
+  const getPrivateBudget = () =>
+    options.getPrivateBudgetChars?.() ??
+    options.privateBudgetChars ??
+    options.budgetChars ??
+    DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS;
+
+  const tools = new MemoryTools(storage, ctx, {
+    getUserLimit: getPrivateBudget,
+    getSessionLimit: getGroupBudget,
+  });
+
   const reviewManager = new BackgroundReviewManager(
     ctx,
     {
@@ -143,7 +178,10 @@ export function setupMemoryService(
     ctx,
     storage,
     options.db,
-    () => options.budgetChars || DEFAULT_MEMORY_BUDGET_CHARS
+    {
+      getGroupBudget,
+      getPrivateBudget,
+    }
   );
   unregisters.push(promptDisposer);
 

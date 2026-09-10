@@ -255,19 +255,31 @@ export class MemoryStorage {
     let currentLength = sessionMemory.length;
 
     if (isPrivate) {
-      // 私聊单用户画像全量注入（不受 7 天过滤）
+      // 私聊单用户画像全量注入（带独立预算截断保护）
       const targetQQ = activeUsers[0]?.qq || peer.replace(/^(user_|qq-user-)/, '').split('-')[0];
       const targetName = activeUsers[0]?.name || targetQQ;
       const profile = this.readUserProfileSync(targetQQ).trim();
       if (profile) {
-        if (profile.startsWith('#')) {
-          userBlocks.push(profile);
-        } else {
-          userBlocks.push(`### ${targetName} (${targetQQ})\n${profile}`);
+        let block = profile.startsWith('#')
+          ? profile
+          : `### ${targetName} (${targetQQ})\n${profile}`;
+
+        const joinSeparatorLen = parts.length > 0 ? 2 : 0;
+        const availableBudget = maxBudget - (currentLength + joinSeparatorLen);
+        if (availableBudget > 0 && block.length > availableBudget) {
+          const suffix = '\n...(超预算截断)';
+          const cut = Math.max(0, availableBudget - suffix.length);
+          block = block.slice(0, cut) + suffix;
+        } else if (availableBudget <= 0) {
+          block = '';
+        }
+
+        if (block) {
+          userBlocks.push(block);
         }
       }
     } else {
-      // 群聊多用户：遍历活跃用户画像，并在达到或突破 2200 上限时放完整当前用户、丢弃后续用户
+      // 群聊多用户：遍历活跃用户画像，并在达到或突破预算上限时放完整当前用户、丢弃后续用户
       for (const user of activeUsers) {
         const profile = this.readUserProfileSync(user.qq).trim();
         if (!profile) continue;
