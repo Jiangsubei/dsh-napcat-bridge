@@ -238,7 +238,8 @@ describe('契约 1: 注册范围与会话隔离门控 (Session Isolation Contrac
     expect(registeredTool.name).toBe('send_qq_message');
     expect(registeredTool.description).toBe(
       '向当前 QQ 会话（群聊/私聊）主动发送一条文本给用户。\n' +
-      '- 长任务进行中：向用户汇报进度（end:false 或省略，任务继续）\n' +
+      '- 要发送的内容请全部传入 text 参数，不要在工具调用之外输出文字\n' +
+      '- 长任务进行中：若有关键阶段进展，调用本工具向用户同步（end:false 或省略，任务继续跑后续工具）\n' +
       '- 任务完成发送最终答复：请以 end:true 调用，成功后本轮结束，无需再产出总结文本；收尾的 end:true 尽量单独一条消息调用\n' +
       '- 每条 text 为一条独立 QQ 消息，过长自动分段'
     );
