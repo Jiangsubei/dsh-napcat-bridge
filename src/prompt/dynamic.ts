@@ -8,61 +8,6 @@ import type { Context } from '@deepseek-ai/cordis';
 import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR } from '../constants/index.js';
 
 /**
- * 定稿 QQ 会话专属动态段提示词内容 (需求 B §2.2)
- *
- * 引导大模型在 QQ 会话中主动调用 send_qq_message 工具回复用户。
- * 口径要求：只提如何回复，必须调用该工具，请勿直接在回复正文中回复；
- * 不提 Web UI，严禁告知 turn/end 兜底机制（隐形安全网）。
- */
-export const QQ_SCENARIO_PROMPT = '';
-
-/**
- * 判断指定 ID 是否为合法普通 QQ 会话标识符（群聊 / 私聊）
- */
-function isQQSessionIdentifier(id: string): boolean {
-  if (!id || typeof id !== 'string') return false;
-  const s = id.trim();
-  // 排除 review 等后台沙箱环境
-  if (s.startsWith('review-')) return false;
-  return (
-    s.startsWith('qq-group-') ||
-    s.startsWith('qq-user-') ||
-    s.startsWith('group_') ||
-    s.startsWith('user_')
-  );
-}
-
-/**
- * 从 assemble 上下文中检测是否属于普通 QQ 会话
- * 支持 session.id, sessionId, peer, agent 等常见注入结构
- */
-export function isQQSessionContext(assembleCtx?: any): boolean {
-  if (!assembleCtx) return false;
-
-  // 1. 显式 peer
-  if (typeof assembleCtx.peer === 'string' && isQQSessionIdentifier(assembleCtx.peer)) {
-    return true;
-  }
-
-  // 2. agent / scope / session 嵌套对象
-  const agent = assembleCtx.agent || assembleCtx.scope || assembleCtx.session;
-  const rawId =
-    agent?.session?.id ||
-    agent?.sessionId ||
-    agent?.id ||
-    assembleCtx.sessionId ||
-    assembleCtx.session?.id ||
-    (typeof agent === 'string' ? agent : '') ||
-    (typeof assembleCtx.scope === 'string' ? assembleCtx.scope : '');
-
-  if (typeof rawId === 'string' && isQQSessionIdentifier(rawId)) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario)
  * AB 测试分支：清理关于如何发送消息的提示词，不注册该段。
  */

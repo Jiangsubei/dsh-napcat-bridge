@@ -322,20 +322,6 @@ export interface SendFileResult {
   error?: string;
 }
 
-export interface SendQqMessageParams {
-  text: string;
-  end?: boolean;
-}
-export type SendMessageParams = SendQqMessageParams;
-
-export interface SendQqMessageResult {
-  success: boolean;
-  message_id?: number;
-  sent_preview?: string;
-  error?: string;
-  concludesTurn?: boolean;
-}
-export type SendMessageResult = SendQqMessageResult;
 
 export interface PokeUserParams {
   user_id: string;
