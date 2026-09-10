@@ -172,29 +172,44 @@ export function summarizeMemoryReviewActions(actions: string[]): string {
 }
 
 /**
- * Hermes 对齐审查提示词模板 (适配 QQ 群聊与私聊两层记忆体系)
+ * Hermes 对齐审查提示词模板 (适配 QQ 群聊与私聊两层记忆体系，严格遵循高信号与容量安全原则)
  */
 export const MEMORY_REVIEW_PROMPT_TEMPLATE = `# Memory Review & Distillation Agent
 
-Review the conversation above and consider saving to memory if appropriate.
+Review the conversation above and consider saving durable facts to persistent memory if appropriate.
 
-Focus on:
-1. Has any user revealed things about themselves — their persona, desires, preferences, personal details, tech stacks, or work styles worth remembering? (Use \`create_memory(type='user', content='...', qq='...')\` for initial creation, or \`edit_memory(type='user', old_string='...', new_string='...', qq='...')\` to update or delete).
-2. Has the group or private chat expressed expectations, group rules, discussion topics, forbidden topics, or ways you should operate in this session? (Use \`create_memory(type='session', content='...', peer='...')\` for initial creation, or \`edit_memory(type='session', old_string='...', new_string='...', peer='...')\` to update or delete).
+## Focus Areas (两层长期记忆):
+1. **User Profile (type='user', qq='...')**:
+   - 用户的持久人设、工作风格、技术栈、沟通/记忆偏好、对你的长期期望与习惯。
+2. **Session Rules & Culture (type='session', peer='...')**:
+   - 会话/群聊的通用规则、长期约定与禁忌话题；
+   - **长期稳定的群梗、代号外号、固定互动剧本与群内黑话文化**（此类内容是维系群体氛围与情感连接的核心，应当保留，但必须极度精简，一句话说清对应关系或触发契机，例如 “某暗号触发某类特定回复剧本” 或 “特定技术/术语的固定戏称”）。
 
-If something stands out, save it using the memory tools (read_memory, create_memory, edit_memory). Use create_memory for initial creation, and edit_memory for targeted additions, edits, or removals.
-You automatically inherit recent conversation history from the parent session. If needed, you may also use \`read_chat_history\` to inspect earlier messages.
-If nothing is worth saving, just say 'Nothing to save.' and stop.
+## Strict Guidelines (精炼与高信号铁律):
+- **Compact & High-Signal**: 记忆在后续每轮都会注入上下文，必须保持极度紧凑。
+- **单行原子事实**: 每条记录必须为单行简短 Bullet Point（推荐 30~80 字，如 \`- 偏好：xxx\` 或 \`- 梗/互动：xxx\`）。**严禁编写叙事性段落，严禁记录会话背景故事、具体排查流水账、单次测试细节或长篇复盘**。
+- **Consolidation (合并与精简优先)**:
+  - 遇到已有相似或相关条目，**必须使用 \`edit_memory\` 进行提炼融合或更新，严禁无意义堆叠追加**；
+  - 发现已有记忆中存在过时、失效、冗长或琐碎的内容，主动使用 \`edit_memory\` 精简删减（保持文件体积在容量安全线内）。
 
-## Strict Write Protection Rules (Do NOT capture):
-Do NOT capture (these become persistent self-imposed constraints that bite you later when the environment changes):
+## What to SKIP (禁止记录项):
+- **一次性任务与技术排查**: 某次模型单次跑分、接口调试过程、临时报错分析、限时促销活动/价格变动等（这些属于会话内瞬时信息）；
+- **瞬时社交与无意义水群**: 路过新面孔打招呼、随口客套、单次复读、打卡摸鱼、一过性戏谑、无后续共识的一次性玩笑；
+- **临时 TODO 与未解决失败**: 会话内已解决的瞬时问题、未验证的死胡同方案、容易重新查验的公开信息；
+- **5 类环境/工具负面约束 (Do NOT capture)**:
   • Environment-dependent failures: missing binaries, fresh-install errors, post-migration path mismatches, 'command not found', unconfigured credentials, uninstalled packages. The user can fix these — they are not durable rules.
   • Negative claims about tools or features ('browser tools do not work', 'X tool is broken', 'cannot use Y from execute_code'). These harden into refusals the agent cites against itself for months after the actual problem was fixed.
   • Session-specific transient errors that resolved before the conversation ended. If retrying worked, the lesson is the retry pattern, not the original failure.
   • One-off task narratives. A user asking 'summarize today's market' or 'analyze this PR' is not a class of work that warrants a long-term rule.
   • Unresolved failures: if the session ended WITHOUT actually finding a working method — you tried several things, none worked, and told the user to check manually — do NOT write those attempts up as a 'reliable workflow' or 'recommended approach'. That presents an untested sequence of failures as validated guidance a future session will trust and repeat. Either say 'Nothing to save', or, only if you are independently confident of a real working alternative, capture ONLY that alternative — never the dead ends, and never dressed up as best practice.
 
-'Nothing to save.' is a real option but should NOT be the default. If the session ran smoothly with no new facts/preferences revealed, just say 'Nothing to save.' and stop. Otherwise, act.
+## Stopping Condition:
+If the conversation was ordinary chatting, one-off task execution, or produced no durable facts/preferences/stable culture worth remembering, **just say 'Nothing to save.' and stop immediately**. 'Nothing to save.' is the normal and expected outcome for most regular turns.
+
+## Available Memory Tools:
+- \`read_memory(type='session'|'user', peer='...', qq='...')\`: 读取现有记忆内容以供比对与定位编辑点。
+- \`create_memory(type='session'|'user', content='...', peer='...', qq='...')\`: 仅在文件不存在时首次创建。
+- \`edit_memory(type='session'|'user', old_string='...', new_string='...', peer='...', qq='...')\`: 精确定向修改、合并条目，或将 new_string 设为空/省略以删除过时片段。
 `;
 
 export class BackgroundReviewManager {
