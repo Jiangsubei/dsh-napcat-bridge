@@ -165,7 +165,34 @@ export class SessionManager {
       } catch {}
     }
 
-    return { provider: 'deepseek-official', model: 'deepseek-v4-flash' };
+    return {
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+      reasoningEffort: 'high' as any,
+    };
+  }
+
+  /**
+   * 动态解析指定模型的默认思考档位 (若模型不支持思考则返回 undefined)
+   */
+  async resolveDefaultEffort(provider: string, model: string): Promise<string | undefined> {
+    const llm = this.ctx.get('llm') || (this.ctx as any).llm;
+    if (llm && typeof llm.resolveModelInfo === 'function') {
+      try {
+        const info = await llm.resolveModelInfo(provider, model);
+        if (info && info.reasoning && Array.isArray(info.reasoning.efforts) && info.reasoning.efforts.length > 0) {
+          return info.reasoning.defaultEffort
+            ? String(info.reasoning.defaultEffort)
+            : String(info.reasoning.efforts[0]?.id);
+        } else if (info && info.reasoning === undefined) {
+          return undefined;
+        }
+      } catch {}
+    }
+    if (provider === 'deepseek-official') {
+      return 'high';
+    }
+    return undefined;
   }
 
   /**
@@ -459,12 +486,16 @@ export class SessionManager {
     this.peerCurrentSessionId.set(peer, targetSessionId);
     this.clearedVersions.set(peer, { round: targetRound, version: targetVersion });
     if (this.db) {
+      const existing = this.db.getSessionState(peer);
       this.db.saveSessionState({
         peer,
         current_session_id: targetSessionId,
         cleared_round: targetRound,
         cleared_version: targetVersion,
         updated_at: Date.now(),
+        model_provider: existing?.model_provider,
+        model_name: existing?.model_name,
+        model_reasoning_effort: existing?.model_reasoning_effort,
       });
     }
 
@@ -506,6 +537,24 @@ export class SessionManager {
     }
     const nextSessionId = buildSessionId(baseId, round, nextVersion);
 
+    // 关键：继承前序会话的模型与思考深度，避免新建会话/清空会话后丢失思考配置
+    const prevSel = currentSid ? this.selectionMap.get(currentSid)?.current : undefined;
+    const dbPrev = this.db?.getSessionState(peer);
+    const defaultSel = this.getDefaultModelSelection();
+    const inheritedProvider = prevSel?.provider || dbPrev?.model_provider || defaultSel.provider;
+    const inheritedModel = prevSel?.model || dbPrev?.model_name || defaultSel.model;
+    const inheritedEffort =
+      prevSel?.reasoningEffort ?? dbPrev?.model_reasoning_effort ?? defaultSel.reasoningEffort;
+
+    this.selectionMap.set(nextSessionId, {
+      current: {
+        provider: inheritedProvider,
+        model: inheritedModel,
+        ...(inheritedEffort !== undefined ? { reasoningEffort: inheritedEffort as any } : {}),
+      },
+      assembled: undefined,
+    });
+
     if (this.db) {
       this.db.saveSessionState({
         peer,
@@ -513,6 +562,9 @@ export class SessionManager {
         cleared_round: round,
         cleared_version: nextVersion,
         updated_at: Date.now(),
+        model_provider: inheritedProvider,
+        model_name: inheritedModel,
+        model_reasoning_effort: inheritedEffort,
       });
     }
 
@@ -676,12 +728,16 @@ export class SessionManager {
     this.peerCurrentSessionId.set(peer, sessionId);
     this.clearedVersions.set(peer, { round: parsed.round, version: parsed.version });
     if (this.db) {
+      const existing = this.db.getSessionState(peer);
       this.db.saveSessionState({
         peer,
         current_session_id: sessionId,
         cleared_round: parsed.round,
         cleared_version: parsed.version,
         updated_at: Date.now(),
+        model_provider: existing?.model_provider,
+        model_name: existing?.model_name,
+        model_reasoning_effort: existing?.model_reasoning_effort,
       });
     }
 
@@ -774,6 +830,28 @@ export class SessionManager {
     const provider = selectionRef.current?.provider || defaultSel.provider;
     const model = selectionRef.current?.model || defaultSel.model;
 
+    // 关键修复：确保 reasoningEffort 明确解析，防止 undefined 导致 DSH installModelSelection 清空思考档位
+    let effort: any = selectionRef.current?.reasoningEffort || defaultSel.reasoningEffort;
+    if (effort === undefined) {
+      effort = await this.resolveDefaultEffort(provider, model);
+    }
+    if (effort !== undefined) {
+      selectionRef.current = {
+        provider,
+        model,
+        reasoningEffort: effort,
+      };
+      if (this.db) {
+        const state = this.db.getSessionState(peer);
+        if (state && !state.model_reasoning_effort) {
+          state.model_provider = provider;
+          state.model_name = model;
+          state.model_reasoning_effort = effort;
+          this.db.saveSessionState(state);
+        }
+      }
+    }
+
     const setupFn = (agentCtx: any) => {
       if (typeof agentCtx?.on === 'function') {
         installModelSelection(agentCtx, selectionRef);
@@ -802,7 +880,11 @@ export class SessionManager {
       try {
         handle = await agents.resume({
           resumeSessionId: sessionId as any,
-          agentOptions: { provider, model },
+          agentOptions: {
+            provider,
+            model,
+            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+          },
           setup: setupFn,
         });
       } catch (err: any) {
@@ -820,7 +902,11 @@ export class SessionManager {
       }
       handle = await agents.create({
         sessionId: sessionId as any,
-        agentOptions: { provider, model },
+        agentOptions: {
+          provider,
+          model,
+          ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+        },
         meta: { cwd },
         setup: setupFn,
       });

@@ -803,6 +803,85 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
       llm.resolveModelInfo = origResolve;
     }
   });
+
+  it('契约 14: /model 切换模型时自动动态解析并继承/对齐思考深度，并在回复中呈现思考状态', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session = booted.ctx.sessions.create('qq-group-1014' as any);
+    const admins = ['2000000001'];
+
+    // 1. 初始为 deepseek-v4-flash 并设思考深度为 low
+    sessionManager.setModelSelection(session.id, 'deepseek-official', 'deepseek-v4-flash', 'low');
+
+    // 2. 切换到同支持思考的 deepseek-v4-pro，预期继承前序 low 档位
+    const resInherit = await handleSlashCommand('/model deepseek-v4-pro', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(resInherit.handled).toBe(true);
+    expect(resInherit.success).toBe(true);
+    expect(resInherit.reply).toContain('思考深度：已自动对齐为 `low (Low)` (继承前序设置)');
+    const selAfterInherit = sessionManager.getModelSelection(session.id);
+    expect(selAfterInherit?.model).toBe('deepseek-v4-pro');
+    expect(selAfterInherit?.reasoningEffort).toBe('low');
+
+    // 3. 切换到不支持思考的模型
+    const llm = booted.ctx.get('llm');
+    const origResolve = llm.resolveModelInfo;
+    llm.resolveModelInfo = async () => ({
+      provider: 'mock-provider',
+      id: 'no-think-model',
+      name: 'No Think Model',
+      reasoning: undefined,
+    });
+
+    try {
+      const resNoThink = await handleSlashCommand('/model mock-provider/no-think-model', {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+        sessionManager,
+      });
+      expect(resNoThink.handled).toBe(true);
+      expect(resNoThink.success).toBe(true);
+      expect(resNoThink.reply).toContain('思考能力：当前目标模型不支持深度思考（思考已关闭）');
+      const selNoThink = sessionManager.getModelSelection(session.id);
+      expect(selNoThink?.reasoningEffort).toBeUndefined();
+    } finally {
+      llm.resolveModelInfo = origResolve;
+    }
+  });
+
+  it('契约 15: /clear 开启新会话时继承原会话的模型与思考深度，且新 session 预先植入 selectionMap', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session = booted.ctx.sessions.create('qq-group-1015' as any);
+    const admins = ['2000000001'];
+
+    // 1. 设置当前会话为 deepseek-v4-pro 且思考深度为 max
+    sessionManager.setModelSelection(session.id, 'deepseek-official', 'deepseek-v4-pro', 'max');
+
+    // 2. 执行 /clear 开启新会话
+    const clearRes = await handleSlashCommand('/clear', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(clearRes.handled).toBe(true);
+    expect(clearRes.success).toBe(true);
+
+    // 3. 验证新 session ID 自动继承了 deepseek-v4-pro 与 max
+    const newSid = sessionManager.peerToSessionId('group_1015');
+    expect(newSid).toBe('qq-group-1015-2');
+    const newSel = sessionManager.getModelSelection(newSid);
+    expect(newSel?.provider).toBe('deepseek-official');
+    expect(newSel?.model).toBe('deepseek-v4-pro');
+    expect(newSel?.reasoningEffort).toBe('max');
+  });
 });
 
 
