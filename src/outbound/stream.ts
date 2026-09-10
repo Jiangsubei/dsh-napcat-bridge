@@ -85,8 +85,6 @@ export class OutboundStreamBridge {
   private activeTurns = new Map<string, number>();
   // 记录每个 Turn 是否已经下发过首段前缀 ( `${peer}:${turn}` )
   private turnFirstSent = new Set<string>();
-  // 记录每个 Turn 中 send_message 的调用次数 ( `${peer}:${turn}` -> count )
-  private turnSendMessageCounts = new Map<string, number>();
   private unlisten: (() => void) | null = null;
 
   constructor(
@@ -174,19 +172,6 @@ export class OutboundStreamBridge {
     return this.getActiveTurnContext(peer);
   }
 
-  /**
-   * 获取指定 peer 和 turn 中 send_qq_message 的调用次数
-   */
-  getTurnSendQqMessageCount(peer: string, turn: number): number {
-    return this.turnSendMessageCounts.get(`${peer}:${turn}`) || 0;
-  }
-
-  /**
-   * 获取指定 peer 和 turn 中 send_message 的调用次数 (兼容别名)
-   */
-  getTurnSendMessageCount(peer: string, turn: number): number {
-    return this.getTurnSendQqMessageCount(peer, turn);
-  }
 
   /**
    * 启动出站事件流监听
@@ -233,7 +218,6 @@ export class OutboundStreamBridge {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.activeTurns.set(peer, turn);
-        this.turnSendMessageCounts.set(`${peer}:${turn}`, 0);
         // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn
         for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
           if (entry.peer === peer) {
@@ -274,27 +258,11 @@ export class OutboundStreamBridge {
       return;
     }
 
-    // 监听 session/event 的 tool/call 事件: 跟踪 send_qq_message / send_message 调用次数
-    if (event.type === 'tool/call') {
-      const toolName = (event.data as any)?.name;
-      if (toolName === 'send_qq_message' || toolName === 'send_message') {
-        const turn = typeof (event.data as any)?.turn === 'number'
-          ? (event.data as any).turn
-          : this.activeTurns.get(peer);
-        if (turn !== undefined) {
-          const key = `${peer}:${turn}`;
-          this.turnSendMessageCounts.set(key, (this.turnSendMessageCounts.get(key) || 0) + 1);
-        }
-      }
-      return;
-    }
-
     // 3. 轮次结束: 清理当前 Turn 的绑定映射与首段标记
     if (event.type === 'turn/end') {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.turnFirstSent.delete(`${peer}:${turn}`);
-        this.turnSendMessageCounts.delete(`${peer}:${turn}`);
         if (this.activeTurns.get(peer) === turn) {
           this.activeTurns.delete(peer);
         }
@@ -305,7 +273,6 @@ export class OutboundStreamBridge {
           : undefined;
         if (normalized && normalized !== peer) {
           this.turnFirstSent.delete(`${normalized}:${turn}`);
-          this.turnSendMessageCounts.delete(`${normalized}:${turn}`);
           if (this.activeTurns.get(normalized) === turn) {
             this.activeTurns.delete(normalized);
           }
@@ -433,87 +400,6 @@ export class OutboundStreamBridge {
   }
 
   /**
-   * 为 send_qq_message 工具构建出站 payload (阶段 5 首调引用规则):
-   * - 若不是群聊（如私聊 user_* / qq-user-*），直接返回纯文本 text；
-   * - 仅首个分段 (chunkIndex === 0) 可能携带前缀；
-   * - 同一 Turn 内多次调用，仅首次调用携带本轮锚定消息的引用 (reply) 与艾特 (at) 前缀；
-   * - 后续调用及后续分段均为纯文本；
-   * - 若当前无活跃 Turn（兼容单发），根据 peer 判定首次并记录。
-   */
-  buildSendQqMessagePayload(
-    peer: string,
-    text: string,
-    chunkIndex = 0
-  ): string | Array<Record<string, any>> {
-    const isGroup = peer.startsWith('group_') || peer.startsWith('qq-group-');
-    if (!isGroup) {
-      return text;
-    }
-
-    let activeTurnPeer = peer;
-    let turn = this.activeTurns.get(peer);
-    if (turn === undefined) {
-      const candidates = [
-        typeof (this.options.sessionManager as any)?.sessionIdToPeer === 'function'
-          ? (this.options.sessionManager as any).sessionIdToPeer(peer)
-          : undefined,
-        typeof (this.options.sessionManager as any)?.peerToSessionId === 'function'
-          ? (this.options.sessionManager as any).peerToSessionId(peer)
-          : undefined,
-        peer.startsWith('qq-group-') ? `group_${peer.slice(9)}` : undefined,
-        peer.startsWith('group_') ? `qq-group-${peer.slice(6)}` : undefined,
-      ].filter(Boolean) as string[];
-
-      for (const cand of candidates) {
-        if (this.activeTurns.has(cand)) {
-          activeTurnPeer = cand;
-          turn = this.activeTurns.get(cand);
-          break;
-        }
-      }
-    }
-
-    let shouldPrefix = false;
-    if (chunkIndex === 0) {
-      if (turn !== undefined) {
-        const turnKey = `${activeTurnPeer}:${turn}`;
-        if (!this.turnFirstSent.has(turnKey)) {
-          this.turnFirstSent.add(turnKey);
-          shouldPrefix = true;
-        } else {
-          shouldPrefix = false;
-        }
-      } else {
-        const peerKey = activeTurnPeer;
-        if (!this.turnFirstSent.has(peerKey)) {
-          this.turnFirstSent.add(peerKey);
-          shouldPrefix = true;
-        } else {
-          shouldPrefix = false;
-        }
-      }
-    }
-
-    if (!shouldPrefix) {
-      return text;
-    }
-
-    const inbound = this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
-    return this.buildMessagePayload(peer, text, { withPrefix: true, inbound });
-  }
-
-  /**
-   * 为 send_message 工具构建出站 payload (兼容别名)
-   */
-  buildSendMessagePayload(
-    peer: string,
-    text: string,
-    chunkIndex = 0
-  ): string | Array<Record<string, any>> {
-    return this.buildSendQqMessagePayload(peer, text, chunkIndex);
-  }
-
-  /**
    * 串行有序向 QQ Peer 发送消息 (解决时序乱序竞态, Spec §7.3)
    * 经共享 per-peer 串行发送器下发，与提问/审批/发文件同队列。
    */
@@ -541,7 +427,6 @@ export class OutboundStreamBridge {
     this.turnContexts.clear();
     this.activeTurns.clear();
     this.turnFirstSent.clear();
-    this.turnSendMessageCounts.clear();
   }
 }
 
