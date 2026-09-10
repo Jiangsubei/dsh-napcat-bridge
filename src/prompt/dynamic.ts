@@ -14,14 +14,7 @@ import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR } from '../constants/index.js';
  * 口径要求：只提如何回复，必须调用该工具，请勿直接在回复正文中回复；
  * 不提 Web UI，严禁告知 turn/end 兜底机制（隐形安全网）。
  */
-export const QQ_SCENARIO_PROMPT = `# 如何发送消息
-
-你正在 QQ 聊天中与用户对话。
-
-【如何把内容送达用户】
-- 想向用户发送文字/答复，必须调用 send_qq_message 工具。除工具调用外不要输出任何回复文本。
-- 多步长任务进行中，若有阶段性进展需告知用户，请以 end:false（或省略 end）调用 send_qq_message 汇报进度，发完继续执行后续工具。
-- 任务完成发送最终答复时，请以 end:true 显式调用 send_qq_message 来结束本轮，而不是自然结束。`;
+export const QQ_SCENARIO_PROMPT = '';
 
 /**
  * 判断指定 ID 是否为合法普通 QQ 会话标识符（群聊 / 私聊）
@@ -71,30 +64,10 @@ export function isQQSessionContext(assembleCtx?: any): boolean {
 
 /**
  * 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario)
- *
- * order 设为 10（排在动态段最前，位于记忆段 40、人格段 50 之前）。
- * 过滤条件：仅对 QQ 会话（qq-group-* / qq-user-* / group_* / user_*）返回段文本；
- * 非 QQ 会话（如 Web UI、沙箱）返回空字符串 ''。
- *
- * @param ctx Cordis 上下文
- * @returns 注销该动态段的 Disposer 函数
+ * AB 测试分支：清理关于如何发送消息的提示词，不注册该段。
  */
-export function registerQQScenarioDynamicPrompt(ctx: Context): () => void {
-  const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
-  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-    return () => {};
-  }
-
-  return systemPrompt.context({
-    name: 'napcat:qq_scenario',
-    order: 10,
-    text: (assembleCtx?: any) => {
-      if (!isQQSessionContext(assembleCtx)) {
-        return '';
-      }
-      return QQ_SCENARIO_PROMPT;
-    },
-  });
+export function registerQQScenarioDynamicPrompt(_ctx: Context): () => void {
+  return () => {};
 }
 
 export const registerNapCatQQScenarioPrompt = registerQQScenarioDynamicPrompt;

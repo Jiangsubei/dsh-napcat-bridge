@@ -321,27 +321,13 @@ export class OutboundStreamBridge {
       const turn = typeof msgData?.turn === 'number' ? msgData.turn : this.activeTurns.get(peer);
       const contentBlocks: ContentBlock[] = msgData?.message?.content || [];
 
-      // 旁白结构性抑制（Checklist C1）：
-      // 若 content 中包含任何 tool-call 块，说明此条消息伴随工具调用，
-      // 其中的文本块纯属模型思考旁白或工具间隙溢出，结构性抑制，绝对不向 QQ 发送。
-      const hasToolCall = contentBlocks.some((block) => block && (block as any).type === 'tool-call');
-      if (hasToolCall) {
+      // AB 测试分支：每一轮拿到正文（含伴随工具调用的中间正文），以及最终回复都会直接发送到 QQ
+      const textBlocks = filterAndExtractOutboundBlocks(contentBlocks);
+      if (textBlocks.length === 0) {
         return;
       }
 
       const turnKey = turn !== undefined ? `${peer}:${turn}` : undefined;
-
-      // turn/end 兜底机制（Checklist C2, C3, C4）：
-      // 当 assistant/message 不包含任何 tool-call 时（即纯文本回复）：
-      // 检查当前 turn 的 sendCount
-      const sendCount = turnKey ? (this.turnSendMessageCounts.get(turnKey) || 0) : 0;
-      // 分支 B: sendCount >= 1 -> 模型已通过 send_message 主动发过言，信任模型自管理输出，末尾纯文本回复不发送（仅留存 Web UI，防重复打扰）
-      if (sendCount >= 1) {
-        return;
-      }
-
-      // 分支 A: sendCount === 0 -> 模型未主动调用 send_message，触发安全兜底，将纯文本回复发送给 QQ Peer
-      const textBlocks = filterAndExtractOutboundBlocks(contentBlocks);
 
       // 提取针对该 Turn 的上下文 (Turn 级精准绑定优先)
       let inbound: InboundReplyContextInput | undefined;
