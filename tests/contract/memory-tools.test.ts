@@ -530,5 +530,33 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     // read_memory 描述
     expect(readTool.description).toContain('old_string');
   });
+
+  it('契约 12: MemoryTools 支持动态 limits getter 配置私聊与群聊容量硬上限', async () => {
+    let dynamicUserLimit = 100;
+    let dynamicSessionLimit = 200;
+
+    const dynamicTools = new MemoryTools(storage, undefined, {
+      getUserLimit: () => dynamicUserLimit,
+      getSessionLimit: () => dynamicSessionLimit,
+    });
+
+    // 1. 当 userLimit=100 时，写入 105 字符报错
+    const resOver = await dynamicTools.createMemory({
+      type: 'user',
+      qq: 'dyn_user',
+      content: 'X'.repeat(105),
+    });
+    expect(resOver.success).toBe(false);
+    expect(resOver.message).toContain('超出上限 (100 字符)');
+
+    // 2. 动态调大 limit 到 500 后，立即可以写入
+    dynamicUserLimit = 500;
+    const resOk = await dynamicTools.createMemory({
+      type: 'user',
+      qq: 'dyn_user',
+      content: 'X'.repeat(105),
+    });
+    expect(resOk.success).toBe(true);
+  });
 });
 

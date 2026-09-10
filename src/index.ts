@@ -189,6 +189,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     storageDir: normalizedMemoryDir,
     dshHome,
     budgetChars: currentConfig().memory_budget_chars,
+    groupBudgetChars: currentConfig().group_memory_budget_chars,
+    privateBudgetChars: currentConfig().private_memory_budget_chars,
+    getGroupBudgetChars: () =>
+      currentConfig().group_memory_budget_chars ??
+      currentConfig().memory_budget_chars,
+    getPrivateBudgetChars: () =>
+      currentConfig().private_memory_budget_chars ??
+      currentConfig().memory_budget_chars,
     reviewEnabled: currentConfig().review_enabled,
     reviewTurnsInterval: currentConfig().review_turns_interval,
     reviewToolCallsInterval: currentConfig().review_tool_calls_interval,
