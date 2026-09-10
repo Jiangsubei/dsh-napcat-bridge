@@ -293,13 +293,20 @@ export class SessionManager {
 
     if (persistDb && this.db) {
       const peer = this.sessionIdToPeer(sessionId);
-      const state = this.db.getSessionState(peer);
-      if (state) {
-        state.model_provider = provider;
-        state.model_name = model;
-        state.model_reasoning_effort = reasoningEffort ?? undefined;
-        this.db.saveSessionState(state);
+      let state = this.db.getSessionState(peer);
+      if (!state) {
+        state = {
+          peer,
+          current_session_id: sessionId,
+          cleared_round: 0,
+          cleared_version: 1,
+          updated_at: Date.now(),
+        };
       }
+      state.model_provider = provider;
+      state.model_name = model;
+      state.model_reasoning_effort = reasoningEffort ?? undefined;
+      this.db.saveSessionState(state);
     }
   }
 
@@ -815,9 +822,11 @@ export class SessionManager {
       sessionId = this.peerToSessionId(peer);
     }
 
+    const selectionRef = this.getOrCreateSelectionRef(sessionId);
     const agents = this.ctx.get('agents') || (this.ctx as any).agents;
     let agent = agents?.get(sessionId as any);
     if (agent && !this.isSessionArchived(sessionId)) {
+      (agent as any).modelSelection = selectionRef;
       this.updateSessionTitle((agent as any).session, peer, sessionId);
       return agent;
     }
@@ -825,7 +834,6 @@ export class SessionManager {
     const cwd = this.resolveCwd(sessionId);
     await fsp.mkdir(cwd, { recursive: true });
 
-    const selectionRef = this.getOrCreateSelectionRef(sessionId);
     const defaultSel = this.getDefaultModelSelection();
     const provider = selectionRef.current?.provider || defaultSel.provider;
     const model = selectionRef.current?.model || defaultSel.model;
@@ -842,8 +850,17 @@ export class SessionManager {
         reasoningEffort: effort,
       };
       if (this.db) {
-        const state = this.db.getSessionState(peer);
-        if (state && !state.model_reasoning_effort) {
+        let state = this.db.getSessionState(peer);
+        if (!state) {
+          state = {
+            peer,
+            current_session_id: sessionId,
+            cleared_round: 0,
+            cleared_version: 1,
+            updated_at: Date.now(),
+          };
+        }
+        if (!state.model_reasoning_effort) {
           state.model_provider = provider;
           state.model_name = model;
           state.model_reasoning_effort = effort;
@@ -924,6 +941,7 @@ export class SessionManager {
     // 锁定会话标题，防止 LLM 自动总结覆盖
     this.updateSessionTitle(handle.agent.session, peer, sessionId);
 
+    (handle.agent as any).modelSelection = selectionRef;
     return handle.agent;
   }
 
