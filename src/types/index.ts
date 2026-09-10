@@ -308,6 +308,8 @@ export interface ForwardNode {
 export interface ExpandForwardMessageResult {
   success: boolean;
   messages?: ForwardNode[];
+  /** FC-1: 本次展开中成功落盘的内层图片数量（缺省表示无新增落盘） */
+  images_downloaded?: number;
   error?: string;
 }
 
