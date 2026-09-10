@@ -23,19 +23,9 @@ import type {
   ForwardNode,
   ReactMessageParams,
   ReactMessageResult,
-  SendQqMessageParams,
-  SendQqMessageResult,
-  SendMessageParams,
-  SendMessageResult,
 } from '../types/index.js';
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
-export type {
-  SendQqMessageParams,
-  SendQqMessageResult,
-  SendMessageParams,
-  SendMessageResult,
-};
 import type { MessageDatabase } from '../storage/database.js';
 import { formatDateTime } from '../storage/database.js';
 import type { MediaStorageManager } from '../storage/media.js';
@@ -44,8 +34,6 @@ import type { MessageWaitRegistry, WaitCollectedMessage } from '../gateway/serve
 import type { SerialSender } from '../types/index.js';
 import { classifySendFileSource, detectSendFileType } from './file-source.js';
 import { downloadPrivateFile } from './private-file.js';
-import { stripMarkdown } from '../outbound/render.js';
-import type { OutboundStreamBridge } from '../outbound/stream.js';
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -61,10 +49,6 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
   /** 当前回合入站消息 ID 获取器（react_message 省略 message_id 时默认绑定） */
   inboundMsgIdGetter?: (peer: string) => number | undefined;
-  /** 出站流桥接器 (阶段 5 首调引用规则) */
-  outboundBridge?: OutboundStreamBridge | null;
-  /** 自定义出站载荷格式化器 (可选透传) */
-  formatOutboundPayload?: (peer: string, text: string, chunkIndex: number) => string | Array<Record<string, any>>;
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -642,109 +626,6 @@ export function splitMessageText(text: string, maxLength = 1500): string[] {
 }
 
 /**
- * 6.9 主动发言工具 (send_qq_message)
- * 大模型向当前普通 QQ 会话（群聊/私聊）主动发送文本消息。
- *
- * 走现有共享 per-peer 串行队列 + stripMarkdown 转换为纯文本；超长文本自动分段；
- * 成功返回 message_id 与 sent_preview。
- */
-export async function sendQqMessage(
-  params: SendQqMessageParams,
-  context?: ToolExecutionContext
-): Promise<SendQqMessageResult> {
-  const ctx = { ...globalToolContext, ...context };
-
-  // 1. 参数非空校验（空文本/纯空白/stripMarkdown 后为空）
-  if (!params || typeof params.text !== 'string') {
-    return { success: false, error: '发送内容不能为空。' };
-  }
-  const plainText = stripMarkdown(params.text).trim();
-  if (!plainText) {
-    return { success: false, error: '发送内容不能为空。' };
-  }
-
-  // 2. 防御守卫：校验 QQ 会话上下文（隔离 WebUI、review 沙箱、加好友 session 等）
-  const rawPeer = ctx.peer || '';
-  const peer = normalizePeer(rawPeer);
-  const isQQ =
-    Boolean(rawPeer) &&
-    !rawPeer.startsWith('review-') &&
-    !rawPeer.startsWith('friend-request-') &&
-    !rawPeer.startsWith('web-') &&
-    (peer.startsWith('group_') || peer.startsWith('user_'));
-
-  if (!isQQ) {
-    return { success: false, error: 'send_qq_message 需在 QQ 会话中执行' };
-  }
-
-  // 3. end 信号：非 true 即 false，不隐式推断
-  const isEnd = (params as any)?.end === true;
-
-  // 4. 超长文本自动分段并经串行队列分批发送（含透明重试：最多 5 次 × 500ms）
-  const chunks = splitMessageText(plainText, 1500);
-  let lastMessageId: number | undefined;
-
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    const payload =
-      ctx.formatOutboundPayload?.(peer, chunk, i) ??
-      ctx.outboundBridge?.buildSendQqMessagePayload?.(peer, chunk, i) ??
-      ctx.outboundBridge?.buildSendMessagePayload?.(peer, chunk, i) ??
-      chunk;
-    const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
-
-    let chunkSuccess = false;
-    let lastError = '';
-
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      try {
-        const res = ctx.sender
-          ? await ctx.sender.enqueue(peer, sendTask)
-          : await sendTask();
-
-        if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
-          const detail = res.wording || res.message || res.retcode;
-          lastError = `消息发送失败: ${detail}`;
-        } else {
-          const mid = res?.data?.message_id;
-          if (mid !== undefined && mid !== null && mid !== '') {
-            lastMessageId = Number(mid);
-            chunkSuccess = true;
-            break;
-          } else {
-            lastError = '消息发送失败: 未返回 message_id';
-          }
-        }
-      } catch (err: any) {
-        lastError = `消息发送失败: ${err?.message || '未知错误'}`;
-      }
-
-      if (attempt < 5) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
-
-    if (!chunkSuccess) {
-      return { success: false, error: lastError || '消息发送失败' };
-    }
-  }
-
-  if (lastMessageId === undefined || Number.isNaN(lastMessageId)) {
-    return { success: false, error: '消息发送失败: 未返回 message_id' };
-  }
-
-  const sent_preview = plainText.length > 60 ? `${plainText.slice(0, 60)}...` : plainText;
-  return {
-    success: true,
-    message_id: lastMessageId,
-    sent_preview,
-    ...(isEnd ? { concludesTurn: true } : {}),
-  };
-}
-
-export const sendMessage = sendQqMessage;
-
-/**
  * 注册 Agent 工具集至 DSH 工具运行时 (ctx.tools)
  */
 export function registerAgentTools(
@@ -757,8 +638,6 @@ export function registerAgentTools(
     dshHome?: string;
     waitRegistry?: MessageWaitRegistry;
     inboundMsgIdGetter?: (peer: string) => number | undefined;
-    outboundBridge?: OutboundStreamBridge | null;
-    formatOutboundPayload?: (peer: string, text: string, chunkIndex: number) => string | Array<Record<string, any>>;
   }
 ): () => void {
   setGlobalToolContext({
@@ -768,8 +647,6 @@ export function registerAgentTools(
     sender: options.sender,
     waitRegistry: options.waitRegistry,
     inboundMsgIdGetter: options.inboundMsgIdGetter,
-    outboundBridge: options.outboundBridge,
-    formatOutboundPayload: options.formatOutboundPayload,
   });
 
   const unregisters: Array<() => void> = [];

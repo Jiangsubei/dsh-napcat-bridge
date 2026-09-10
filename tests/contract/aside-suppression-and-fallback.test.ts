@@ -1,12 +1,12 @@
 /**
- * 契约测试: 阶段 4 出站旁白抑制与 turn/end 自动补发兜底机制
+ * 契约测试: 出站直发模式（Direct Stream）与多步消息流转机制
  *
  * 覆盖规范清单:
- * 契约 1: 旁白结构性抑制：当 assistant/message 中同时包含 TextBlock 和 tool-call 块时，纯文本永不自动发送给 NapCat 网关；
- * 契约 2: 纯终答发出：当 assistant/message 中仅包含 TextBlock 且无 tool-call 时，作为终答正常下发（群聊带引用/@ 前缀，私聊纯文本）；
- * 契约 3: turn/end 兜底分支 A (0 次 send_message)：当本轮未调用 send_message 时，纯文本终答正常发送到 QQ；
- * 契约 4: turn/end 兜底分支 B (≥1 次 send_message)：当本轮中途调用了 send_message（收到 tool/call name: 'send_message'），末尾输出的纯文本终答被抑制，不重复发送到 QQ；
- * 契约 5: 多步交互场景：Step 1 带 tool-call (如 read_chat_history) 的思考旁白被抑制，Step 2 纯文本终答正常发出；
+ * 契约 1: 伴随工具调用的中间正文直接直发 NapCat，且思考块 (reasoning) 严密过滤不泄漏；
+ * 契约 2: 纯终答发出：当 assistant/message 仅包含 TextBlock 且无 tool-call 时，作为终答正常下发（群聊带引用/@ 前缀，私聊纯文本）；
+ * 契约 3: 纯文本终答直发出站，turn 结束正常清理映射；
+ * 契约 4: 多步交互场景中，伴随工具调用的中间正文首发带前缀，末尾终答直接下发且不重复携带前缀；
+ * 契约 5: 多步交互场景：Step 1 伴随 tool-call 正文直发，Step 2 纯工具调用无正文不下发，Step 3 纯文本终答直发；
  * 契约 6: 真实生产装配闭环验证（基于 bootDshNapcatBridge + 真实 WS 网关）。
  */
 
@@ -22,7 +22,7 @@ import * as NapCatBridgePlugin from '../../src/index.js';
 import { OutboundStreamBridge } from '../../src/outbound/stream.js';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 
-describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机制单元契约', () => {
+describe('契约 1 ~ 5: OutboundStreamBridge 直发模式与多步消息出站单元契约', () => {
   function makeMockBridge(sent: Array<{ peer: string; msg: any }>, config: Record<string, any> = {}) {
     const gateway = {
       sendMsg: async (peer: string, msg: any) => {
@@ -48,7 +48,7 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
     return { bridge, ctx };
   }
 
-  it('契约 1: 旁白结构性抑制：当 assistant/message 中同时包含 TextBlock 和 tool-call 块时，纯文本永不自动发送给 NapCat', async () => {
+  it('契约 1: 直发模式：当 assistant/message 中同时包含 TextBlock 和 tool-call 块时，中间正文直接发送给 NapCat，且思考块严禁泄漏', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const { bridge } = makeMockBridge(sent);
     const session = { id: 'qq-group-10001' };
@@ -68,8 +68,12 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
       data: { id: 'msg_user_1', content: [{ type: 'text', text: '请帮我查天气' }] },
     } as any);
 
-    // 模型输出伴随工具调用，包含过程性思考文本
+    // 模型输出伴随工具调用，包含过程性思考文本与正文
     const blocksWithToolCall: ContentBlock[] = [
+      {
+        type: 'reasoning',
+        text: 'Thinking about weather in Beijing...',
+      },
       {
         type: 'text',
         text: '好的，正在为您查询北京市的天气情况，请稍候...',
@@ -91,8 +95,14 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
       },
     } as any);
 
-    // 关键断言：文本被结构性抑制，绝不向 QQ 下发
-    expect(sent).toHaveLength(0);
+    // 关键断言：直发模式下，中间正文直接向 QQ 下发，首段携带引用，思考过程严禁外泄
+    expect(sent).toHaveLength(1);
+    expect(sent[0].peer).toBe('group_10001');
+    const segs = sent[0].msg as Array<Record<string, any>>;
+    expect(Array.isArray(segs)).toBe(true);
+    expect(segs.find((s) => s.type === 'reply')?.data?.id).toBe(10001);
+    expect(segs.find((s) => s.type === 'text')?.data?.text).toBe('好的，正在为您查询北京市的天气情况，请稍候...');
+    expect(JSON.stringify(sent[0])).not.toContain('Thinking about weather');
   });
 
   it('契约 2: 纯终答发出：当 assistant/message 仅包含 TextBlock 且无 tool-call 时，作为终答正常下发（群聊带引用/@ 前缀，私聊纯文本）', async () => {
@@ -166,7 +176,7 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
     expect(userSent[0].msg).toBe('私聊纯文本终答。');
   });
 
-  it('契约 3: turn/end 兜底分支 A (0 次 send_message)：当本轮未调用 send_message 时，纯文本终答正常补发到 QQ', async () => {
+  it('契约 3: 纯文本终答直发出站，turn 结束正常清理映射', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const { bridge } = makeMockBridge(sent);
     const session = { id: 'qq-group-10001' };
@@ -186,35 +196,33 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
       data: { id: 'msg_fallback_a', content: [{ type: 'text', text: '你好' }] },
     } as any);
 
-    // 未发生 send_message 调用（sendCount === 0）
     // 输出纯文本终答
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
         turn: 1,
         step: 1,
-        message: { content: [{ type: 'text', text: '这是兜底发出的终答。' }] },
+        message: { content: [{ type: 'text', text: '这是发出的终答。' }] },
       },
     } as any);
 
     expect(sent).toHaveLength(1);
     const segs = sent[0].msg as Array<Record<string, any>>;
-    expect(segs.find((s) => s.type === 'text')?.data?.text).toBe('这是兜底发出的终答。');
+    expect(segs.find((s) => s.type === 'text')?.data?.text).toBe('这是发出的终答。');
 
     // turn/end 结束并清理
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/end',
       data: { turn: 1 },
     } as any);
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(0);
   });
 
-  it('契约 4: turn/end 兜底分支 B (≥1 次 send_message)：当本轮中途调用了 send_message，末尾纯文本终答被抑制，不重复发送到 QQ', async () => {
+  it('契约 4: 多步交互场景中，伴随工具调用的中间正文与末尾终答均直发 QQ，且同轮次后续不重复带前缀', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const { bridge } = makeMockBridge(sent);
     const session = { id: 'qq-group-10001' };
 
-    bridge.trackPendingMessage('msg_fallback_b', 'group_10001', {
+    bridge.trackPendingMessage('msg_step_flow', 'group_10001', {
       msg_id: 40001,
       from_user: '2000000001',
       is_group: true,
@@ -226,11 +234,10 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
     } as any);
     await bridge.handleSessionEvent(session as any, {
       type: 'user/message',
-      data: { id: 'msg_fallback_b', content: [{ type: 'text', text: '帮我发消息' }] },
+      data: { id: 'msg_step_flow', content: [{ type: 'text', text: '帮我发消息' }] },
     } as any);
 
-    // Step 1: 模型调用了 send_qq_message
-    // 1) assistant/message 带 tool-call
+    // Step 1: 模型输出中间正文并调用工具
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
@@ -238,52 +245,43 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
         step: 1,
         message: {
           content: [
-            { type: 'text', text: '准备调用 send_qq_message 工具主动发言...' },
-            { type: 'tool-call', id: 'call_send', name: 'send_qq_message', arguments: '{"text":"主动内容"}' },
+            { type: 'text', text: '正在处理中，请稍候...' },
+            { type: 'tool-call', id: 'call_bash', name: 'bash', arguments: '{"command":"ls"}' },
           ],
         },
       },
     } as any);
-    expect(sent).toHaveLength(0); // 旁白抑制
 
-    // 2) session 派发 tool/call 事件
-    await bridge.handleSessionEvent(session as any, {
-      type: 'tool/call',
-      data: {
-        turn: 1,
-        step: 1,
-        callId: 'call_send',
-        name: 'send_qq_message',
-        arguments: '{"text":"主动内容"}',
-      },
-    } as any);
-    expect(bridge.getTurnSendQqMessageCount('group_10001', 1)).toBe(1);
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(1);
+    // Step 1 正文直发出站，首段带引用
+    expect(sent).toHaveLength(1);
+    const segs1 = sent[0].msg as Array<Record<string, any>>;
+    expect(segs1.find((s) => s.type === 'reply')?.data?.id).toBe(40001);
+    expect(segs1.find((s) => s.type === 'text')?.data?.text).toBe('正在处理中，请稍候...');
 
-    // Step 2: 模型在末尾输出了纯文本（仅留存 Web UI，不向 QQ 发送）
+    // Step 2: 模型输出末尾纯文本终答
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
         turn: 1,
         step: 2,
         message: {
-          content: [{ type: 'text', text: '我已经通过主动发言工具发送完毕！' }],
+          content: [{ type: 'text', text: '任务已全部处理完成！' }],
         },
       },
     } as any);
 
-    // 核心断言：因为 sendCount >= 1，末尾的纯文本终答被抑制，sent 依然为 0！
-    expect(sent).toHaveLength(0);
+    // 终答直接下发，同轮次后续不重复带前缀
+    expect(sent).toHaveLength(2);
+    expect(sent[1].msg).toBe('任务已全部处理完成！');
 
     // 轮次正常关闭
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/end',
       data: { turn: 1 },
     } as any);
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(0);
   });
 
-  it('契约 5: 多步交互场景：Step 1 带 tool-call (如 read_chat_history) 的思考旁白被抑制，Step 2 纯文本终答正常发出', async () => {
+  it('契约 5: 多步交互场景：Step 1 带正文和 tool-call 时正文直发，Step 2 纯工具调用无正文不下发，Step 3 纯文本终答直发', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const { bridge } = makeMockBridge(sent);
     const session = { id: 'qq-group-10001' };
@@ -303,7 +301,7 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
       data: { id: 'msg_multi_step', content: [{ type: 'text', text: '查一下之前的讨论' }] },
     } as any);
 
-    // Step 1: 调用 read_chat_history
+    // Step 1: 调用 read_chat_history 并伴随正文说明
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
@@ -317,57 +315,53 @@ describe('契约 1 ~ 5: OutboundStreamBridge 旁白抑制与 turn/end 兜底机�
         },
       },
     } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'tool/call',
-      data: {
-        turn: 1,
-        step: 1,
-        callId: 'call_read',
-        name: 'read_chat_history',
-        arguments: '{"limit":10}',
-      },
-    } as any);
 
-    // 断言 Step 1 思考旁白被抑制，read_chat_history 不是 send_message 不增加计数
-    expect(sent).toHaveLength(0);
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(0);
+    // Step 1 正文直发出站
+    expect(sent).toHaveLength(1);
+    const segs1 = sent[0].msg as Array<Record<string, any>>;
+    expect(segs1.find((s) => s.type === 'reply')?.data?.id).toBe(50001);
+    expect(segs1.find((s) => s.type === 'text')?.data?.text).toBe('我来看看大家刚才在聊什么...');
 
-    // Step 2: 模型综合查询结果后输出纯文本终答
+    // Step 2: 纯工具调用无正文（只有 reasoning + tool-call）
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
         turn: 1,
         step: 2,
         message: {
+          content: [
+            { type: 'reasoning', text: 'Analyzing records...' },
+            { type: 'tool-call', id: 'call_tool2', name: 'other_tool', arguments: '{}' },
+          ],
+        },
+      },
+    } as any);
+
+    // 纯工具步骤无正文，不下发任何 QQ 消息
+    expect(sent).toHaveLength(1);
+
+    // Step 3: 模型综合查询结果后输出纯文本终答
+    await bridge.handleSessionEvent(session as any, {
+      type: 'assistant/message',
+      data: {
+        turn: 1,
+        step: 3,
+        message: {
           content: [{ type: 'text', text: '根据历史记录，大家讨论了明天的团建安排。' }],
         },
       },
     } as any);
 
-    // 断言 Step 2 纯文本终答正常发出，且首段携带引用
-    expect(sent).toHaveLength(1);
-    const segs = sent[0].msg as Array<Record<string, any>>;
-    expect(segs.find((s) => s.type === 'reply')?.data?.id).toBe(50001);
-    expect(segs.find((s) => s.type === 'text')?.data?.text).toBe('根据历史记录，大家讨论了明天的团建安排。');
+    // 断言 Step 3 纯文本终答正常发出，同轮次不重复带前缀
+    expect(sent).toHaveLength(2);
+    expect(sent[1].msg).toBe('根据历史记录，大家讨论了明天的团建安排。');
   });
 
-  it('补充契约: dispose 清空所有 turnSendMessageCounts 映射', async () => {
+  it('补充契约: dispose 安全清理映射', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const { bridge } = makeMockBridge(sent);
-    const session = { id: 'qq-group-10001' };
-
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/start',
-      data: { turn: 1 },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'tool/call',
-      data: { turn: 1, step: 1, callId: 'c1', name: 'send_message', arguments: '{}' },
-    } as any);
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(1);
-
     bridge.dispose();
-    expect(bridge.getTurnSendMessageCount('group_10001', 1)).toBe(0);
+    expect(sent).toHaveLength(0);
   });
 });
 
@@ -402,7 +396,7 @@ describe('契约 6: 真实生产装配闭环验证 (Real Assembly via bootDshNap
     } catch {}
   });
 
-  it('真实装配下：带 tool-call 旁白被抑制；0 次 send_message 补发终答；≥1 次 send_message 抑制终答', async () => {
+  it('真实装配下：中间正文与最终终答均顺畅直发出站，且 reasoning 块坚决过滤', async () => {
     booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
@@ -486,7 +480,7 @@ describe('契约 6: 真实生产装配闭环验证 (Real Assembly via bootDshNap
       data: capturedUserMsgs[0],
     });
 
-    // 3. Step 1: 模型输出带 tool-call 的旁白思考
+    // 3. Step 1: 模型输出带 tool-call 的中间正文与思考
     (booted.ctx as any).emit('session/event', session, {
       seq: seq++,
       type: 'assistant/message',
@@ -495,23 +489,28 @@ describe('契约 6: 真实生产装配闭环验证 (Real Assembly via bootDshNap
         step: 1,
         message: {
           content: [
+            { type: 'reasoning', text: 'Internal checking logic...' },
             { type: 'text', text: '正在调工具检查系统状态...' },
             { type: 'tool-call', id: 'call_chk', name: 'read_chat_history', arguments: '{}' },
           ],
         },
       },
     });
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'tool/call',
-      data: { turn: 1, step: 1, callId: 'call_chk', name: 'read_chat_history', arguments: '{}' },
-    });
 
     await new Promise((r) => setTimeout(r, 150));
-    // 真实网关未收到任何出站消息帧（旁白被结构抑制）
-    expect(sentActionFrames).toHaveLength(0);
+    // 真实网关收到第 1 条中间正文，且携带引用
+    expect(sentActionFrames).toHaveLength(1);
+    const frame1 = sentActionFrames[0];
+    expect(frame1.action).toBe('send_group_msg');
+    expect(frame1.params.group_id).toBe(GROUP_ID);
+    const replySeg = frame1.params.message.find((s: any) => s.type === 'reply');
+    expect(replySeg?.data?.id).toBe(realMsgId);
+    const textSeg = frame1.params.message.find((s: any) => s.type === 'text');
+    expect(textSeg?.data?.text).toBe('正在调工具检查系统状态...');
+    // 思考过程绝不外泄
+    expect(JSON.stringify(frame1)).not.toContain('Internal checking logic');
 
-    // 4. Step 2: 模型输出纯文本终答 (本轮 send_message 计数为 0 -> 兜底发出)
+    // 4. Step 2: 模型输出纯文本终答
     (booted.ctx as any).emit('session/event', session, {
       seq: seq++,
       type: 'assistant/message',
@@ -530,79 +529,12 @@ describe('契约 6: 真实生产装配闭环验证 (Real Assembly via bootDshNap
     });
 
     await new Promise((r) => setTimeout(r, 150));
-    // 真实网关收到 1 条群消息
-    expect(sentActionFrames).toHaveLength(1);
-    const frame1 = sentActionFrames[0];
-    expect(frame1.action).toBe('send_group_msg');
-    expect(frame1.params.group_id).toBe(GROUP_ID);
-    const replySeg = frame1.params.message.find((s: any) => s.type === 'reply');
-    expect(replySeg?.data?.id).toBe(realMsgId);
-    const textSeg = frame1.params.message.find((s: any) => s.type === 'text');
-    expect(textSeg?.data?.text).toBe('系统一切正常。');
-
-    // 5. 轮次 2：测试 send_message 调用后终答被抑制
-    sentActionFrames.length = 0; // 清空
-    const realMsgId2 = 77002;
-    client.send(
-      JSON.stringify({
-        post_type: 'message',
-        message_type: 'group',
-        sub_type: 'normal',
-        message_id: realMsgId2,
-        group_id: GROUP_ID,
-        user_id: USER_QQ,
-        time: 1700000005,
-        self_id: BOT_QQ,
-        sender: { user_id: USER_QQ, nickname: 'Tester', card: 'Tester' },
-        message: [
-          { type: 'at', data: { qq: BOT_QQ } },
-          { type: 'text', data: { text: ' 主动发言测试' } },
-        ],
-        raw_message: `[CQ:at,qq=${BOT_QQ}] 主动发言测试`,
-      })
-    );
-
-    await new Promise((r) => setTimeout(r, 150));
-    expect(capturedUserMsgs).toHaveLength(2);
-
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'turn/start',
-      data: { turn: 2 },
-    });
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'user/message',
-      data: capturedUserMsgs[1],
-    });
-
-    // 模型在轮次 2 中调用了 send_qq_message
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'tool/call',
-      data: { turn: 2, step: 1, callId: 'call_send_2', name: 'send_qq_message', arguments: '{"text":"主动发出的测试"}' },
-    });
-
-    // 随后模型输出末尾纯文本回复
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'assistant/message',
-      data: {
-        turn: 2,
-        step: 2,
-        message: {
-          content: [{ type: 'text', text: '我已调用主动发言工具完成任务。' }],
-        },
-      },
-    });
-    (booted.ctx as any).emit('session/event', session, {
-      seq: seq++,
-      type: 'turn/end',
-      data: { turn: 2, reason: { kind: 'completed' } },
-    });
-
-    await new Promise((r) => setTimeout(r, 150));
-    // 关键断言：因为本轮已调用 send_message，末尾纯文本被抑制，真实网关未收到多余的出站文本消息
-    expect(sentActionFrames).toHaveLength(0);
+    // 真实网关共收到 2 条群消息，终答顺畅发出
+    expect(sentActionFrames).toHaveLength(2);
+    const frame2 = sentActionFrames[1];
+    expect(frame2.action).toBe('send_group_msg');
+    expect(frame2.params.group_id).toBe(GROUP_ID);
+    expect(frame2.params.message).toBe('系统一切正常。');
   });
 });
+
