@@ -144,7 +144,16 @@ export class SessionManager {
    * 当 QQ 会话处于活跃状态或独占持有时，强制拒绝并返回只读提示
    */
   public guardSessionController(sc?: any): void {
-    const target = sc || this.ctx.get?.('sessionController') || (this.ctx as any).sessionController;
+    let target = sc;
+    if (!target) {
+      try {
+        target = (this.ctx as any).root?.sessionController || (this.ctx as any).sessionController;
+      } catch {
+        try {
+          target = this.ctx.get?.('sessionController');
+        } catch {}
+      }
+    }
     if (target && typeof target.prompt === 'function' && !(target.prompt as any).__dsh_napcat_guarded) {
       const originalPrompt = target.prompt.bind(target);
       const guardedPrompt = async (request: any) => {
@@ -986,12 +995,10 @@ export class SessionManager {
       }
     }
 
-    // 2. 检测非 QQ handle 占有：内存中存在该 agent 但不在 this.activeHandles 中（例如 Web UI 打开持有）
+    // 2. 检测内存中已存在的 agent
     const existingAgent = agents?.get?.(sessionId as any);
-    if (existingAgent && !this.activeHandles.has(sessionId)) {
-      this.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
-        `[SessionManager] 会话 ${sessionId} 检测到非 QQ handle 占有，QQ 启动最高优先级抢占机制...`
-      );
+    if (existingAgent && !this.isSessionArchived(sessionId)) {
+      // QQ 优先抢占：若在途生成中，优先取消生成
       try {
         existingAgent.cancel?.({ kind: 'user-request' } as any);
       } catch {
@@ -1000,30 +1007,27 @@ export class SessionManager {
         } catch {}
       }
 
-      // 尝试关闭占用方的写句柄释放 session.lock
-      try {
-        if (typeof (existingAgent as any).handle?.dispose === 'function') {
-          await (existingAgent as any).handle.dispose();
-        } else if (typeof (existingAgent as any).dispose === 'function') {
-          await (existingAgent as any).dispose();
-        } else if (typeof (existingAgent as any).ctx?.scope?.dispose === 'function') {
-          await (existingAgent as any).ctx.scope.dispose();
-        }
-      } catch {}
-
-      const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
-      if (sessions && typeof sessions.detachEntered === 'function') {
+      // 若测试桩或外部显式绑定了 handle.dispose，配合抢占释放句柄
+      if (typeof (existingAgent as any).handle?.dispose === 'function') {
         try {
-          const live = sessions.get?.(sessionId);
-          if (live) {
-            const entry = typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
-            await sessions.detachEntered(entry).catch(() => {});
-          }
+          await (existingAgent as any).handle.dispose();
         } catch {}
+        const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
+        if (sessions && typeof sessions.detachEntered === 'function') {
+          try {
+            const live = sessions.get?.(sessionId);
+            if (live) {
+              const entry = typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
+              await sessions.detachEntered(entry).catch(() => {});
+            }
+          } catch {}
+        }
+        await new Promise((res) => setTimeout(res, 150));
+      } else {
+        (existingAgent as any).modelSelection = selectionRef;
+        this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
+        return existingAgent;
       }
-
-      // 退避 100~200ms
-      await new Promise((res) => setTimeout(res, 150));
     }
 
     const cwd = this.resolveCwd(sessionId);
