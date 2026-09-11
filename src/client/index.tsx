@@ -8,7 +8,10 @@ import { NapCatSettingsCard } from './card.js';
 import { SETTINGS_NAMESPACE } from '../constants/index.js';
 
 export const name = 'dsh-napcat-bridge/client';
-export const inject = ['slots', 'connection', 'settingsScope'];
+export const inject = ['slots', 'connection', 'settingsScope', 'sessions', 'workspaces'];
+
+export const READONLY_STYLE_ID = 'dsh-napcat-readonly-style';
+export const READONLY_BODY_ATTR = 'data-dsh-napcat-readonly';
 
 /**
  * Build the card props bridge for one settings namespace.
@@ -180,6 +183,93 @@ export function buildSettingsBridge(ctx: any, namespace: string = SETTINGS_NAMES
 }
 
 /**
+ * 判断指定 Workspace 是否属于 NapCat QQ 桥接工作区
+ */
+export function isNapCatWorkspace(ws: any): boolean {
+  if (!ws || typeof ws !== 'object') return false;
+  const title = String(ws.title || '').toLowerCase();
+  const path = String(ws.path || '').toLowerCase();
+  return title.includes('napcat') || path.includes('napcat');
+}
+
+export interface IsNapCatOptions {
+  sessionId?: string;
+  currentWorkspaceId?: string;
+  workspaces?: any[] | { items?: any[] };
+}
+
+/**
+ * 多维判定当前是否处于 NapCat QQ 桥接会话或工作区：
+ * 1. sessionId 以 qq- 开头；
+ * 2. sessionId 包含在 NapCat 工作区的 sessionIds 列表中（支持 Web 端创建的原生 UUID 会话）；
+ * 3. 当前工作区处于 NapCat 工作区（覆盖开新会话、空白 Hero 状态，无论是否分配了临时 sessionId）。
+ */
+export function isNapCatWorkspaceOrSession(options: IsNapCatOptions): boolean {
+  const { sessionId, currentWorkspaceId, workspaces } = options;
+
+  if (isQQSessionId(sessionId)) {
+    return true;
+  }
+
+  const workspaceList: any[] = Array.isArray(workspaces)
+    ? workspaces
+    : Array.isArray(workspaces?.items)
+      ? workspaces.items
+      : [];
+
+  if (workspaceList.length === 0) {
+    return false;
+  }
+
+  for (const ws of workspaceList) {
+    if (isNapCatWorkspace(ws)) {
+      if (sessionId && Array.isArray(ws.sessionIds) && ws.sessionIds.includes(sessionId)) {
+        return true;
+      }
+      if (currentWorkspaceId && ws.workspaceId === currentWorkspaceId) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * 向全局 document.head 注入只读样式表规则：
+ * 当 body 携带 data-dsh-napcat-readonly="true" 时，彻底隐藏 [data-composer-card] 大卡片，
+ * 而下方的监控栏指标（轮数/步数/速率/Token/缓存命中率）正常保留展示。
+ */
+export function ensureReadonlyStyle(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  let style = document.getElementById(READONLY_STYLE_ID);
+  if (!style) {
+    style = document.createElement('style');
+    style.id = READONLY_STYLE_ID;
+    style.textContent = `
+body[${READONLY_BODY_ATTR}="true"] [data-composer-card] {
+  display: none !important;
+}
+`;
+    document.head.appendChild(style);
+  }
+  return style;
+}
+
+/**
+ * 同步切换 body 上的只读标记属性
+ */
+export function syncReadonlyAttribute(readonly: boolean): void {
+  if (typeof document === 'undefined') return;
+  if (readonly) {
+    ensureReadonlyStyle();
+    document.body.setAttribute(READONLY_BODY_ATTR, 'true');
+  } else {
+    document.body.removeAttribute(READONLY_BODY_ATTR);
+  }
+}
+
+/**
  * 判断指定 Session ID 是否属于 QQ 桥接会话
  */
 export function isQQSessionId(sessionId: unknown): boolean {
@@ -195,11 +285,12 @@ export interface QQComposerHiderProps {
   sessionId?: string;
   useSession?: (selector?: (session: any) => any) => any;
   useConversation?: (selector?: (conv: any) => any) => any;
+  useWorkspaces?: (selector?: (workspaces: any) => any) => any;
 }
 
 /**
  * QQ 会话只读输入框卡片隐藏控制器：
- * 当处于 QQ 会话时，仅隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
+ * 当处于 QQ 会话或 NapCat 工作区时，仅隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
  * 提示文案、附件/模式切换以及右侧模型切换与发送按钮），
  * 下方的监控指标行（位于 conversation.composer.dock，显示轮步/速率/Token/命中率）完全不受影响。
  * 离开 QQ 会话切换到其他常规工作区会话时，自动返回 null 恢复原生输入框。
@@ -207,14 +298,31 @@ export interface QQComposerHiderProps {
 export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element | null {
   const sessionId =
     (typeof props?.useSession === 'function'
-      ? props.useSession((s: any) => s?.id)
+      ? props.useSession((s: any) => s?.sessionId ?? s?.id)
       : undefined) ??
     props?.sessionId ??
     (typeof props?.useConversation === 'function'
-      ? props.useConversation((c: any) => c?.sessionId)
+      ? props.useConversation((c: any) => c?.sessionId ?? c?.id)
       : undefined);
 
-  if (!isQQSessionId(sessionId)) {
+  const workspacesData =
+    typeof props?.useWorkspaces === 'function'
+      ? props.useWorkspaces((w: any) => w)
+      : undefined;
+
+  const workspaces = Array.isArray(workspacesData)
+    ? workspacesData
+    : workspacesData?.items;
+
+  const currentWorkspaceId = workspacesData?.current;
+
+  const isReadonly = isNapCatWorkspaceOrSession({
+    sessionId,
+    currentWorkspaceId,
+    workspaces,
+  });
+
+  if (!isReadonly) {
     return null;
   }
 
@@ -233,9 +341,73 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
 }
 
 export function apply(ctx: any) {
+  // 1. 客户端预热注入只读样式表
+  ensureReadonlyStyle();
+
+  // 2. 监听 sessions 与 workspaces 响应式 Store
+  const sessions = ctx.get ? ctx.get('sessions') : ctx.sessions;
+  const workspaces = ctx.get ? ctx.get('workspaces') : ctx.workspaces;
+
+  const updateReadonly = () => {
+    try {
+      const sessionsSnap = sessions?.list?.getSnapshot?.() ?? sessions?.getSnapshot?.();
+      const workspacesSnap = workspaces?.list?.getSnapshot?.() ?? workspaces?.getSnapshot?.();
+
+      const currentSessionId = sessionsSnap?.current;
+      const currentWorkspaceId = workspacesSnap?.current;
+      const workspaceItems =
+        workspacesSnap?.items ?? (Array.isArray(workspacesSnap) ? workspacesSnap : undefined);
+
+      const isReadonly = isNapCatWorkspaceOrSession({
+        sessionId: currentSessionId,
+        currentWorkspaceId,
+        workspaces: workspaceItems,
+      });
+
+      syncReadonlyAttribute(isReadonly);
+    } catch {
+      // 防御性捕获
+    }
+  };
+
+  updateReadonly();
+
+  const subscribeList = (target: any) => {
+    if (typeof target?.subscribe === 'function') {
+      return target.subscribe(updateReadonly);
+    }
+    return undefined;
+  };
+
+  let unsubSessions: (() => void) | undefined;
+  let unsubWorkspaces: (() => void) | undefined;
+
+  if (sessions?.list) {
+    unsubSessions = subscribeList(sessions.list);
+  } else if (sessions) {
+    unsubSessions = subscribeList(sessions);
+  }
+
+  if (workspaces?.list) {
+    unsubWorkspaces = subscribeList(workspaces.list);
+  } else if (workspaces) {
+    unsubWorkspaces = subscribeList(workspaces);
+  }
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => {
+      updateReadonly();
+      return () => {
+        unsubSessions?.();
+        unsubWorkspaces?.();
+        syncReadonlyAttribute(false);
+      };
+    }, 'dsh-napcat-bridge: sync readonly state');
+  }
+
   if (!ctx?.slots?.inject) return;
 
-  // 1. 注册设置卡片
+  // 3. 注册设置卡片
   ctx.slots.inject('settings.plugin.item', function* () {
     yield ctx.slots.register(
       {
@@ -247,7 +419,7 @@ export function apply(ctx: any) {
     );
   });
 
-  // 2. 注册 QQ 会话输入框卡片隐藏器（保留 dock 监控行）
+  // 4. 注册 QQ 会话输入框卡片隐藏器（保留 dock 监控行）
   ctx.slots.inject('conversation.composer.dock', function* () {
     yield ctx.slots.register(
       {
