@@ -553,6 +553,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
         data: {
           turn: 1,
           step: 1,
+          stream: [],
           message: { content: [{ type: 'text', text: '收到消息 A' }] },
         },
       });
@@ -603,6 +604,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
         data: {
           turn: 2,
           step: 1,
+          stream: [],
           message: { content: [{ type: 'text', text: '戳一戳纯文本回复' }] },
         },
       });
@@ -658,6 +660,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
         data: {
           turn: 3,
           step: 1,
+          stream: [],
           message: { content: [{ type: 'text', text: '收到消息 B' }] },
         },
       });
