@@ -312,7 +312,7 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
       data-dsh-napcat="hide-composer"
       dangerouslySetInnerHTML={{
         __html: `
-body[${READONLY_BODY_ATTR}="true"] [data-composer-card] {
+[data-composer-card] {
   display: none !important;
 }
 `,
@@ -405,6 +405,7 @@ export function apply(ctx: any) {
     yield ctx.slots.register(
       {
         name: 'conversation.composer.dock',
+        id: 'dsh-napcat-bridge-hide-composer',
         key: 'dsh-napcat-bridge-hide-composer',
         order: -100,
       },
