@@ -183,13 +183,16 @@ export function buildSettingsBridge(ctx: any, namespace: string = SETTINGS_NAMES
 }
 
 /**
- * 判断指定 Workspace 是否属于 NapCat QQ 桥接工作区
+ * 精准判断指定 Workspace 是否为插件专用的固定工作区：
+ * 插件工作区固定为 title === 'NapCat' 且路径以 `.dsh/workspace/napcat` 结尾（规范化斜杠）。
+ * 严禁使用 includes 模糊关键字匹配，防止误伤名称或路径包含 napcat 的其他工作区。
  */
-export function isNapCatWorkspace(ws: any): boolean {
+export function isFixedNapCatWorkspace(ws: any): boolean {
   if (!ws || typeof ws !== 'object') return false;
-  const title = String(ws.title || '').toLowerCase();
-  const path = String(ws.path || '').toLowerCase();
-  return title.includes('napcat') || path.includes('napcat');
+  const title = typeof ws.title === 'string' ? ws.title.trim() : '';
+  if (title !== 'NapCat') return false;
+  const p = typeof ws.path === 'string' ? ws.path.replace(/\\/g, '/').toLowerCase() : '';
+  return p.endsWith('/.dsh/workspace/napcat') || p === '.dsh/workspace/napcat';
 }
 
 export interface IsNapCatOptions {
@@ -199,40 +202,18 @@ export interface IsNapCatOptions {
 }
 
 /**
- * 多维判定当前是否处于 NapCat QQ 桥接会话或工作区：
- * 1. sessionId 以 qq- 开头；
- * 2. sessionId 包含在 NapCat 工作区的 sessionIds 列表中（支持 Web 端创建的原生 UUID 会话）；
- * 3. 当前工作区处于 NapCat 工作区（覆盖开新会话、空白 Hero 状态，无论是否分配了临时 sessionId）。
+ * 判定当前会话是否为插件创建的 QQ 只读会话：
+ * 1. 插件只管自己创建的 QQ 会话（isQQSessionId，即 qq-group-、qq-user-、qq- 开头）才判定为 true，执行隐藏输入框；
+ * 2. 欢迎页（sessionId 为空或 Hero 状态）必须判定为 false，保留原生输入框！
+ * 3. 在 NapCat 工作区中由用户在 Web UI 新建的普通会话（session-uuid 等非 QQ 会话）必须判定为 false，允许用户在 Web 端发消息；
+ * 4. 其他任何非 QQ 会话或工作区，一律判定为 false。
  */
 export function isNapCatWorkspaceOrSession(options: IsNapCatOptions): boolean {
-  const { sessionId, currentWorkspaceId, workspaces } = options;
-
-  if (isQQSessionId(sessionId)) {
-    return true;
-  }
-
-  const workspaceList: any[] = Array.isArray(workspaces)
-    ? workspaces
-    : Array.isArray(workspaces?.items)
-      ? workspaces.items
-      : [];
-
-  if (workspaceList.length === 0) {
+  const { sessionId } = options;
+  if (!sessionId || typeof sessionId !== 'string') {
     return false;
   }
-
-  for (const ws of workspaceList) {
-    if (isNapCatWorkspace(ws)) {
-      if (sessionId && Array.isArray(ws.sessionIds) && ws.sessionIds.includes(sessionId)) {
-        return true;
-      }
-      if (currentWorkspaceId && ws.workspaceId === currentWorkspaceId) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return isQQSessionId(sessionId);
 }
 
 /**
