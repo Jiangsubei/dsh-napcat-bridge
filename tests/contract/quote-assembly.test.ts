@@ -443,6 +443,7 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
       data: {
         turn: 1,
         step: 1,
+        stream: [],
         message: { content: [{ type: 'text', text: '轮次 1 最终答复' }] },
       },
     });
@@ -473,6 +474,7 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
       data: {
         turn: 2,
         step: 1,
+        stream: [],
         message: { content: [{ type: 'text', text: '轮次 2 最终答复' }] },
       },
     });
