@@ -21,7 +21,7 @@ import {
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
 } from '../constants/index.js';
-import { resolveDshPath } from '../utils/path.js';
+import { resolveDshPath, encodeSegment } from '../utils/path.js';
 
 export const ALLOWED_MEMORY_REVIEW_TOOLS: readonly string[] = [
   'read_memory',
@@ -589,6 +589,7 @@ export class BackgroundReviewManager {
 
   /**
    * 物理删除已完成的 Review Session（用完即焚）
+   * 严格对齐 DSH 0.1.5 销毁时序：内核锁释放先行 -> 内存与持久化解绑 -> 投影清理 -> Spill 清理 -> 工作区解绑 -> 最终物理删除
    */
   public async cleanupReviewSession(
     sessionId: string,
@@ -597,25 +598,36 @@ export class BackgroundReviewManager {
     parentWorkspace?: any
   ): Promise<void> {
     try {
-      // 1. 实时会话持久化与分离
-      const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
-      const live = sessions?.get?.(sessionId);
-      if (live) {
+      // Step 1【首要步骤】：优先执行 await agentHandle.dispose()，停止循环、排空待写缓冲、彻底释放 session.lock 内核锁并解绑
+      if (agentHandle && typeof agentHandle.dispose === 'function') {
         try {
-          if (typeof sessions.flush === 'function') {
-            await sessions.flush(live);
-          }
-          if (typeof sessions.detachEntered === 'function') {
-            const entry =
-              typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
-            await sessions.detachEntered(entry);
+          await agentHandle.dispose();
+        } catch (err: any) {
+          this.logger.warn?.(`[BackgroundReview] agentHandle.dispose warning: ${err?.message}`);
+        }
+      }
+
+      // Step 2：内存 Session 清理与持久化解绑（sessions.detachEntered 防御性清理）
+      const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
+      if (sessions) {
+        try {
+          const live = sessions.get?.(sessionId);
+          if (live) {
+            if (typeof sessions.flush === 'function') {
+              await sessions.flush(live);
+            }
+            if (typeof sessions.detachEntered === 'function') {
+              const entry =
+                typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
+              await sessions.detachEntered(entry);
+            }
           }
         } catch (err: any) {
           this.logger.warn?.(`[BackgroundReview] sessions flush/detach warning: ${err?.message}`);
         }
       }
 
-      // 2. 投影缓存清理
+      // Step 3：投影缓存清理（sessionProjectionCache.delete）
       const projCache =
         this.ctx.get?.('sessionProjectionCache') || (this.ctx as any).sessionProjectionCache;
       if (projCache) {
@@ -627,7 +639,7 @@ export class BackgroundReviewManager {
         }
       }
 
-      // 3. Spill 临时目录清理
+      // Step 4：Spill 临时目录清理（spillStore）
       const spill = this.ctx.get?.('spillStore') || (this.ctx as any).spillStore;
       if (spill?.root) {
         try {
@@ -639,50 +651,7 @@ export class BackgroundReviewManager {
         } catch {}
       }
 
-      // 4. 物理文件删除
-      let sessionPath: string | undefined;
-      if (typeof parentSession === 'string') {
-        sessionPath = parentSession;
-      }
-
-      const persistence =
-        this.ctx.get?.('sessionPersistence') || (this.ctx as any).sessionPersistence;
-      if (!sessionPath && persistence && typeof persistence.locate === 'function') {
-        try {
-          const loc = persistence.locate({
-            id: sessionId,
-            cwd: parentSession?.header?.cwd || parentSession?.cwd,
-          });
-          if (loc?.path) {
-            sessionPath = path.dirname(loc.path);
-          }
-        } catch {}
-      }
-
-      if (!sessionPath) {
-        const baseSessionsDir = path.join(this.dshHome, 'sessions');
-        try {
-          const dirs = await fsp.readdir(baseSessionsDir).catch(() => [] as string[]);
-          for (const d of dirs) {
-            const candidate = path.join(baseSessionsDir, d, sessionId);
-            try {
-              const st = await fsp.stat(candidate);
-              if (st.isDirectory()) {
-                sessionPath = candidate;
-                break;
-              }
-            } catch {}
-          }
-        } catch {}
-      }
-
-      if (sessionPath) {
-        await rm(sessionPath, { recursive: true, force: true }).catch((err) => {
-          this.logger.warn?.(`[BackgroundReview] rm sessionPath warning: ${err?.message}`);
-        });
-      }
-
-      // 5. 工作区解绑与记账清理
+      // Step 5：工作区解绑与记账清理（workspaceRegistry 解绑）
       if (parentWorkspace && typeof parentWorkspace.detachSession === 'function') {
         try {
           await parentWorkspace.detachSession(sessionId).catch(() => {});
@@ -713,13 +682,76 @@ export class BackgroundReviewManager {
         }
       }
 
-      // 6. 释放 AgentHandle
-      if (agentHandle && typeof agentHandle.dispose === 'function') {
-        await agentHandle.dispose().catch(() => {});
+      // Step 6【最后步骤】：物理文件与目录彻底删除（此时文件锁已完全释放，无任何死锁与占用风险）
+      let sessionPath: string | undefined;
+      if (typeof parentSession === 'string') {
+        sessionPath = parentSession;
+      }
+
+      const persistence =
+        this.ctx.get?.('sessionPersistence') || (this.ctx as any).sessionPersistence;
+      if (!sessionPath && persistence && typeof (persistence as any).locate === 'function') {
+        try {
+          const loc = (persistence as any).locate({
+            id: sessionId,
+            cwd: parentSession?.header?.cwd || parentSession?.cwd,
+          });
+          if (loc?.path) {
+            sessionPath = path.dirname(loc.path);
+          }
+        } catch {}
+      }
+
+      if (!sessionPath) {
+        let encodedId: string;
+        try {
+          encodedId = encodeSegment(sessionId);
+        } catch {
+          encodedId = sessionId;
+        }
+
+        const baseSessionsDir = path.join(this.dshHome, 'sessions');
+        try {
+          const dirs = await fsp.readdir(baseSessionsDir).catch(() => [] as string[]);
+          for (const d of dirs) {
+            const candidates = [
+              path.join(baseSessionsDir, d, encodedId),
+              ...(encodedId !== sessionId ? [path.join(baseSessionsDir, d, sessionId)] : []),
+            ];
+            for (const candidate of candidates) {
+              try {
+                const st = await fsp.stat(candidate);
+                if (st.isDirectory()) {
+                  sessionPath = candidate;
+                  break;
+                }
+              } catch {}
+            }
+            if (sessionPath) break;
+          }
+        } catch {}
+      }
+
+      if (sessionPath) {
+        await rm(sessionPath, { recursive: true, force: true }).catch((err) => {
+          this.logger.warn?.(`[BackgroundReview] rm sessionPath warning: ${err?.message}`);
+        });
       }
     } catch (error: any) {
       this.logger.warn?.(`[BackgroundReview] cleanupReviewSession error: ${error?.message}`);
     }
+  }
+
+  /**
+   * 销毁临时回顾会话（destroyTemporarySession，内核锁释放先行，对齐 cleanupReviewSession）
+   */
+  public async destroyTemporarySession(
+    sessionId: string,
+    agentHandle?: any,
+    parentSession?: any,
+    parentWorkspace?: any
+  ): Promise<void> {
+    return this.cleanupReviewSession(sessionId, agentHandle, parentSession, parentWorkspace);
   }
 
   /**
