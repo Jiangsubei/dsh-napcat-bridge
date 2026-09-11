@@ -20,7 +20,43 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { formatDateTime, type MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
 import { DEFAULT_WORKSPACE_ROOT } from '../constants/index.js';
-import { resolveDshPath } from '../utils/path.js';
+import { resolveDshPath, encodeSegment } from '../utils/path.js';
+
+export { encodeSegment };
+
+/**
+ * 结构化 RemoteError 类（对齐 DSH typert-protocol 远程调用失败契约）
+ */
+export class RemoteError extends Error {
+  readonly code: string;
+  readonly details: any;
+  readonly isDSHRemoteError = true;
+
+  constructor(code: string, message: string, details: any = {}, options?: ErrorOptions) {
+    super(message, options);
+    this.code = code;
+    this.details = details;
+    this.name = 'RemoteError';
+    Object.setPrototypeOf(this, RemoteError.prototype);
+  }
+}
+
+/**
+ * DSH 0.1.5 文件级排他锁 (session.lock) 冲突异常
+ */
+export class SessionAlreadyOwnedError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, message?: string) {
+    super(
+      message ||
+        `会话 ${sessionId} 当前正被其他控制台或任务占用（排他锁冲突），请稍后重试或在 Web 端切换其他会话以释放锁。`
+    );
+    this.name = 'SessionAlreadyOwnedError';
+    this.sessionId = sessionId;
+    Object.setPrototypeOf(this, SessionAlreadyOwnedError.prototype);
+  }
+}
 
 export interface ParsedSessionId {
   peer: string;
@@ -75,6 +111,7 @@ export class SessionManager {
 
   private napcatDefaultModel?: ModelSelection;
   private outboundBridge?: OutboundBridgeLike;
+  private busySessions = new Set<string>();
 
   setOutboundBridge(bridge: OutboundBridgeLike): void {
     this.outboundBridge = bridge;
@@ -89,10 +126,72 @@ export class SessionManager {
   constructor(
     private readonly ctx: Context,
     dshHome?: string,
-    private readonly db?: MessageDatabase
+    private readonly db?: MessageDatabase,
+    private readonly options?: { retryDelays?: number[] }
   ) {
     this.dshHome = path.resolve(dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh'));
     this.loadStateFromDb();
+    this.guardSessionController();
+    if (typeof (this.ctx as any).on === 'function') {
+      (this.ctx as any).on('ready', () => {
+        this.guardSessionController();
+      });
+    }
+  }
+
+  /**
+   * 拦截 Web UI 发送消息 (sessionController.prompt)：
+   * 当 QQ 会话处于活跃状态或独占持有时，强制拒绝并返回只读提示
+   */
+  public guardSessionController(sc?: any): void {
+    const target = sc || this.ctx.get?.('sessionController') || (this.ctx as any).sessionController;
+    if (target && typeof target.prompt === 'function' && !(target.prompt as any).__dsh_napcat_guarded) {
+      const originalPrompt = target.prompt.bind(target);
+      const guardedPrompt = async (request: any) => {
+        const sid = request?.sessionId;
+        if (sid && (this.activeHandles.has(sid) || (this.isQQSession(sid) && this.isSessionBusy(sid)))) {
+          throw new RemoteError(
+            'session/agent-busy',
+            '⚠️ 该会话当前正由 QQ 独占使用中，Web 端处于只读监视模式。请在 QQ 端发送消息。',
+            { reason: 'EXCLUSIVE_QQ_SESSION', sessionId: sid }
+          );
+        }
+        return originalPrompt(request);
+      };
+      (guardedPrompt as any).__dsh_napcat_guarded = true;
+      (guardedPrompt as any).__originalPrompt = originalPrompt;
+      target.prompt = guardedPrompt;
+    }
+  }
+
+  hasActiveHandle(sessionId: string): boolean {
+    return this.activeHandles.has(sessionId);
+  }
+
+  getActiveHandle(sessionId: string): AgentHandle | undefined {
+    return this.activeHandles.get(sessionId);
+  }
+
+  async releaseActiveHandle(sessionId: string): Promise<void> {
+    const handle = this.activeHandles.get(sessionId);
+    if (handle) {
+      this.activeHandles.delete(sessionId);
+      if (typeof handle.dispose === 'function') {
+        await Promise.resolve(handle.dispose()).catch(() => {});
+      }
+    }
+  }
+
+  markSessionBusy(sessionId: string, busy: boolean): void {
+    if (busy) {
+      this.busySessions.add(sessionId);
+    } else {
+      this.busySessions.delete(sessionId);
+    }
+  }
+
+  isSessionBusy(sessionId: string): boolean {
+    return this.busySessions.has(sessionId);
   }
 
   public getDshHome(): string {
@@ -335,9 +434,9 @@ export class SessionManager {
     if (live) return true;
 
     const persistence = this.ctx.get('sessionPersistence') || (this.ctx as any).sessionPersistence;
-    if (persistence && typeof persistence.locate === 'function') {
+    if (persistence && typeof (persistence as any).locate === 'function') {
       try {
-        const loc = persistence.locate({ id: sessionId, cwd: this.resolveCwd() });
+        const loc = (persistence as any).locate({ id: sessionId, cwd: this.resolveCwd() });
         if (loc?.path) {
           if (fs.existsSync(loc.path) || fs.existsSync(path.dirname(loc.path))) {
             return true;
@@ -345,6 +444,17 @@ export class SessionManager {
         }
       } catch {}
     }
+
+    // 文件系统直接探测：支持 V3 encodeSegment 目录编码与 V3/V2/旧版会话文件名
+    const encodedId = encodeSegment(sessionId);
+    const sessionFileCandidates = [
+      'session.v3.jsonl',
+      'session.v3.jsonl.zstd',
+      'session.v2.jsonl',
+      'session.v2.jsonl.zstd',
+      'session.jsonl',
+      'session.jsonl.zstd',
+    ];
 
     const checkRoots = [
       path.join(this.dshHome, 'sessions'),
@@ -356,9 +466,25 @@ export class SessionManager {
         try {
           const dirs = fs.readdirSync(baseSessionsDir);
           for (const d of dirs) {
-            const candidate = path.join(baseSessionsDir, d, sessionId);
-            if (fs.existsSync(candidate)) {
-              return true;
+            const candidates = [
+              path.join(baseSessionsDir, d, encodedId),
+              ...(encodedId !== sessionId ? [path.join(baseSessionsDir, d, sessionId)] : []),
+            ];
+            for (const candidate of candidates) {
+              if (fs.existsSync(candidate)) {
+                try {
+                  const st = fs.statSync(candidate);
+                  if (st.isDirectory()) {
+                    const files = fs.readdirSync(candidate);
+                    const hasLog = sessionFileCandidates.some((fn) =>
+                      files.includes(fn)
+                    );
+                    if (hasLog || files.length === 0) return true;
+                  } else if (st.isFile()) {
+                    return true;
+                  }
+                } catch {}
+              }
             }
           }
         } catch {}
@@ -366,6 +492,27 @@ export class SessionManager {
     }
 
     return false;
+  }
+
+  /**
+   * 异步精确检查物理会话状态（优先利用 DSH 0.1.5 sessionPersistence.stat API）
+   */
+  async isSessionPhysicallyPresentAsync(sessionId: string): Promise<boolean> {
+    if (this.activeHandles.has(sessionId)) return true;
+    const live = (this.ctx.get('sessions') || (this.ctx as any).sessions)?.get?.(sessionId);
+    if (live) return true;
+
+    const persistence = this.ctx.get('sessionPersistence') || (this.ctx as any).sessionPersistence;
+    if (persistence && typeof persistence.stat === 'function') {
+      try {
+        const snapshot = await persistence.stat(sessionId as any);
+        if (snapshot !== undefined) {
+          return true;
+        }
+      } catch {}
+    }
+
+    return this.isSessionPhysicallyPresent(sessionId);
   }
 
   /**
@@ -824,11 +971,59 @@ export class SessionManager {
 
     const selectionRef = this.getOrCreateSelectionRef(sessionId);
     const agents = this.ctx.get('agents') || (this.ctx as any).agents;
-    let agent = agents?.get(sessionId as any);
-    if (agent && !this.isSessionArchived(sessionId)) {
-      (agent as any).modelSelection = selectionRef;
-      this.updateSessionTitle((agent as any).session, peer, sessionId);
-      return agent;
+
+    // 1. 若当前会话已由 QQ 自身持有专属写句柄，直接复用
+    if (this.activeHandles.has(sessionId)) {
+      const handle = this.activeHandles.get(sessionId)!;
+      if (!this.isSessionArchived(sessionId)) {
+        (handle.agent as any).modelSelection = selectionRef;
+        this.updateSessionTitle((handle.agent as any).session, peer, sessionId);
+        return handle.agent;
+      }
+      this.activeHandles.delete(sessionId);
+      if (typeof handle.dispose === 'function') {
+        await Promise.resolve(handle.dispose()).catch(() => {});
+      }
+    }
+
+    // 2. 检测非 QQ handle 占有：内存中存在该 agent 但不在 this.activeHandles 中（例如 Web UI 打开持有）
+    const existingAgent = agents?.get?.(sessionId as any);
+    if (existingAgent && !this.activeHandles.has(sessionId)) {
+      this.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
+        `[SessionManager] 会话 ${sessionId} 检测到非 QQ handle 占有，QQ 启动最高优先级抢占机制...`
+      );
+      try {
+        existingAgent.cancel?.({ kind: 'user-request' } as any);
+      } catch {
+        try {
+          (existingAgent as any).cancel?.('user-request');
+        } catch {}
+      }
+
+      // 尝试关闭占用方的写句柄释放 session.lock
+      try {
+        if (typeof (existingAgent as any).handle?.dispose === 'function') {
+          await (existingAgent as any).handle.dispose();
+        } else if (typeof (existingAgent as any).dispose === 'function') {
+          await (existingAgent as any).dispose();
+        } else if (typeof (existingAgent as any).ctx?.scope?.dispose === 'function') {
+          await (existingAgent as any).ctx.scope.dispose();
+        }
+      } catch {}
+
+      const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
+      if (sessions && typeof sessions.detachEntered === 'function') {
+        try {
+          const live = sessions.get?.(sessionId);
+          if (live) {
+            const entry = typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
+            await sessions.detachEntered(entry).catch(() => {});
+          }
+        } catch {}
+      }
+
+      // 退避 100~200ms
+      await new Promise((res) => setTimeout(res, 150));
     }
 
     const cwd = this.resolveCwd(sessionId);
@@ -891,30 +1086,82 @@ export class SessionManager {
     };
 
     let handle: AgentHandle | undefined;
+    let isSessionLocked = false;
 
-    // 1. 若该会话此前已持久化在磁盘上，优先通过 agents.resume 恢复会话，避免 id collision
-    if (typeof agents.resume === 'function') {
-      try {
-        handle = await agents.resume({
-          resumeSessionId: sessionId as any,
-          agentOptions: {
-            provider,
-            model,
-            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-          },
-          setup: setupFn,
-        });
-      } catch (err: any) {
-        this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
-          `[SessionManager] Resume session ${sessionId} 未命中或创建新会话:`,
-          err?.message
-        );
+    // 3. 若该会话此前已持久化在磁盘上，优先通过 agents.resume 恢复会话（带锁冲突重试与抢占保护）
+    if (typeof agents?.resume === 'function') {
+      const delays = this.options?.retryDelays || [300, 600, 900];
+      const maxRetries = delays.length;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          handle = await agents.resume({
+            resumeSessionId: sessionId as any,
+            agentOptions: {
+              provider,
+              model,
+              ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+            },
+            setup: setupFn,
+          });
+          break;
+        } catch (err: any) {
+          const isOwnedError =
+            err?.name === 'SessionAlreadyOwnedError' ||
+            err?.constructor?.name === 'SessionAlreadyOwnedError' ||
+            (typeof err?.message === 'string' &&
+              (err.message.includes('SessionAlreadyOwnedError') ||
+               err.message.includes('already has a live persistence owner') ||
+               err.message.includes('while it is live') ||
+               err.message.includes('already owned')));
+
+          if (isOwnedError) {
+            isSessionLocked = true;
+            this.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
+              `[SessionManager] 会话 ${sessionId} 正在被其他进程或控制台占用 (SessionAlreadyOwnedError)，正在进行第 ${attempt + 1}/${maxRetries} 次重试...`
+            );
+
+            // 再次尝试抢占并关闭可能占用的非 QQ 写句柄
+            const occAgent = agents?.get?.(sessionId as any);
+            if (occAgent && !this.activeHandles.has(sessionId)) {
+              try {
+                occAgent.cancel?.({ kind: 'user-request' } as any);
+              } catch {
+                try { (occAgent as any).cancel?.('user-request'); } catch {}
+              }
+              try {
+                if (typeof (occAgent as any).handle?.dispose === 'function') {
+                  await (occAgent as any).handle.dispose();
+                } else if (typeof (occAgent as any).dispose === 'function') {
+                  await (occAgent as any).dispose();
+                } else if (typeof (occAgent as any).ctx?.scope?.dispose === 'function') {
+                  await (occAgent as any).ctx.scope.dispose();
+                }
+              } catch {}
+            }
+
+            if (attempt < maxRetries - 1) {
+              await new Promise((res) => setTimeout(res, delays[attempt]));
+              continue;
+            }
+            // 重试耗尽，严禁进入 agents.create，抛出明确错误
+            throw new SessionAlreadyOwnedError(
+              sessionId,
+              `会话 ${sessionId} 当前正被其他控制台或任务占用（排他锁冲突），请稍后重试或在 Web 端切换其他会话以释放锁。`
+            );
+          }
+
+          this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+            `[SessionManager] Resume session ${sessionId} 未命中或异常:`,
+            err?.message
+          );
+          break;
+        }
       }
     }
 
-    // 2. 若磁盘无历史记录或未恢复，则创建全新的 session
-    if (!handle) {
-      if (typeof agents.create !== 'function') {
+    // 4. 若磁盘无历史记录或未恢复（且绝非持锁冲突状态），则创建全新的 session
+    if (!handle && !isSessionLocked) {
+      if (typeof agents?.create !== 'function') {
         throw new Error('agents.create is not available');
       }
       handle = await agents.create({
@@ -997,13 +1244,21 @@ export class SessionManager {
       });
     }
 
-    options?.onMessageCreated?.(userMsg);
-
-    agent.followup(userMsg);
-    return userMsg;
+    this.markSessionBusy(sessionId, true);
+    try {
+      options?.onMessageCreated?.(userMsg);
+      agent.followup(userMsg);
+      return userMsg;
+    } finally {
+      this.markSessionBusy(sessionId, false);
+    }
   }
 
   async dispose(): Promise<void> {
+    const sc = this.ctx.get?.('sessionController') || (this.ctx as any).sessionController;
+    if (sc && (sc.prompt as any)?.__dsh_napcat_guarded) {
+      sc.prompt = (sc.prompt as any).__originalPrompt;
+    }
     for (const [id, handle] of this.activeHandles.entries()) {
       try {
         await handle.dispose();
@@ -1014,6 +1269,7 @@ export class SessionManager {
     this.activeHandles.clear();
     this.peerCurrentSessionId.clear();
     this.peerNames.clear();
+    this.busySessions.clear();
   }
 }
 
