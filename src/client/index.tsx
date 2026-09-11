@@ -312,7 +312,7 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
       data-dsh-napcat="hide-composer"
       dangerouslySetInnerHTML={{
         __html: `
-[data-composer-card] {
+body[${READONLY_BODY_ATTR}="true"] [data-composer-card] {
   display: none !important;
 }
 `,
