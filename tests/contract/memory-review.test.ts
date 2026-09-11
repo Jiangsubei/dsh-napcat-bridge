@@ -24,6 +24,7 @@ import {
   BACKGROUND_REVIEW_CANCEL_TIMEOUT_MS,
 } from '../../src/memory/review.js';
 import { setupMemoryService } from '../../src/memory/index.js';
+import { encodeSegment } from '../../src/utils/path.js';
 
 describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制', () => {
   let tmpDir: string;
@@ -184,15 +185,20 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     }));
   });
 
-  it('契约 6: cleanupReviewSession 物理清理契约 - 调用 flush/detach、清 workspaceRegistry、物理 rm 会话目录、释放 handle', async () => {
+  it('契约 6: cleanupReviewSession 物理清理契约 - 内核锁释放先行 (handle.dispose)、调用 flush/detach、清 workspaceRegistry、物理 rm 会话目录', async () => {
     const reviewSessionId = 'review-test-12345';
     const fakeSessionDir = path.join(tmpDir, 'sessions', 'ws-test', reviewSessionId);
     await fsp.mkdir(fakeSessionDir, { recursive: true });
     await fsp.writeFile(path.join(fakeSessionDir, 'events.jsonl'), '{"type":"test"}\n');
 
+    const callOrder: string[] = [];
     const liveSessionMock = { id: reviewSessionId };
-    const flushMock = vi.fn().mockResolvedValue(undefined);
-    const detachEnteredMock = vi.fn().mockResolvedValue(undefined);
+    const flushMock = vi.fn().mockImplementation(async () => {
+      callOrder.push('flush');
+    });
+    const detachEnteredMock = vi.fn().mockImplementation(async () => {
+      callOrder.push('detachEntered');
+    });
     mockCtx.sessions = {
       get: vi.fn().mockReturnValue(liveSessionMock),
       flush: flushMock,
@@ -209,13 +215,16 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     };
 
     const handleMock = {
-      dispose: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockImplementation(async () => {
+        callOrder.push('dispose');
+      }),
     };
 
     (reviewManager as any).dshHome = tmpDir;
 
     await reviewManager.cleanupReviewSession(reviewSessionId, handleMock, fakeSessionDir);
 
+    expect(callOrder[0]).toBe('dispose');
     expect(flushMock).toHaveBeenCalledWith(liveSessionMock);
     expect(detachEnteredMock).toHaveBeenCalledWith(liveSessionMock);
     expect(headersMap.has(reviewSessionId)).toBe(false);
@@ -480,4 +489,68 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
 
     memService.dispose();
   });
+
+  it('契约 12: destroyTemporarySession 临时会话销毁时序重构 - 内核锁释放先行 (Step 1 handle.dispose) 并对齐 V3 encodeSegment 目录物理删除', async () => {
+    const reviewSessionId = 'review-test:special/session@123';
+    const encodedId = encodeSegment(reviewSessionId);
+    const workspaceId = 'ws-test-v3';
+    const sessionDir = path.join(tmpDir, 'sessions', workspaceId, encodedId);
+    await fsp.mkdir(sessionDir, { recursive: true });
+    await fsp.writeFile(path.join(sessionDir, 'session.v3.jsonl'), '{"v3":true}\n');
+    expect(await fsp.stat(sessionDir).then((s) => s.isDirectory())).toBe(true);
+
+    const callTimeline: string[] = [];
+
+    const handleMock = {
+      dispose: vi.fn(async () => {
+        callTimeline.push('step1:agentHandle.dispose');
+      }),
+    };
+
+    const detachEnteredMock = vi.fn(async () => {
+      callTimeline.push('step2:sessions.detachEntered');
+    });
+    mockCtx.sessions = {
+      get: vi.fn().mockReturnValue({ id: reviewSessionId }),
+      flush: vi.fn(async () => {
+        callTimeline.push('step2:sessions.flush');
+      }),
+      detachEntered: detachEnteredMock,
+    };
+
+    const projCacheDeleteMock = vi.fn(async () => {
+      callTimeline.push('step3:sessionProjectionCache.delete');
+    });
+    mockCtx.sessionProjectionCache = {
+      whenIdle: vi.fn().mockResolvedValue(undefined),
+      delete: projCacheDeleteMock,
+    };
+
+    const detachWorkspaceMock = vi.fn(async () => {
+      callTimeline.push('step5:workspace.detachSession');
+    });
+    const fakeWorkspace = {
+      detachSession: detachWorkspaceMock,
+    };
+
+    (reviewManager as any).dshHome = tmpDir;
+
+    await reviewManager.destroyTemporarySession(
+      reviewSessionId,
+      handleMock,
+      undefined, // 不传 parentSessionPath，强制走 V3 encodeSegment 目录扫描
+      fakeWorkspace
+    );
+
+    // 验证销毁时序：Step 1 handle.dispose 必须排在首位
+    expect(callTimeline[0]).toBe('step1:agentHandle.dispose');
+    expect(callTimeline).toContain('step2:sessions.detachEntered');
+    expect(callTimeline).toContain('step3:sessionProjectionCache.delete');
+    expect(callTimeline).toContain('step5:workspace.detachSession');
+
+    // 验证物理目录已被彻底删除（且通过 encodeSegment 寻址找到并删除）
+    const dirExists = await fsp.stat(sessionDir).then(() => true).catch(() => false);
+    expect(dirExists).toBe(false);
+  });
 });
+
