@@ -325,7 +325,12 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
           inject: vi.fn((slotName: string, generator: () => Generator) => {
             registeredSlots[slotName] = Array.from(generator());
           }),
-          register: vi.fn((opts: any, component: any) => ({ opts, component })),
+          register: vi.fn((opts: any, component: any) => {
+            if (opts?.name === 'conversation.composer.dock' && opts?.id === void 0) {
+              throw new Error(`list slot "${opts.name}" requires options.id`);
+            }
+            return { opts, component };
+          }),
         },
       };
 
@@ -359,6 +364,14 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       // 验证插槽注册正常
       expect(mockCtx.slots.inject).toHaveBeenCalledWith('settings.plugin.item', expect.any(Function));
       expect(mockCtx.slots.inject).toHaveBeenCalledWith('conversation.composer.dock', expect.any(Function));
+
+      // 严格验证 list slot "conversation.composer.dock" 必须包含 options.id 字段
+      const dockEntries = registeredSlots['conversation.composer.dock'];
+      expect(dockEntries).toBeDefined();
+      expect(dockEntries.length).toBeGreaterThan(0);
+      expect(dockEntries[0].component).toBe(QQComposerHider);
+      expect(dockEntries[0].opts.name).toBe('conversation.composer.dock');
+      expect(dockEntries[0].opts.id).toBe('dsh-napcat-bridge-hide-composer');
     });
   });
 });
