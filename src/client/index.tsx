@@ -3,6 +3,7 @@
  * Injects NapCat settings card into the DSH Web UI settings.plugin.item extension slot.
  */
 
+import React from 'react';
 import { NapCatSettingsCard } from './card.js';
 import { SETTINGS_NAMESPACE } from '../constants/index.js';
 
@@ -178,9 +179,63 @@ export function buildSettingsBridge(ctx: any, namespace: string = SETTINGS_NAMES
   };
 }
 
+/**
+ * 判断指定 Session ID 是否属于 QQ 桥接会话
+ */
+export function isQQSessionId(sessionId: unknown): boolean {
+  if (typeof sessionId !== 'string' || !sessionId) return false;
+  return (
+    sessionId.startsWith('qq-group-') ||
+    sessionId.startsWith('qq-user-') ||
+    sessionId.startsWith('qq-')
+  );
+}
+
+export interface QQComposerHiderProps {
+  sessionId?: string;
+  useSession?: (selector?: (session: any) => any) => any;
+  useConversation?: (selector?: (conv: any) => any) => any;
+}
+
+/**
+ * QQ 会话只读输入框卡片隐藏控制器：
+ * 当处于 QQ 会话时，仅隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
+ * 提示文案、附件/模式切换以及右侧模型切换与发送按钮），
+ * 下方的监控指标行（位于 conversation.composer.dock，显示轮步/速率/Token/命中率）完全不受影响。
+ * 离开 QQ 会话切换到其他常规工作区会话时，自动返回 null 恢复原生输入框。
+ */
+export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element | null {
+  const sessionId =
+    (typeof props?.useSession === 'function'
+      ? props.useSession((s: any) => s?.id)
+      : undefined) ??
+    props?.sessionId ??
+    (typeof props?.useConversation === 'function'
+      ? props.useConversation((c: any) => c?.sessionId)
+      : undefined);
+
+  if (!isQQSessionId(sessionId)) {
+    return null;
+  }
+
+  return (
+    <style
+      data-dsh-napcat="hide-composer"
+      dangerouslySetInnerHTML={{
+        __html: `
+[data-composer-card] {
+  display: none !important;
+}
+`,
+      }}
+    />
+  );
+}
+
 export function apply(ctx: any) {
   if (!ctx?.slots?.inject) return;
 
+  // 1. 注册设置卡片
   ctx.slots.inject('settings.plugin.item', function* () {
     yield ctx.slots.register(
       {
@@ -191,6 +246,19 @@ export function apply(ctx: any) {
       NapCatSettingsCard
     );
   });
+
+  // 2. 注册 QQ 会话输入框卡片隐藏器（保留 dock 监控行）
+  ctx.slots.inject('conversation.composer.dock', function* () {
+    yield ctx.slots.register(
+      {
+        name: 'conversation.composer.dock',
+        key: 'dsh-napcat-bridge-hide-composer',
+        order: -100,
+      },
+      QQComposerHider
+    );
+  });
 }
 
 export { NapCatSettingsCard };
+
