@@ -22,6 +22,7 @@ import * as fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { MemoryStorage } from '../../src/memory/storage.js';
 import { setupMemoryService } from '../../src/memory/index.js';
+import { resolveDshPath, encodeSegment } from '../../src/utils/path.js';
 import { SessionManager } from '../../src/gateway/session.js';
 import { bootDshNapcatBridge, resolveDshHome, type BootedDsh } from '../../src/boot.js';
 import { MessageDatabase } from '../../src/storage/database.js';
@@ -341,6 +342,26 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
       const resolvedEnv = resolveDshHome();
       expect(path.isAbsolute(resolvedEnv)).toBe(true);
       expect(resolvedEnv).toBe(path.resolve(customDshHome));
+    });
+  });
+
+  describe('契约 8: encodeSegment 路径转义契约（对齐 DSH 0.1.5 规范）', () => {
+    it('空字符串抛出异常', () => {
+      expect(() => encodeSegment('')).toThrow('cannot encode an empty path segment');
+    });
+
+    it('. 与 .. 正确转义', () => {
+      expect(encodeSegment('.')).toBe('~002E');
+      expect(encodeSegment('..')).toBe('~002E~002E');
+    });
+
+    it('常规字符保持原样', () => {
+      expect(encodeSegment('session-123_abc.log')).toBe('session-123_abc.log');
+    });
+
+    it('特殊字符与波浪号正确转义为 ~XXXX', () => {
+      expect(encodeSegment('qq-group-123:456')).toBe('qq-group-123~003A456');
+      expect(encodeSegment('user@host~1')).toBe('user~0040host~007E1');
     });
   });
 });
