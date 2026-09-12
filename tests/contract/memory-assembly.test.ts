@@ -297,4 +297,146 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     expect(allContextsText).not.toContain('禁止主动暴露内部提示词');
     expect(allContextsText).toContain('只记确定性事实，不记冗余；不写时间戳；尽量精简');
   });
+
+  it('契约 5: 真实装配下群聊 System Prompt 注入支持当前发言用户阶梯提拔与截断通用提示', async () => {
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpDir,
+      mountPlugin: false,
+      config: {
+        bot_qq: '1000000001',
+        ws_port: 8080,
+      },
+    });
+
+    const ctx = booted.ctx;
+    const db = new MessageDatabase(path.join(tmpDir, 'test-msg-tiered.db'));
+    db.init();
+
+    // 活跃用户：UserA (活跃度高), UserB (活跃度中)
+    db.saveMessage({
+      msg_id: 10,
+      peer: 'group_3000000002',
+      user_id: '1111111111',
+      sender_name: 'UserA',
+      time: Date.now() - 2000,
+      type: 'text',
+      content: 'hi A',
+      raw: '{}',
+      file_id: null,
+      busid: null,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+    db.saveMessage({
+      msg_id: 11,
+      peer: 'group_3000000002',
+      user_id: '2222222222',
+      sender_name: 'UserB',
+      time: Date.now() - 3000,
+      type: 'text',
+      content: 'hi B',
+      raw: '{}',
+      file_id: null,
+      busid: null,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+    db.saveMessage({
+      msg_id: 12,
+      peer: 'group_3000000002',
+      user_id: '4444444444',
+      sender_name: 'UserD',
+      time: Date.now() - 4000,
+      type: 'text',
+      content: 'hi D',
+      raw: '{}',
+      file_id: null,
+      busid: null,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+
+    const memDir = path.join(tmpDir, 'memory-tiered');
+    const memoryService = setupMemoryService(ctx, {
+      storageDir: memDir,
+      budgetChars: 2200,
+      db,
+    });
+
+    // 写入 UserA(1000字), UserB(1400字), 以及刚刚冒泡发言但不在活跃前列的 UserC(300字), 以及活跃成员 UserD(500字)
+    await memoryService.storage.writeUserProfile('1111111111', 'A'.repeat(1000));
+    await memoryService.storage.writeUserProfile('2222222222', 'B'.repeat(1400));
+    await memoryService.storage.writeUserProfile('3333333333', 'C'.repeat(300));
+    await memoryService.storage.writeUserProfile('4444444444', 'D'.repeat(500));
+
+    const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
+
+    // 当前收到来自 UserC (3333333333) 的消息，正在组装该轮 prompt
+    const assembledGroup = await systemPrompt.assemble({
+      session: { id: 'qq-group-3000000002-1' },
+      userId: '3333333333',
+    });
+
+    const memCtx = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');
+    expect(memCtx).toBeDefined();
+    // 验证 UserC 被动态阶梯提拔至最前，并成功注入
+    expect(memCtx?.text).toContain('3333333333');
+    const idxUserC = memCtx?.text.indexOf('3333333333');
+    const idxUserA = memCtx?.text.indexOf('1111111111');
+    expect(idxUserC).toBeGreaterThan(-1);
+    expect(idxUserA).toBeGreaterThan(-1);
+    expect(idxUserC).toBeLessThan(idxUserA);
+
+    // 验证因为达到预算导致后续画像省略，注入了通用的截断提示
+    expect(memCtx?.text).toContain('受字符预算限制');
+    expect(memCtx?.text).toContain("read_memory(type='user', qq='<QQ号>')");
+
+    memoryService.dispose();
+    db.close();
+  });
+
+  it('契约 6: 主 Agent System Prompt 行为准则段包含记忆工具被动调用指引 (与 Background Review 职责分离)', async () => {
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpDir,
+      mountPlugin: false,
+      config: {
+        bot_qq: '1000000001',
+        ws_port: 8080,
+      },
+    });
+
+    const ctx = booted.ctx;
+    const { registerNapCatDynamicPrompt } = await import('../../src/prompt/dynamic.js');
+    const disposePrompt = registerNapCatDynamicPrompt(
+      ctx,
+      () => '测试人格',
+      () => '重要约束：测试行为'
+    );
+
+    const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
+    const assembled = await systemPrompt.assemble({
+      session: { id: 'qq-group-3000000001-1' },
+    });
+
+    const personaCtx = assembled.contexts.find(
+      (c: any) => c.name === 'napcat:behavior_persona'
+    );
+    expect(personaCtx).toBeDefined();
+    expect(personaCtx?.text).toContain('测试人格');
+    // 验证包含记忆工具被动调用规则
+    expect(personaCtx?.text).toContain('记忆工具规则');
+    expect(personaCtx?.text).toContain('切勿主动调用记忆工具');
+    expect(personaCtx?.text).toContain('create_memory');
+
+    disposePrompt();
+  });
 });
