@@ -6,7 +6,7 @@ import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import { isSlashCommand, handleSlashCommand, formatTokens } from '../../src/commands/index.js';
 import { SessionManager } from '../../src/gateway/session.js';
 
-describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Commands & Permission Contract)', () => {
+describe('契约测试: 两字中文斜杠命令与白名单门控 (Two-Character Chinese Commands Contract)', () => {
   let tmpHome: string;
   let booted: BootedDsh;
 
@@ -27,19 +27,20 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     }
   });
 
-  it('契约 1: isSlashCommand 识别斜杠命令，handleSlashCommand 执行管理员白名单门控', async () => {
+  it('契约 1: isSlashCommand 识别半角/全角斜杠命令，handleSlashCommand 执行管理员白名单门控', async () => {
     const session = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001']; // 仅此 QQ 为管理员
 
     // 1. 普通消息不是命令
     expect(isSlashCommand('你好小助手')).toBe(false);
 
-    // 2. / 开头识别为命令
-    expect(isSlashCommand('/mode edit')).toBe(true);
-    expect(isSlashCommand('/model deepseek-chat')).toBe(true);
+    // 2. / 开头识别为命令，且兼容全角 ／
+    expect(isSlashCommand('/权限 编辑')).toBe(true);
+    expect(isSlashCommand('/模型 deepseek-v4-flash')).toBe(true);
+    expect(isSlashCommand('／状态')).toBe(true);
 
-    // 3. 管理员执行成功
-    const adminRes = await handleSlashCommand('/mode edit', {
+    // 3. 管理员执行成功（含全角斜杠兼容）
+    const adminRes = await handleSlashCommand('/权限 编辑', {
       userId: '2000000001',
       admins,
       session,
@@ -48,8 +49,17 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(adminRes.handled).toBe(true);
     expect(adminRes.success).toBe(true);
 
+    const fullWidthRes = await handleSlashCommand('／权限 只读', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+    });
+    expect(fullWidthRes.handled).toBe(true);
+    expect(fullWidthRes.success).toBe(true);
+
     // 4. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/mode yolo', {
+    const nonAdminRes = await handleSlashCommand('/权限 完全', {
       userId: '1234567890',
       admins,
       session,
@@ -58,36 +68,70 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(nonAdminRes.handled).toBe(true);
     expect(nonAdminRes.success).toBe(false);
     expect(nonAdminRes.error).toContain('权限不足');
+    // 无 emoji
+    expect(nonAdminRes.error).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
   });
 
-  it('契约 2: /mode 命令通过 permissionPresets.set 实现 Per-Session 权限切换与隔离', async () => {
+  it('契约 2: /权限 命令仅支持中文参数（只读/编辑/完全），无参展示当前模式，严格隔离并杜绝英文参数', async () => {
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const sessionB = booted.ctx.sessions.create('qq-group-1002' as any);
     const admins = ['2000000001'];
 
-    // 切换群 A 为 danger-full-access (yolo 模式)
-    await handleSlashCommand('/mode yolo', {
+    // 切换群 A 为 完全 (danger-full-access)
+    const resA = await handleSlashCommand('/权限 完全', {
       userId: '2000000001',
       admins,
       session: sessionA,
       ctx: booted.ctx,
     });
+    expect(resA.success).toBe(true);
+    expect(resA.reply).toBe('权限模式已切换为：完全');
 
-    // 切换群 B 为 workspace-write (edit 模式)
-    await handleSlashCommand('/mode edit', {
+    // 切换群 B 为 编辑 (workspace-write)
+    const resB = await handleSlashCommand('/权限 编辑', {
       userId: '2000000001',
       admins,
       session: sessionB,
       ctx: booted.ctx,
     });
+    expect(resB.success).toBe(true);
+    expect(resB.reply).toBe('权限模式已切换为：编辑');
 
     // 契约断言: 会话级隔离生效，A 与 B 互不影响
     const presetsSvc = booted.ctx.permissionPresets;
     expect(presetsSvc.current(sessionA)).toBe('danger-full-access');
     expect(presetsSvc.current(sessionB)).toBe('workspace-write');
+
+    // 无参数查询：返回中文友好模式名，符合用户预期
+    const queryA = await handleSlashCommand('/权限', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+    });
+    expect(queryA.reply).toBe('当前权限模式：完全');
+
+    const queryB = await handleSlashCommand('/权限', {
+      userId: '2000000001',
+      admins,
+      session: sessionB,
+      ctx: booted.ctx,
+    });
+    expect(queryB.reply).toBe('当前权限模式：编辑');
+
+    // 不再支持旧英文参数：拒绝并提示可用中文模式
+    const invalidRes = await handleSlashCommand('/权限 yolo', {
+      userId: '2000000001',
+      admins,
+      session: sessionA,
+      ctx: booted.ctx,
+    });
+    expect(invalidRes.success).toBe(false);
+    expect(invalidRes.error).toContain('无效的权限模式：yolo');
+    expect(invalidRes.error).toContain('可用模式：只读、编辑、完全');
   });
 
-  it('B1-契约 3: /model 普通命令仅落位当前 QQ 会话，不影响其他 QQ 会话且不污染 Web UI 宿主全局默认', async () => {
+  it('契约 3: /模型 普通命令仅落位当前 QQ 会话，无 emoji，不污染 Web UI 宿主全局默认', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const sessionB = booted.ctx.sessions.create('qq-group-1002' as any);
@@ -96,7 +140,7 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     const hostDefaultBefore = (booted.ctx as any).agentDefaultModel?.currentSelection?.();
 
     // 1. 切换 A 会话模型
-    const resA = await handleSlashCommand('/model deepseek-v4-pro', {
+    const resA = await handleSlashCommand('/模型 deepseek-v4-pro', {
       userId: '2000000001',
       admins,
       session: sessionA,
@@ -105,7 +149,8 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     });
     expect(resA.handled).toBe(true);
     expect(resA.success).toBe(true);
-    expect(resA.reply).toContain('当前 QQ 会话');
+    expect(resA.reply).toContain('当前会话模型已切换为：deepseek-official / deepseek-v4-pro');
+    expect(resA.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
     // 2. A 会话选择已落位
     const selA = sessionManager.getModelSelection(sessionA.id);
@@ -116,23 +161,21 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     const selB = sessionManager.getModelSelection(sessionB.id);
     expect(selB?.model).not.toBe('deepseek-v4-pro');
 
-    // 4. Web UI 宿主全局默认模型绝对未被修改 (保护 Web UI 全局设置)
+    // 4. Web UI 宿主全局默认模型绝对未被修改
     const hostDefaultAfter = (booted.ctx as any).agentDefaultModel?.currentSelection?.();
     if (hostDefaultBefore) {
       expect(hostDefaultAfter).toEqual(hostDefaultBefore);
     }
   });
 
-  it('B2-契约 3b: /model --global 切换 NapCat 插件全局 QQ 会话模型，批量同步所有 QQ 会话且不误伤 Web UI 宿主全局设置', async () => {
+  it('契约 3b: /模型 支持 -g 与 --全局 参数切换 QQ 全局默认模型', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const sessionB = booted.ctx.sessions.create('qq-group-1002' as any);
     const admins = ['2000000001'];
 
-    const hostDefaultBefore = (booted.ctx as any).agentDefaultModel?.currentSelection?.();
-
-    // 1. 执行 NapCat 全局切换命令
-    const resGlobal = await handleSlashCommand('/model deepseek-v4-pro --global', {
+    // 1. 执行全局切换命令（支持 --全局）
+    const resGlobal = await handleSlashCommand('/模型 deepseek-v4-pro --全局', {
       userId: '2000000001',
       admins,
       session: sessionA,
@@ -141,7 +184,8 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     });
     expect(resGlobal.handled).toBe(true);
     expect(resGlobal.success).toBe(true);
-    expect(resGlobal.reply).toContain('NapCat 插件全局 QQ 会话模型已切换为');
+    expect(resGlobal.reply).toContain('QQ全局模型已切换为：deepseek-official / deepseek-v4-pro');
+    expect(resGlobal.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
     // 2. 所有已知的 QQ 会话（A 与 B）均被批量更新为新模型
     const selA = sessionManager.getModelSelection(sessionA.id);
@@ -149,19 +193,8 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(selA?.model).toBe('deepseek-v4-pro');
     expect(selB?.model).toBe('deepseek-v4-pro');
 
-    // 3. 未来新创建的 QQ 会话（如群 C）也继承该 NapCat 全局默认模型
-    const sessionC = booted.ctx.sessions.create('qq-group-1003' as any);
-    const selC = sessionManager.getModelSelection(sessionC.id);
-    expect(selC?.model).toBe('deepseek-v4-pro');
-
-    // 4. 宿主 Web UI 全局设置 (settings.yaml / agentDefaultModel) 绝对未被修改
-    const hostDefaultAfter = (booted.ctx as any).agentDefaultModel?.currentSelection?.();
-    if (hostDefaultBefore) {
-      expect(hostDefaultAfter).toEqual(hostDefaultBefore);
-    }
-
-    // 5. 容错测试：支持前置 --global 与 -g 简写
-    const resPrefix = await handleSlashCommand('/model -g deepseek-v4-flash', {
+    // 3. 容错测试：支持 -g 简写
+    const resPrefix = await handleSlashCommand('/模型 -g deepseek-v4-flash', {
       userId: '2000000001',
       admins,
       session: sessionA,
@@ -173,12 +206,12 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(sessionManager.getModelSelection(sessionB.id)?.model).toBe('deepseek-v4-flash');
   });
 
-  it('B3-契约 3c: /model 空参数查询同时呈现当前 QQ 会话模型、NapCat 全局模型及双模切换语法帮助', async () => {
+  it('契约 3c: /模型 空参数查询呈现当前会话模型、QQ全局模型及帮助说明，无 emoji', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001'];
 
-    const res = await handleSlashCommand('/model', {
+    const res = await handleSlashCommand('/模型', {
       userId: '2000000001',
       admins,
       session: sessionA,
@@ -188,81 +221,21 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
 
     expect(res.handled).toBe(true);
     expect(res.success).toBe(true);
-    expect(res.reply).toContain('当前 QQ 会话模型');
-    expect(res.reply).toContain('QQ 插件全局默认');
-    expect(res.reply).toContain('--global');
+    expect(res.reply).toContain('当前会话模型：');
+    expect(res.reply).toContain('QQ全局默认：');
+    expect(res.reply).toContain('可用模型列表：');
+    expect(res.reply).toContain('--全局');
+    expect(res.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
   });
 
-  it('B4-契约 3d: 验证与 sessionController 的装配联动与宿主全局设置防污染安全拦截机制', async () => {
+  it('契约 4: /新建 开启全新会话且不归档原会话（清空当前上下文，原会话进历史）', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001'];
 
-    // 模拟挂载宿主 sessionController 与 agentDefaultModel 服务。
-    // 注：DSH 0.1.2-rc.1 起 apiProxy 已移除，宿主服务键为 sessionController，
-    // selectModel 直接接收 { sessionId, provider, model } 请求体（无 { rpcId, payload } 信封）。
-    let selectModelCalledWith: any = null;
-    let hostSaveCalled = false;
-
-    const mockSessionController = {
-      selectModel: async (req: any) => {
-        selectModelCalledWith = req;
-        // 模拟 DSH 官方 selectModel 内部默认尝试调用 saveSelection 的行为
-        await (booted.ctx as any).agentDefaultModel?.saveSelection?.(req);
-        return { selected: { provider: req.provider, model: req.model } };
-      },
-    };
-    (booted.ctx as any).provide('sessionController', mockSessionController);
-
-    const agentDefaultModel = (booted.ctx as any).agentDefaultModel;
-    const originalSaveSelection = agentDefaultModel?.saveSelection;
-    const spySave = async () => {
-      hostSaveCalled = true;
-    };
-    if (agentDefaultModel) {
-      agentDefaultModel.saveSelection = spySave;
-    }
-
-    try {
-      // 1. 执行普通切换：必须以新直传形态调用 sessionController.selectModel，但宿主
-      //    saveSelection 必须被拦截阻止
-      const res = await handleSlashCommand('/model deepseek-v4-pro', {
-        userId: '2000000001',
-        admins,
-        session: sessionA,
-        ctx: booted.ctx,
-        sessionManager,
-      });
-
-      expect(res.success).toBe(true);
-      expect(selectModelCalledWith).not.toBeNull();
-      // 新契约：请求体为直传 { sessionId, provider, model }，不再有旧版 { rpcId, payload } 信封
-      expect(selectModelCalledWith.sessionId).toBe(sessionA.id);
-      expect(selectModelCalledWith.model).toBe('deepseek-v4-pro');
-      expect(selectModelCalledWith.provider).toBeTruthy();
-      expect(selectModelCalledWith.rpcId).toBeUndefined();
-      expect('payload' in selectModelCalledWith).toBe(false);
-      // 关键断言：宿主真实 saveSelection 在命令执行期间绝对不能被触发
-      expect(hostSaveCalled).toBe(false);
-      // 关键断言：安全拦截结束后原保存逻辑已恢复，后续调用正常触发
-      await (booted.ctx as any).agentDefaultModel.saveSelection({ provider: 'test', model: 'test' });
-      expect(hostSaveCalled).toBe(true);
-    } finally {
-      if (agentDefaultModel && originalSaveSelection) {
-        agentDefaultModel.saveSelection = originalSaveSelection;
-      }
-    }
-  });
-
-  it('C1-契约 4: /clear 开启全新会话且不归档原会话（直接开启新对话语义）', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const sessionA = booted.ctx.sessions.create('qq-group-1001' as any);
-    const admins = ['2000000001'];
-
-    // 清空前的当前会话为基础会话
     expect(sessionManager.peerToSessionId('group_1001')).toBe('qq-group-1001');
 
-    const res = await handleSlashCommand('/clear', {
+    const res = await handleSlashCommand('/新建', {
       userId: '2000000001',
       admins,
       session: sessionA,
@@ -271,47 +244,17 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     });
     expect(res.handled).toBe(true);
     expect(res.success).toBe(true);
+    expect(res.reply).toBe('已开启新会话（原会话已保留归档，新消息将计入新会话）。');
+    expect(res.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
     // 1. 清空后 peer 映射到全新版本会话
     expect(sessionManager.peerToSessionId('group_1001')).toBe('qq-group-1001-2');
-
-    // 2. 再次唤醒保持新会话（不退回基础会话）
-    expect(sessionManager.peerToSessionId('group_1001')).toBe('qq-group-1001-2');
-
-    // 3. 原会话未被归档（Web UI 归档是手动行为，/clear 不归档）
-    const wsRegistry = (booted.ctx as any).workspaceRegistry;
-    const archived = (wsRegistry?.archivedSessionIds || []) as string[];
-    expect(archived).not.toContain('qq-group-1001');
-    expect(archived).not.toContain('qq-group-1001-2');
   });
 
-  it('契约 5: /stop 命令通过 sessionController.cancel 停止当前会话生成并受管理员白名单保护', async () => {
+  it('契约 5: /停止 命令停止当前生成，回复无 emoji', async () => {
     const session = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001'];
 
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/stop', {
-      userId: '1234567890',
-      admins,
-      session,
-      ctx: booted.ctx,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
-
-    // 2. 服务未提供时报错
-    const noServiceRes = await handleSlashCommand('/stop', {
-      userId: '2000000001',
-      admins,
-      session,
-      ctx: booted.ctx,
-    });
-    expect(noServiceRes.handled).toBe(true);
-    expect(noServiceRes.success).toBe(false);
-    expect(noServiceRes.error).toContain('sessionController 服务不可用');
-
-    // 3. 挂载 mock sessionController.cancel
     let cancelCalledWith: any = null;
     const mockController = {
       cancel: async (req: any) => {
@@ -321,7 +264,7 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     };
     (booted.ctx as any).provide('sessionController', mockController);
 
-    const adminRes = await handleSlashCommand('/stop', {
+    const adminRes = await handleSlashCommand('/停止', {
       userId: '2000000001',
       admins,
       session,
@@ -329,85 +272,41 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     });
     expect(adminRes.handled).toBe(true);
     expect(adminRes.success).toBe(true);
-    expect(adminRes.reply).toContain('⏹️ 已停止当前生成。');
+    expect(adminRes.reply).toBe('已停止当前生成。');
+    expect(adminRes.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
     expect(cancelCalledWith).toEqual({ sessionId: session.id });
-
-    // 4. cancel 抛错时优雅处理
-    mockController.cancel = async () => {
-      throw new Error('agent not found');
-    };
-    const errRes = await handleSlashCommand('/stop', {
-      userId: '2000000001',
-      admins,
-      session,
-      ctx: booted.ctx,
-    });
-    expect(errRes.handled).toBe(true);
-    expect(errRes.success).toBe(false);
-    expect(errRes.error).toContain('停止失败: agent not found');
   });
 
-  it('契约 6: /new 命令开启全新会话且不归档原会话（语义对齐 /clear 并受管理员白名单保护）', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const sessionA = booted.ctx.sessions.create('qq-group-1002' as any);
+  it('契约 6: 不再响应旧英文命令（如 /help, /model, /clear 等均报未知指令）', async () => {
+    const session = booted.ctx.sessions.create('qq-group-1001' as any);
     const admins = ['2000000001'];
 
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/new', {
-      userId: '1234567890',
-      admins,
-      session: sessionA,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
-
-    // 2. 管理员执行成功，版本递增
-    expect(sessionManager.peerToSessionId('group_1002')).toBe('qq-group-1002');
-    const res = await handleSlashCommand('/new', {
-      userId: '2000000001',
-      admins,
-      session: sessionA,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(res.handled).toBe(true);
-    expect(res.success).toBe(true);
-    expect(res.reply).toContain('✅ 会话已开启新对话');
-
-    // 3. 验证会话已更新且原会话未被归档
-    expect(sessionManager.peerToSessionId('group_1002')).toBe('qq-group-1002-2');
+    const oldCommands = ['/help', '/model', '/clear', '/new', '/stop', '/ctx', '/mode', '/think', '/resume'];
+    for (const cmd of oldCommands) {
+      const res = await handleSlashCommand(cmd, {
+        userId: '2000000001',
+        admins,
+        session,
+        ctx: booted.ctx,
+      });
+      expect(res.handled).toBe(true);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain(`未知指令：${cmd}，输入 /帮助 查看可用指令`);
+    }
   });
 
-  it('契约 7: /resume 命令列出历史会话（升序排序，倒序渲染，序号切换）并受管理员白名单保护', async () => {
+  it('契约 7: /会话 命令无参列出历史会话，支持序号或标题切换，无 emoji', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const admins = ['2000000001'];
 
-    // 创建三个同 peer 会话
     const s1 = booted.ctx.sessions.create('qq-group-1003' as any);
     const s2 = booted.ctx.sessions.create('qq-group-1003-2' as any);
     const s3 = booted.ctx.sessions.create('qq-group-1003-3' as any);
 
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/resume', {
-      userId: '1234567890',
-      admins,
-      session: s3,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
+    sessionManager.setPeerName('group_1003', '摸鱼交流群');
 
-    // 2. listPeerSessionIds 升序返回旧→新
-    const list = sessionManager.listPeerSessionIds('group_1003');
-    expect(list).toEqual(['qq-group-1003', 'qq-group-1003-2', 'qq-group-1003-3']);
-
-    // 3. /resume 无参：倒序渲染，最新编号最大在最上，最旧编号 1 在最下
-    const listRes = await handleSlashCommand('/resume', {
+    // 1. /会话 无参：列出历史会话
+    const listRes = await handleSlashCommand('/会话', {
       userId: '2000000001',
       admins,
       session: s3,
@@ -416,136 +315,57 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     });
     expect(listRes.handled).toBe(true);
     expect(listRes.success).toBe(true);
-    expect(listRes.reply).toContain('3. qq-group-1003-3');
-    expect(listRes.reply).toContain('2. qq-group-1003-2');
-    expect(listRes.reply).toContain('1. qq-group-1003');
-    // 验证相对顺序：3 在 2 前面，2 在 1 前面
-    const idx3 = listRes.reply!.indexOf('3. qq-group-1003-3');
-    const idx2 = listRes.reply!.indexOf('2. qq-group-1003-2');
-    const idx1 = listRes.reply!.indexOf('1. qq-group-1003');
-    expect(idx3).toBeLessThan(idx2);
-    expect(idx2).toBeLessThan(idx1);
+    expect(listRes.reply).toContain('历史会话列表');
+    expect(listRes.reply).toContain('qq-group-1003-3');
+    expect(listRes.reply).toContain('qq-group-1003');
+    expect(listRes.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
-    // 4. /resume <越界序号> 返回错误
-    const outOfBoundsRes1 = await handleSlashCommand('/resume 0', {
+    // 2. /会话 1 序号切换到最旧会话
+    const resume1Res = await handleSlashCommand('/会话 1', {
       userId: '2000000001',
       admins,
       session: s3,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(outOfBoundsRes1.success).toBe(false);
-    expect(outOfBoundsRes1.error).toContain('序号无效，范围 1~3');
-
-    const outOfBoundsRes2 = await handleSlashCommand('/resume 4', {
-      userId: '2000000001',
-      admins,
-      session: s3,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(outOfBoundsRes2.success).toBe(false);
-    expect(outOfBoundsRes2.error).toContain('序号无效，范围 1~3');
-
-    // 5. /resume 1 切换到最旧会话 qq-group-1003
-    const resume1Res = await handleSlashCommand('/resume 1', {
-      userId: '2000000001',
-      admins,
-      session: s3,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(resume1Res.handled).toBe(true);
     expect(resume1Res.success).toBe(true);
-    expect(resume1Res.reply).toContain('✅ 已切换到会话 qq-group-1003');
+    expect(resume1Res.reply).toContain('已切换到会话：');
+    expect(resume1Res.reply).toContain('qq-group-1003');
     expect(sessionManager.peerToSessionId('group_1003')).toBe('qq-group-1003');
 
-    // 6. /resume 2 切换到 qq-group-1003-2
-    const resume2Res = await handleSlashCommand('/resume 2', {
+    // 3. /会话 #2 按标题或版本特征切换
+    const resumeTitleRes = await handleSlashCommand('/会话 #2', {
       userId: '2000000001',
       admins,
       session: s1,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(resume2Res.success).toBe(true);
-    expect(resume2Res.reply).toContain('✅ 已切换到会话 qq-group-1003-2');
+    expect(resumeTitleRes.success).toBe(true);
+    expect(resumeTitleRes.reply).toContain('qq-group-1003-2');
     expect(sessionManager.peerToSessionId('group_1003')).toBe('qq-group-1003-2');
-
-    // 7. 尝试切换到已归档会话应失败
-    const wsRegistry = (booted.ctx as any).workspaceRegistry;
-    if (wsRegistry?.archiveSession) {
-      await wsRegistry.archiveSession('qq-group-1003');
-      const ok = sessionManager.resumeSession('group_1003', 'qq-group-1003');
-      expect(ok).toBe(false);
-    }
   });
 
-  it('契约 8: /ctx 命令测量上下文用量，对齐 WebUI 格式与百分比计算，受管理员白名单保护', async () => {
+  it('契约 8: /用量 命令测量上下文用量明细，无 emoji', async () => {
     const session = booted.ctx.sessions.create('qq-group-1004' as any);
     const admins = ['2000000001'];
 
-    // 0. formatTokens 工具函数契约
-    expect(formatTokens(850)).toBe('850');
-    expect(formatTokens(1700)).toBe('1.7K');
-    expect(formatTokens(17000)).toBe('17K');
-    expect(formatTokens(113000)).toBe('113K');
-    expect(formatTokens(250000)).toBe('250K');
-    expect(formatTokens(1000000)).toBe('1M');
-    expect(formatTokens(1048576)).toBe('1M');
-
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/ctx', {
-      userId: '1234567890',
-      admins,
-      session,
-      ctx: booted.ctx,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
-
-    // 2. 服务未提供时报错
-    const noServiceCtx = {
-      get: () => undefined,
-    } as any;
-    const noServiceRes = await handleSlashCommand('/ctx', {
-      userId: '2000000001',
-      admins,
-      session,
-      ctx: noServiceCtx,
-    });
-    expect(noServiceRes.handled).toBe(true);
-    expect(noServiceRes.success).toBe(false);
-    expect(noServiceRes.error).toContain('tokenMeter 服务不可用');
-
-    // 3. 打桩真实 tokenMeter.measure 与 sessionProjections.snapshot
     const tokenMeter = booted.ctx.get('tokenMeter') || (booted.ctx as any).tokenMeter;
     const originalMeasure = tokenMeter?.measure;
-    let measureCalledWith: any = null;
     if (tokenMeter) {
-      tokenMeter.measure = (sess: any) => {
-        measureCalledWith = sess;
-        return {
-          totalTokens: 250000,
-          surfaceTokens: 113000,
-          nodes: [{ seq: 1, tokens: 113000, heuristicTokens: 113000 }],
-        };
-      };
+      tokenMeter.measure = () => ({
+        totalTokens: 250000,
+        surfaceTokens: 113000,
+      });
     }
 
-    const sessionProjections =
-      booted.ctx.get('sessionProjections') || (booted.ctx as any).sessionProjections;
+    const sessionProjections = booted.ctx.get('sessionProjections') || (booted.ctx as any).sessionProjections;
     const originalSnapshot = sessionProjections?.snapshot;
     if (sessionProjections) {
-      sessionProjections.snapshot = (sess: any, keys: string[]) => ({
+      sessionProjections.snapshot = () => ({
         asOfSeq: 1,
         values: {
-          contextPressure: {
-            contextWindow: 1000000,
-            pressureTokens: 250000,
-            projectedTokens: 250000,
-          },
+          contextPressure: { contextWindow: 1000000 },
           contextBreakdown: {
             systemTokens: 1700,
             toolsTokens: 17000,
@@ -556,65 +376,30 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     }
 
     try {
-      // 4. 管理员执行 /ctx：显示已用、上限与百分比，以及三段明细
-      const resWithCapacity = await handleSlashCommand('/ctx', {
+      const res = await handleSlashCommand('/用量', {
         userId: '2000000001',
         admins,
         session,
         ctx: booted.ctx,
       });
-      expect(resWithCapacity.handled).toBe(true);
-      expect(resWithCapacity.success).toBe(true);
-      expect(measureCalledWith).toBe(session);
-
-      const replyText = resWithCapacity.reply!;
-      expect(replyText).toContain('🧠 上下文已用 ~250K');
-      expect(replyText).toContain('~250K / 1M (25%)');
-      expect(replyText).toContain('系统提示词 ~1.7K');
-      expect(replyText).toContain('工具 ~17K');
-      expect(replyText).toContain('对话消息 ~113K');
-
-      // 5. 当没有 contextWindow 时：仅显示 totalTokens，不显示百分比与容量
-      if (sessionProjections) {
-        sessionProjections.snapshot = () => ({
-          asOfSeq: 1,
-          values: {},
-        });
-      }
-      const resWithoutCapacity = await handleSlashCommand('/ctx', {
-        userId: '2000000001',
-        admins,
-        session,
-        ctx: booted.ctx,
-      });
-      expect(resWithoutCapacity.handled).toBe(true);
-      expect(resWithoutCapacity.success).toBe(true);
-      expect(resWithoutCapacity.reply).toContain('🧠 上下文已用 ~250K');
-      expect(resWithoutCapacity.reply).not.toContain('%');
-      expect(resWithoutCapacity.reply).not.toContain('/ 1M');
+      expect(res.handled).toBe(true);
+      expect(res.success).toBe(true);
+      expect(res.reply).toContain('上下文已用：~250K / 1M (25%)');
+      expect(res.reply).toContain('系统提示词：~1.7K');
+      expect(res.reply).toContain('工具声明：~17K');
+      expect(res.reply).toContain('对话消息：~113K');
+      expect(res.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
     } finally {
       if (tokenMeter && originalMeasure) tokenMeter.measure = originalMeasure;
       if (sessionProjections && originalSnapshot) sessionProjections.snapshot = originalSnapshot;
     }
   });
 
-  it('契约 9: /help 命令输出最新指令清单，涵盖全部管理指令并受管理员白名单保护', async () => {
+  it('契约 9: /帮助 命令输出 9 个两字中文指令，无 emoji', async () => {
     const session = booted.ctx.sessions.create('qq-group-1005' as any);
     const admins = ['2000000001'];
 
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/help', {
-      userId: '1234567890',
-      admins,
-      session,
-      ctx: booted.ctx,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
-
-    // 2. 管理员执行，返回完整指令列表
-    const adminRes = await handleSlashCommand('/help', {
+    const adminRes = await handleSlashCommand('/帮助', {
       userId: '2000000001',
       admins,
       session,
@@ -623,264 +408,144 @@ describe('契约测试: 斜杠命令白名单与 Per-Session 权限隔离 (Comma
     expect(adminRes.handled).toBe(true);
     expect(adminRes.success).toBe(true);
     const reply = adminRes.reply!;
-    expect(reply).toContain('【DSH × NapCat 快捷指令】');
-    expect(reply).toContain('• /model <model_id> : 切换当前会话 LLM 模型');
-    expect(reply).toContain('• /mode <readonly|edit|yolo> : 切换权限模式');
-    expect(reply).toContain('• /think [档位] : 查看或切换当前思考深度');
-    expect(reply).toContain('• /new (clear) : 开启新会话（原会话保留）');
-    expect(reply).toContain('• /resume : 列出并切换历史会话 (/resume <序号>)');
-    expect(reply).toContain('• /ctx : 查看当前会话上下文用量');
-    expect(reply).toContain('• /stop : 停止当前生成');
-    expect(reply).toContain('• /help : 查看帮助');
+    expect(reply).toContain('【快捷指令帮助】');
+    expect(reply).toContain('/状态');
+    expect(reply).toContain('/模型');
+    expect(reply).toContain('/权限');
+    expect(reply).toContain('/思考');
+    expect(reply).toContain('/会话');
+    expect(reply).toContain('/新建');
+    expect(reply).toContain('/用量');
+    expect(reply).toContain('/停止');
+    expect(reply).toContain('/帮助');
+    expect(reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
   });
 
-  it('契约 10: /think 空参数动态读取 DSH 思考能力，展示当前生效档位与实际支持档位（无 medium，包含 max）', async () => {
+  it('契约 10: /思考 命令保留英文档位参数方便输入，无 emoji', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const session = booted.ctx.sessions.create('qq-group-1010' as any);
     const admins = ['2000000001'];
 
-    // 1. 非管理员拒绝
-    const nonAdminRes = await handleSlashCommand('/think', {
-      userId: '1234567890',
-      admins,
-      session,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(nonAdminRes.handled).toBe(true);
-    expect(nonAdminRes.success).toBe(false);
-    expect(nonAdminRes.error).toContain('权限不足');
-
-    // 2. 管理员执行空参数：查询当前思考深度与 DSH 真实档位
-    const adminRes = await handleSlashCommand('/think', {
+    // 1. 无参查询
+    const queryRes = await handleSlashCommand('/思考', {
       userId: '2000000001',
       admins,
       session,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(adminRes.handled).toBe(true);
-    expect(adminRes.success).toBe(true);
-    const reply = adminRes.reply!;
-    expect(reply).toContain('🤖 当前会话模型');
-    expect(reply).toContain('🧠 当前思考强度');
-    expect(reply).toContain('high');
-    expect(reply).toContain('[默认]');
-    // 验证来自 DSH 的真实档位列表：包含 max，绝不包含不存在的 medium
-    expect(reply).toContain('`off` (Off)');
-    expect(reply).toContain('`low` (Low)');
-    expect(reply).toContain('`high` (High)');
-    expect(reply).toContain('`max` (Max)');
-    expect(reply).not.toContain('`medium`');
-    expect(reply).toContain('/think <档位>');
-    expect(reply).toContain('/think default');
-  });
+    expect(queryRes.success).toBe(true);
+    expect(queryRes.reply).toContain('当前思考强度：');
+    expect(queryRes.reply).toContain('支持的思考档位：');
+    expect(queryRes.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
-  it('契约 11: /think 动态校验 DSH 档位：支持 max，拒绝非 DSH 档位（如 medium），支持 per-session 隔离与 default 恢复', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const sessionA = booted.ctx.sessions.create('qq-group-1011a' as any);
-    const sessionB = booted.ctx.sessions.create('qq-group-1011b' as any);
-    const admins = ['2000000001'];
-
-    // 1. 输入非法档位（如旧版写死的 medium，DSH 实际不支持）
-    const invalidRes = await handleSlashCommand('/think medium', {
+    // 2. 切换 max 档位
+    const setRes = await handleSlashCommand('/思考 max', {
       userId: '2000000001',
       admins,
-      session: sessionA,
+      session,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(invalidRes.handled).toBe(true);
-    expect(invalidRes.success).toBe(false);
-    expect(invalidRes.error).toContain('无效的思考深度: [medium]');
-    expect(invalidRes.error).toContain('实际支持的档位为');
-    expect(invalidRes.error).toContain('`max`');
-    expect(invalidRes.error).not.toContain('`medium`');
+    expect(setRes.success).toBe(true);
+    expect(setRes.reply).toContain('当前会话思考深度已切换为：max (Max)');
+    expect(setRes.reply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
-    // 2. 切换为 DSH 合法档位 max（旧版硬编码曾错误阻断）
-    const validRes = await handleSlashCommand('/think max', {
+    // 3. 全局切换支持 --全局
+    const globalRes = await handleSlashCommand('/思考 low --全局', {
       userId: '2000000001',
       admins,
-      session: sessionA,
+      session,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(validRes.handled).toBe(true);
-    expect(validRes.success).toBe(true);
-    expect(validRes.reply).toContain('当前 QQ 会话思考深度已切换为: max (Max)');
-
-    // 3. 验证 Per-Session 隔离：sessionA 为 max，sessionB 保持未覆盖
-    const selA = sessionManager.getModelSelection(sessionA.id);
-    expect(selA?.reasoningEffort).toBe('max');
-    const selB = sessionManager.getModelSelection(sessionB.id);
-    expect(selB?.reasoningEffort).toBeUndefined();
-
-    // 4. 执行 /think default 恢复默认
-    const resetRes = await handleSlashCommand('/think default', {
-      userId: '2000000001',
-      admins,
-      session: sessionA,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(resetRes.handled).toBe(true);
-    expect(resetRes.success).toBe(true);
-    expect(resetRes.reply).toContain('模型默认 (high)');
-    const selAAfterReset = sessionManager.getModelSelection(sessionA.id);
-    expect(selAAfterReset?.reasoningEffort).toBeUndefined();
-  });
-
-  it('契约 12: /think <档位> --global 批量同步所有 QQ 会话并更新 NapCat 全局默认思考深度', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const session1 = booted.ctx.sessions.create('qq-group-1012a' as any);
-    const session2 = booted.ctx.sessions.create('qq-group-1012b' as any);
-    const admins = ['2000000001'];
-
-    // 预先注册这两个 session
-    sessionManager.getOrCreateSelectionRef(session1.id);
-    sessionManager.getOrCreateSelectionRef(session2.id);
-
-    const globalRes = await handleSlashCommand('/think low --global', {
-      userId: '2000000001',
-      admins,
-      session: session1,
-      ctx: booted.ctx,
-      sessionManager,
-    });
-    expect(globalRes.handled).toBe(true);
     expect(globalRes.success).toBe(true);
-    expect(globalRes.reply).toContain('NapCat 插件全局 QQ 会话思考深度已切换为: low (Low)');
-
-    // 验证所有会话都被批量更新为 low
-    expect(sessionManager.getModelSelection(session1.id)?.reasoningEffort).toBe('low');
-    expect(sessionManager.getModelSelection(session2.id)?.reasoningEffort).toBe('low');
-    // 验证 NapCat 全局默认也更新
-    expect(sessionManager.getNapcatDefaultModel()?.reasoningEffort).toBe('low');
+    expect(globalRes.reply).toContain('QQ全局思考深度已切换为：low (Low)');
   });
 
-  it('契约 13: /think 针对不支持思考的模型给出明确不可用提示', async () => {
+  it('契约 11: /状态 命令汇总模型、思考等级、权限模式、上下文用量及运行状态', async () => {
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const session = booted.ctx.sessions.create('qq-group-1013' as any);
+    const session = booted.ctx.sessions.create('qq-group-1020' as any);
     const admins = ['2000000001'];
 
-    // 设置为无思考能力的 mock 模型
-    sessionManager.setModelSelection(session.id, 'mock-provider', 'no-reason-model');
+    sessionManager.setModelSelection(session.id, 'deepseek-official', 'deepseek-v4-pro', 'high');
+    booted.ctx.permissionPresets.set(session, 'danger-full-access');
 
-    const llm = booted.ctx.get('llm');
-    const origResolve = llm.resolveModelInfo;
-    llm.resolveModelInfo = async () => ({
-      provider: 'mock-provider',
-      id: 'no-reason-model',
-      name: 'No Reasoning Model',
-      reasoning: undefined, // 无思考能力
-    });
-
-    try {
-      // 空参数查询
-      const queryRes = await handleSlashCommand('/think', {
-        userId: '2000000001',
-        admins,
-        session,
-        ctx: booted.ctx,
-        sessionManager,
-      });
-      expect(queryRes.handled).toBe(true);
-      expect(queryRes.success).toBe(true);
-      expect(queryRes.reply).toContain('当前模型不支持思考强度设置');
-
-      // 带参数切换
-      const setRes = await handleSlashCommand('/think low', {
-        userId: '2000000001',
-        admins,
-        session,
-        ctx: booted.ctx,
-        sessionManager,
-      });
-      expect(setRes.handled).toBe(true);
-      expect(setRes.success).toBe(false);
-      expect(setRes.error).toContain('不支持思考强度设置');
-    } finally {
-      llm.resolveModelInfo = origResolve;
-    }
-  });
-
-  it('契约 14: /model 切换模型时自动动态解析并继承/对齐思考深度，并在回复中呈现思考状态', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const session = booted.ctx.sessions.create('qq-group-1014' as any);
-    const admins = ['2000000001'];
-
-    // 1. 初始为 deepseek-v4-flash 并设思考深度为 low
-    sessionManager.setModelSelection(session.id, 'deepseek-official', 'deepseek-v4-flash', 'low');
-
-    // 2. 切换到同支持思考的 deepseek-v4-pro，预期继承前序 low 档位
-    const resInherit = await handleSlashCommand('/model deepseek-v4-pro', {
+    // 1. 空闲状态查询
+    const idleRes = await handleSlashCommand('/状态', {
       userId: '2000000001',
       admins,
       session,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(resInherit.handled).toBe(true);
-    expect(resInherit.success).toBe(true);
-    expect(resInherit.reply).toContain('思考深度：已自动对齐为 `low (Low)` (继承前序设置)');
-    const selAfterInherit = sessionManager.getModelSelection(session.id);
-    expect(selAfterInherit?.model).toBe('deepseek-v4-pro');
-    expect(selAfterInherit?.reasoningEffort).toBe('low');
+    expect(idleRes.handled).toBe(true);
+    expect(idleRes.success).toBe(true);
+    const idleReply = idleRes.reply!;
+    expect(idleReply).toContain('【当前会话状态】');
+    expect(idleReply).toContain('运行状态：空闲');
+    expect(idleReply).toContain('当前模型：deepseek-official / deepseek-v4-pro');
+    expect(idleReply).toContain('思考等级：high');
+    expect(idleReply).toContain('权限模式：完全');
+    expect(idleReply).toContain('上下文用量：');
+    expect(idleReply).toContain('会话标识：');
+    expect(idleReply).not.toMatch(/[\u{1F300}-\u{1F9FF}]/u);
 
-    // 3. 切换到不支持思考的模型
-    const llm = booted.ctx.get('llm');
-    const origResolve = llm.resolveModelInfo;
-    llm.resolveModelInfo = async () => ({
-      provider: 'mock-provider',
-      id: 'no-think-model',
-      name: 'No Think Model',
-      reasoning: undefined,
-    });
+    // 2. 运行中状态查询（模拟 activeTurn）
+    const mockOutbound = {
+      getActiveTurn: (_peer: string) => 3,
+    };
+    (sessionManager as any).setOutboundBridge?.(mockOutbound);
 
-    try {
-      const resNoThink = await handleSlashCommand('/model mock-provider/no-think-model', {
-        userId: '2000000001',
-        admins,
-        session,
-        ctx: booted.ctx,
-        sessionManager,
-      });
-      expect(resNoThink.handled).toBe(true);
-      expect(resNoThink.success).toBe(true);
-      expect(resNoThink.reply).toContain('思考能力：当前目标模型不支持深度思考（思考已关闭）');
-      const selNoThink = sessionManager.getModelSelection(session.id);
-      expect(selNoThink?.reasoningEffort).toBeUndefined();
-    } finally {
-      llm.resolveModelInfo = origResolve;
-    }
-  });
-
-  it('契约 15: /clear 开启新会话时继承原会话的模型与思考深度，且新 session 预先植入 selectionMap', async () => {
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const session = booted.ctx.sessions.create('qq-group-1015' as any);
-    const admins = ['2000000001'];
-
-    // 1. 设置当前会话为 deepseek-v4-pro 且思考深度为 max
-    sessionManager.setModelSelection(session.id, 'deepseek-official', 'deepseek-v4-pro', 'max');
-
-    // 2. 执行 /clear 开启新会话
-    const clearRes = await handleSlashCommand('/clear', {
+    const busyRes = await handleSlashCommand('/状态', {
       userId: '2000000001',
       admins,
       session,
       ctx: booted.ctx,
       sessionManager,
     });
-    expect(clearRes.handled).toBe(true);
-    expect(clearRes.success).toBe(true);
+    expect(busyRes.success).toBe(true);
+    expect(busyRes.reply).toContain('运行状态：正在运行（轮次 #3）');
+  });
 
-    // 3. 验证新 session ID 自动继承了 deepseek-v4-pro 与 max
-    const newSid = sessionManager.peerToSessionId('group_1015');
-    expect(newSid).toBe('qq-group-1015-2');
-    const newSel = sessionManager.getModelSelection(newSid);
-    expect(newSel?.provider).toBe('deepseek-official');
-    expect(newSel?.model).toBe('deepseek-v4-pro');
-    expect(newSel?.reasoningEffort).toBe('max');
+  it('契约 12: /模型 优化：唯一模型 ID 智能匹配、空格多词匹配及供应商显式指定', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const session = booted.ctx.sessions.create('qq-group-1030' as any);
+    const admins = ['2000000001'];
+
+    // 1. 唯一模型 ID 免输供应商：/模型 deepseek-v4-flash
+    const res1 = await handleSlashCommand('/模型 deepseek-v4-flash', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(res1.success).toBe(true);
+    expect(sessionManager.getModelSelection(session.id)?.provider).toBe('deepseek-official');
+    expect(sessionManager.getModelSelection(session.id)?.model).toBe('deepseek-v4-flash');
+
+    // 2. 空格多词智能匹配：/模型 deepseek flash -> 匹配到 deepseek-flash
+    const res2 = await handleSlashCommand('/模型 deepseek flash', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(res2.success).toBe(true);
+    expect(sessionManager.getModelSelection(session.id)?.model).toBe('deepseek-flash');
+
+    // 3. 显式指定供应商与模型：/模型 deepseek-official deepseek-v4-pro
+    const res3 = await handleSlashCommand('/模型 deepseek-official deepseek-v4-pro', {
+      userId: '2000000001',
+      admins,
+      session,
+      ctx: booted.ctx,
+      sessionManager,
+    });
+    expect(res3.success).toBe(true);
+    expect(sessionManager.getModelSelection(session.id)?.model).toBe('deepseek-v4-pro');
   });
 });
 
