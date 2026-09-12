@@ -13,11 +13,16 @@ export const DEFAULT_DOWNLOAD_ROOT = '.dsh/workspace/napcat_download';
 export const DEFAULT_PERSONA =
   '你是一个得力的 QQ 群聊与私聊智能助手，请友好、精炼、真实地回答用户的问题。';
 
+export const TRUNCATED_USER_PROFILE_NOTICE =
+  "[提示：受字符预算限制，用户画像未完全展示。如需了解特定用户的完整画像，可按需调用 read_memory(type='user', qq='<QQ号>') 获取。]";
+
+export const DEFAULT_MEMORY_GUIDANCE =
+  '记忆工具规则：持久记忆由系统后台自动打理，日常对话切勿主动调用记忆工具（create_memory、edit_memory），仅在用户明确要求记住、修改或查看设定时才去调用；若上下文快照提示画像未完全展示，可按需使用 read_memory 查询。';
+
 export const DEFAULT_BEHAVIOR =
   '重要约束：QQ 消息不支持复杂的 Markdown 格式，请严格使用清晰的纯文本结构排版，避免输出多余的 Markdown 标记语法。' +
-  '部署环境：NapCat 运行在 Windows 宿主机，本环境是 WSL（同一物理机，/mnt/c 即 C:\）。' +
-  '你生成并需要发送给用户的文件/图片，应保存到两边共享目录（如 /mnt/c/napcat_share/），并在调用 send_file 时传递 Windows 侧可访问的路径（file:///C:/... 形式；传 /mnt/c/... 也会自动翻译为 file:///C:/...）。' +
-  '请勿传 WSL 内部路径（/home/...、/tmp/...），否则 NapCat 无法读取导致发送失败。';
+  '文件发送：生成并需要发送给用户的文件或图片，必须保存到 NapCat 能够访问的本地持久化路径或共享目录，并在调用 send_file 时传递有效的文件绝对路径或 file:// URI。若处于跨系统或容器映射环境，请确保路径已正确映射至 NapCat 可读取位置。' +
+  DEFAULT_MEMORY_GUIDANCE;
 
 export const DEFAULT_PROACTIVE_REPLY_ENABLED = false;
 export const DEFAULT_PROACTIVE_ONLY_TEXT_ENABLED = false;

@@ -5,7 +5,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis';
-import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR } from '../constants/index.js';
+import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR, DEFAULT_MEMORY_GUIDANCE } from '../constants/index.js';
 
 /**
  * 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario)
@@ -62,7 +62,13 @@ export function registerNapCatDynamicPrompt(
       const b = (getBehavior() || '').trim();
 
       const effectivePersona = p || DEFAULT_PERSONA;
-      const effectiveBehavior = b || DEFAULT_BEHAVIOR;
+      let effectiveBehavior = b || DEFAULT_BEHAVIOR;
+      if (
+        !effectiveBehavior.includes('记忆工具规则') &&
+        !effectiveBehavior.includes('create_memory')
+      ) {
+        effectiveBehavior = `${effectiveBehavior}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
+      }
 
       const parts: string[] = [];
       if (effectivePersona) parts.push(effectivePersona);

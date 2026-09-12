@@ -416,9 +416,10 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       name: 'create_memory',
       description:
         '创建用户持久画像（type=\'user\'，跨群聊私聊通用）或会话专属规则/长期群文化（type=\'session\'，仅当前群或私聊）。记忆每轮对话均会全量注入，必须保持极度紧凑（Compact）与高信号（High-signal）。\n' +
+        '【调用契机】：日常对话切勿主动调用，仅在用户明确要求记住某事或修改设定时调用。日常记忆提炼由后台自动处理。\n' +
         '【WHEN 记录项】：仅记录跨会话持久有效的人设、偏好、工作风格、通用群规，或长期稳定的群梗/代号/固定互动剧本。\n' +
         '【SKIP 忽略项】：严禁记录单次技术排查流水账、一次性跑分测试、临时报错、日常琐碎寒暄、一过性玩笑或易重新获取的信息。\n' +
-        '【FORMAT 格式】：必须为精简单行的原子事实（建议 <80 字，如 "- 偏好：xxx" 或 "- 梗/互动：xxx"），严禁长篇大论或附带背景。设有严格容量硬上限（用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝。仅当文件不存在时可用，文件已存在时必须用 edit_memory。',
+        '【FORMAT 格式】：必须为精简单行的陈述事实（建议 <80 字，如 "- 偏好：xxx" 或 "- 梗/互动：xxx"），严禁长篇大论或附带背景。设有严格容量硬上限（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回具体提示。仅当文件不存在时可用，文件已存在时必须用 edit_memory。',
       parameters: {
         type: {
           type: 'string',
@@ -466,8 +467,9 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       name: 'edit_memory',
       description:
         '定向修改或删减已有记忆。通过 old_string 精确匹配替换为 new_string；若 new_string 省略或为空则直接删除该片段。\n' +
+        '【调用契机】：日常对话切勿主动调用，仅在用户明确要求修改或删除设定时调用。\n' +
         '【核心用途】：优先用于合并相似事实、精简过长条目、更新偏好或删除过时无用的琐碎记忆（Consolidation），使记忆文件保持短小精炼。\n' +
-        '【约束】：禁止拼接入大段叙事，修改后同样受容量硬上限约束（用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限拒绝写入。要求 old_string 在目标文件中必须唯一存在。',
+        '【约束】：禁止拼接入大段叙事，修改后同样受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回提示。要求 old_string 在目标文件中必须唯一存在。',
       parameters: {
         type: {
           type: 'string',

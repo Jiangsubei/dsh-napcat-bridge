@@ -7,7 +7,11 @@ import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-import { DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_BUDGET_CHARS } from '../constants/index.js';
+import {
+  DEFAULT_MEMORY_DIR,
+  DEFAULT_MEMORY_BUDGET_CHARS,
+  TRUNCATED_USER_PROFILE_NOTICE,
+} from '../constants/index.js';
 import { resolveDshPath } from '../utils/path.js';
 import type { ActiveUserInfo } from './types.js';
 
@@ -237,7 +241,8 @@ export class MemoryStorage {
   public getPromptSnapshotSync(
     peer: string,
     activeUsers: ActiveUserInfo[] = [],
-    maxBudget = DEFAULT_MEMORY_BUDGET_CHARS
+    maxBudget = DEFAULT_MEMORY_BUDGET_CHARS,
+    currentQQ?: string
   ): string {
     const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
     const sessionMemory = this.readSessionMemorySync(peer).trim();
@@ -253,10 +258,12 @@ export class MemoryStorage {
 
     const userBlocks: string[] = [];
     let currentLength = sessionMemory.length;
+    let truncated = false;
 
     if (isPrivate) {
       // 私聊单用户画像全量注入（带独立预算截断保护）
-      const targetQQ = activeUsers[0]?.qq || peer.replace(/^(user_|qq-user-)/, '').split('-')[0];
+      const targetQQ =
+        activeUsers[0]?.qq || currentQQ || peer.replace(/^(user_|qq-user-)/, '').split('-')[0];
       const targetName = activeUsers[0]?.name || targetQQ;
       const profile = this.readUserProfileSync(targetQQ).trim();
       if (profile) {
@@ -279,8 +286,50 @@ export class MemoryStorage {
         }
       }
     } else {
-      // 群聊多用户：遍历活跃用户画像，并在达到或突破预算上限时放完整当前用户、丢弃后续用户
-      for (const user of activeUsers) {
+      // 群聊多用户：动态阶梯排序 + 快照稳定性保护
+      let candidateUsers = [...activeUsers];
+      const normalizedCurrentQQ =
+        currentQQ && currentQQ !== 'default' ? currentQQ.trim() : null;
+
+      if (normalizedCurrentQQ) {
+        const currentProfile = this.readUserProfileSync(normalizedCurrentQQ).trim();
+        if (currentProfile) {
+          // 模拟按自然活跃顺序装填，检查 normalizedCurrentQQ 是否能被完整/原子纳入预算
+          let naturallyIncluded = false;
+          let simLength = currentLength;
+
+          for (const u of candidateUsers) {
+            const p = this.readUserProfileSync(u.qq).trim();
+            if (!p) continue;
+            const b = p.startsWith('#') ? p : `### ${u.name} (${u.qq})\n${p}`;
+            simLength += b.length + 1;
+
+            if (u.qq === normalizedCurrentQQ) {
+              naturallyIncluded = true;
+              break;
+            }
+
+            if (simLength >= maxBudget) {
+              break;
+            }
+          }
+
+          if (!naturallyIncluded) {
+            // 自然顺序下会被截断挤出（或不在活跃列表中），动态将当前发言人提拔到最前面
+            const currentName =
+              candidateUsers.find((u) => u.qq === normalizedCurrentQQ)?.name ||
+              normalizedCurrentQQ;
+            candidateUsers = [
+              { qq: normalizedCurrentQQ, name: currentName },
+              ...candidateUsers.filter((u) => u.qq !== normalizedCurrentQQ),
+            ];
+          }
+        }
+      }
+
+      // 按确定的顺序装填用户画像
+      for (let i = 0; i < candidateUsers.length; i++) {
+        const user = candidateUsers[i];
         const profile = this.readUserProfileSync(user.qq).trim();
         if (!profile) continue;
 
@@ -291,7 +340,13 @@ export class MemoryStorage {
         currentLength += block.length + 1;
 
         if (currentLength >= maxBudget) {
-          // 当前用户已完整放入 userBlocks，立即终止后续用户追加
+          // 达到或突破预算，检查后续候选用户中是否还有未装入的有画像用户
+          for (let j = i + 1; j < candidateUsers.length; j++) {
+            if (this.readUserProfileSync(candidateUsers[j].qq).trim()) {
+              truncated = true;
+              break;
+            }
+          }
           break;
         }
       }
@@ -299,6 +354,10 @@ export class MemoryStorage {
 
     if (userBlocks.length > 0) {
       parts.push(userBlocks.join('\n\n'));
+    }
+
+    if (truncated) {
+      parts.push(TRUNCATED_USER_PROFILE_NOTICE);
     }
 
     return parts.join('\n\n').trim();
