@@ -209,4 +209,84 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     expect(snapshotGroup).toContain('User1');
     expect(snapshotGroup).not.toContain('User2');
   });
+
+  it('契约 9: 截断显式通用提示 — 当用户画像超出预算截断时注入通用提示，未截断时绝不注入', () => {
+    storage.writeSessionMemorySync('group_trunc_test', '群规');
+    storage.writeUserProfileSync('u1', 'A'.repeat(1000));
+    storage.writeUserProfileSync('u2', 'B'.repeat(1400));
+    storage.writeUserProfileSync('u3', 'C'.repeat(500));
+
+    // 1. 发生截断：u1(1000) + u2(1400) 突破 2200 预算，u3 被截断
+    const truncatedSnapshot = storage.getPromptSnapshotSync(
+      'group_trunc_test',
+      [
+        { qq: 'u1', name: 'User1' },
+        { qq: 'u2', name: 'User2' },
+        { qq: 'u3', name: 'User3' },
+      ],
+      2200
+    );
+    expect(truncatedSnapshot).toContain('User1');
+    expect(truncatedSnapshot).toContain('User2');
+    expect(truncatedSnapshot).not.toContain('User3');
+    expect(truncatedSnapshot).toContain(
+      "[提示：受字符预算限制，用户画像未完全展示。如需了解特定用户的完整画像，可按需调用 read_memory(type='user', qq='<QQ号>') 获取。]"
+    );
+
+    // 2. 未发生截断：短画像完全容纳在预算内
+    storage.writeUserProfileSync('u_short', '短画像偏好');
+    const normalSnapshot = storage.getPromptSnapshotSync(
+      'group_trunc_test',
+      [{ qq: 'u_short', name: 'ShortUser' }],
+      2200
+    );
+    expect(normalSnapshot).toContain('ShortUser');
+    expect(normalSnapshot).not.toContain('受字符预算限制');
+  });
+
+  it('契约 10: 动态阶梯排序 — 自然顺序下会被截断的发言用户提拔至首位，若本在预算内则保持顺序保护缓存', () => {
+    storage.writeSessionMemorySync('group_tiered_test', '群规');
+    // u1: 800 字符, u2: 1500 字符 (两者合计 2300 > 2200), u3: 400 字符
+    storage.writeUserProfileSync('u1', 'A'.repeat(800));
+    storage.writeUserProfileSync('u2', 'B'.repeat(1500));
+    storage.writeUserProfileSync('u3', 'C'.repeat(400));
+
+    const activeUsers = [
+      { qq: 'u1', name: 'User1' },
+      { qq: 'u2', name: 'User2' },
+      { qq: 'u3', name: 'User3' },
+    ];
+
+    // 场景 A: 当前发言用户为 u3。
+    // 在自然顺序下 u1(800) + u2(1500) 突破预算，u3 会被截断挤出。
+    // 动态阶梯排序应将 u3 提拔至首位，确保当前说话用户的画像注入成功！
+    const snapshotU3 = storage.getPromptSnapshotSync(
+      'group_tiered_test',
+      activeUsers,
+      2200,
+      'u3' // 当前发言人 u3
+    );
+    expect(snapshotU3).toContain('User3 (u3)');
+    // 验证 u3 排在最前面（出现在 User1 之前）
+    const idxU3 = snapshotU3.indexOf('User3 (u3)');
+    const idxU1 = snapshotU3.indexOf('User1 (u1)');
+    expect(idxU3).toBeGreaterThan(-1);
+    expect(idxU1).toBeGreaterThan(-1);
+    expect(idxU3).toBeLessThan(idxU1);
+
+    // 场景 B: 当前发言用户为 u1。
+    // 在自然顺序下 u1 本就在第 1 位、完全在预算内。
+    // 动态排序应严格保持自然活跃顺序不变（u1 在前，u2 在后），保护 Prefix Cache。
+    const snapshotU1 = storage.getPromptSnapshotSync(
+      'group_tiered_test',
+      activeUsers,
+      2200,
+      'u1' // 当前发言人 u1
+    );
+    const idxU1_normal = snapshotU1.indexOf('User1 (u1)');
+    const idxU2_normal = snapshotU1.indexOf('User2 (u2)');
+    expect(idxU1_normal).toBeGreaterThan(-1);
+    expect(idxU2_normal).toBeGreaterThan(-1);
+    expect(idxU1_normal).toBeLessThan(idxU2_normal);
+  });
 });

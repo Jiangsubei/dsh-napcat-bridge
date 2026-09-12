@@ -62,6 +62,7 @@ export function registerMemoryPromptContext(
     text: (assembleCtx?: any) => {
       const resolved = resolveContextPeerAndQQ(assembleCtx);
       const peer = resolved.peer;
+      const currentQQ = resolved.qq !== 'default' ? resolved.qq : undefined;
 
       const isQQSession = Boolean(
         peer &&
@@ -88,7 +89,12 @@ export function registerMemoryPromptContext(
 
       if (isPrivate) {
         // 私聊：直接传入单用户，无 7 天活跃限制
-        return storage.getPromptSnapshotSync(peer, [{ qq: resolved.qq, name: resolved.qq }], budget);
+        return storage.getPromptSnapshotSync(
+          peer,
+          [{ qq: resolved.qq, name: resolved.qq }],
+          budget,
+          currentQQ
+        );
       }
 
       // 群聊：从 SQLite 查询近 7 天活跃发言用户列表 (按发言时间倒序)
@@ -100,7 +106,7 @@ export function registerMemoryPromptContext(
         } catch {}
       }
 
-      return storage.getPromptSnapshotSync(peer, activeUsers, budget);
+      return storage.getPromptSnapshotSync(peer, activeUsers, budget, currentQQ);
     },
   });
 }
