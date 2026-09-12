@@ -7,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-permission-presets';
 import type { SessionManager } from '../gateway/session.js';
+import { formatSessionTitle, parseSessionId } from '../gateway/session.js';
 
 export interface CommandContext {
   userId: string;
@@ -193,11 +194,12 @@ export function formatTokens(value: number): string {
 }
 
 /**
- * 判断输入文本是否为斜杠命令
+ * 判断输入文本是否为斜杠命令（兼容全半角斜杠）
  */
 export function isSlashCommand(text: string): boolean {
   if (typeof text !== 'string') return false;
-  return text.trim().startsWith('/');
+  const trimmed = text.trim();
+  return trimmed.startsWith('/') || trimmed.startsWith('／');
 }
 
 /**
@@ -211,13 +213,13 @@ export async function handleSlashCommand(
     return { handled: false };
   }
 
-  const trimmed = commandText.trim();
+  const trimmed = commandText.trim().replace(/^／/, '/');
   const match = trimmed.match(/^\/([^\s]+)(?:\s+(.*))?$/s);
   if (!match) {
     return { handled: false };
   }
 
-  const command = match[1].toLowerCase();
+  const command = match[1];
   const args = (match[2] || '').trim();
 
   // 1. 管理员白名单权限门控
@@ -229,34 +231,45 @@ export async function handleSlashCommand(
     return {
       handled: true,
       success: false,
-      error: '权限不足：仅管理员白名单用户允许执行斜杠命令',
+      error: '权限不足：仅管理员允许执行指令',
     };
   }
 
-  // 2. 命令分发处理
+  // 2. 命令分发处理（纯两字中文命令，不保留英文别名）
   switch (command) {
-    case 'mode': {
+    case '权限': {
       const permissionPresets = context.ctx.get('permissionPresets') || (context.ctx as any).permissionPresets;
+      const toZhMode = (p?: string) => {
+        if (!p) return '编辑';
+        if (p === 'danger-full-access' || p === 'yolo') return '完全';
+        if (p === 'workspace-write' || p === 'edit') return '编辑';
+        if (p === 'readonly' || p === 'read-only') return '只读';
+        return p;
+      };
+
       if (!args) {
         const current = permissionPresets?.current?.(context.session);
         return {
           handled: true,
           success: true,
-          reply: `当前会话权限模式为: ${current || 'workspace-write'}`,
+          reply: `当前权限模式：${toZhMode(current)}`,
         };
       }
 
-      const modeArg = args.toLowerCase();
       let targetPreset: string;
-      if (modeArg === 'edit' || modeArg === 'workspace-write') {
-        targetPreset = 'workspace-write';
-      } else if (modeArg === 'yolo' || modeArg === 'danger-full-access') {
-        targetPreset = 'danger-full-access';
-      } else if (modeArg === 'readonly' || modeArg === 'read-only') {
+      if (args === '只读') {
         const names = permissionPresets?.names || [];
         targetPreset = names.includes('readonly') ? 'readonly' : 'read-only';
+      } else if (args === '编辑') {
+        targetPreset = 'workspace-write';
+      } else if (args === '完全') {
+        targetPreset = 'danger-full-access';
       } else {
-        targetPreset = modeArg;
+        return {
+          handled: true,
+          success: false,
+          error: `无效的权限模式：${args}\n可用模式：只读、编辑、完全`,
+        };
       }
 
       if (permissionPresets && typeof permissionPresets.set === 'function') {
@@ -265,7 +278,7 @@ export async function handleSlashCommand(
           return {
             handled: true,
             success: true,
-            reply: `权限模式已切换为: ${targetPreset}`,
+            reply: `权限模式已切换为：${args}`,
           };
         } catch (err: any) {
           return {
@@ -283,13 +296,11 @@ export async function handleSlashCommand(
       }
     }
 
-    case 'model': {
+    case '模型': {
       const discovered = await getDiscoveredModels(context.ctx);
       const agents = context.ctx.get('agents') || (context.ctx as any).agents;
       const agent = agents?.get(context.session.id);
 
-      // 同步宿主会话模型选择：DSH 0.1.2-rc.1 起统一通过 sessionController.selectModel 同步，
-      // 并临时抑制 agentDefaultModel.saveSelection 避免污染 Web UI 宿主全局设置。
       const safeSyncApiProxy = (
         sessionId: string,
         provider: string,
@@ -297,13 +308,13 @@ export async function handleSlashCommand(
         reasoningEffort?: string
       ) => safeSyncSessionModel(context.ctx, sessionId, provider, model, reasoningEffort);
 
-      // 1. 参数拆解：分离 --global / -g 与目标模型参数
+      // 1. 参数拆解：分离 --global / -g / --全局 与目标模型参数
       let isGlobal = false;
       const rawArgs = (args || '').trim();
       const tokens = rawArgs.split(/\s+/).filter(Boolean);
       const filteredTokens: string[] = [];
       for (const tok of tokens) {
-        if (tok === '--global' || tok === '-g') {
+        if (tok === '--global' || tok === '-g' || tok === '--全局') {
           isGlobal = true;
         } else {
           filteredTokens.push(tok);
@@ -326,7 +337,7 @@ export async function handleSlashCommand(
         model: 'deepseek-v4-flash',
       };
 
-      // 2. 空模型参数时：列出当前 QQ 会话、NapCat 全局默认以及全量多供应商可用列表
+      // 2. 空模型参数时：列出当前会话、全局默认及可用模型列表
       if (!modelArg) {
         const groups = new Map<string, DiscoveredModelInfo[]>();
         for (const item of discovered) {
@@ -338,24 +349,25 @@ export async function handleSlashCommand(
         const listSections: string[] = [];
         for (const [groupName, items] of groups.entries()) {
           const lines = items.map(
-            (m) => `• \`${m.model}\`${m.modelName && m.modelName !== m.model ? ` (${m.modelName})` : ''}`
+            (m) => `- ${m.model}${m.modelName && m.modelName !== m.model ? ` (${m.modelName})` : ''}`
           );
-          listSections.push(`【${groupName}】\n${lines.join('\n')}`);
+          listSections.push(`[${groupName}]\n${lines.join('\n')}`);
         }
 
         const reply = [
-          `🤖 当前 QQ 会话模型: \`${curProv} / ${curMod}\``,
-          `🐧 QQ 插件全局默认: \`${napcatDefault.provider} / ${napcatDefault.model}\``,
-          `🌐 Web UI 宿主默认: \`${hostDefault.provider} / ${hostDefault.model}\``,
+          `当前会话模型：${curProv} / ${curMod}`,
+          `QQ全局默认：${napcatDefault.provider} / ${napcatDefault.model}`,
+          `宿主全局默认：${hostDefault.provider} / ${hostDefault.model}`,
           '',
-          '📋 可用模型列表:',
+          '可用模型列表：',
           listSections.join('\n\n'),
           '',
-          '💡 切换方法:',
-          '• 仅当前 QQ 会话: /model <模型名> (例如: /model deepseek-v4-flash)',
-          '• 所有 QQ 会话全局: /model <模型名> --global (例如: /model deepseek-v4-flash --global)',
-          '• 指定供应商: /model <供应商> <模型名> [--global]',
-          '• 供应商斜杠语法: /model <供应商>/<模型名> [--global]',
+          '切换说明：',
+          '- 单模型名智能匹配：/模型 deepseek-v4-flash',
+          '- 空格智能匹配：/模型 deepseek flash',
+          '- 指定供应商：/模型 opencode-go deepseek-flash',
+          '- 供应商斜杠语法：/模型 deepseek-official/deepseek-v4-pro',
+          '- 所有会话全局生效：在末尾追加 -g 或 --全局',
         ].join('\n');
 
         return {
@@ -369,7 +381,7 @@ export async function handleSlashCommand(
       let targetProvider: string | undefined;
       let targetModel: string | undefined;
 
-      // 3.1 显式供应商/模型语法: <provider>/<model> 或 <provider> <model>
+      // 3.1 显式供应商斜杠语法: <provider>/<model>
       if (modelArg.includes('/')) {
         const parts = modelArg.split('/');
         const p0 = parts[0]?.trim();
@@ -378,17 +390,56 @@ export async function handleSlashCommand(
           targetProvider = p0;
           targetModel = p1;
         }
-      } else if (/\s+/.test(modelArg)) {
-        const parts = modelArg.split(/\s+/);
-        const p0 = parts[0]?.trim();
-        const p1 = parts.slice(1).join(' ').trim();
-        if (p0 && p1) {
-          targetProvider = p0;
-          targetModel = p1;
+      }
+
+      // 3.2 空格语法: 优先尝试将整体转换为连字符匹配模型（如 deepseek flash -> deepseek-flash）
+      if (!targetProvider && /\s+/.test(modelArg)) {
+        const normalized = modelArg.toLowerCase().replace(/[\s_]+/g, '-');
+        const exactModelHits = discovered.filter(
+          (m) =>
+            m.model.toLowerCase() === normalized ||
+            m.model.toLowerCase().replace(/[\s_]+/g, '-') === normalized
+        );
+
+        if (exactModelHits.length === 1) {
+          targetProvider = exactModelHits[0].provider;
+          targetModel = exactModelHits[0].model;
+        } else if (exactModelHits.length > 1) {
+          const candidates = exactModelHits
+            .map((m) => `- /模型 ${m.provider} ${m.model}${isGlobal ? ' -g' : ''}`)
+            .join('\n');
+          return {
+            handled: true,
+            success: false,
+            error: `发现多个供应商提供同名模型 [${modelArg}]，请指定供应商：\n${candidates}`,
+          };
+        } else {
+          // 若整体未命中独立模型，尝试 <provider> <model>
+          const parts = modelArg.split(/\s+/);
+          const p0 = parts[0]?.trim();
+          const p1 = parts.slice(1).join(' ').trim();
+
+          const matchedProvider = discovered.find(
+            (m) =>
+              m.provider.toLowerCase() === p0.toLowerCase() ||
+              (m.providerName && m.providerName.toLowerCase() === p0.toLowerCase())
+          );
+
+          if (matchedProvider) {
+            targetProvider = matchedProvider.provider;
+            const p1Normalized = p1.toLowerCase().replace(/[\s_]+/g, '-');
+            const provModelHit = discovered.find(
+              (m) =>
+                m.provider === matchedProvider.provider &&
+                (m.model.toLowerCase() === p1.toLowerCase() ||
+                  m.model.toLowerCase() === p1Normalized)
+            );
+            targetModel = provModelHit ? provModelHit.model : p1;
+          }
         }
       }
 
-      // 3.2 单 token 智能检索匹配
+      // 3.3 单 token 智能检索匹配
       if (!targetProvider || !targetModel) {
         const modelCandidate = modelArg;
         const matches = discovered.filter(
@@ -402,12 +453,12 @@ export async function handleSlashCommand(
           targetModel = matches[0].model;
         } else if (matches.length > 1) {
           const candidates = matches
-            .map((m) => `• \`/model ${m.provider} ${m.model}${isGlobal ? ' --global' : ''}\``)
+            .map((m) => `- /模型 ${m.provider} ${m.model}${isGlobal ? ' -g' : ''}`)
             .join('\n');
           return {
             handled: true,
             success: false,
-            error: `⚠️ 发现多个供应商提供同名模型 [${modelCandidate}]，请指定供应商切换：\n${candidates}`,
+            error: `发现多个供应商提供同名模型 [${modelCandidate}]，请指定供应商：\n${candidates}`,
           };
         } else {
           targetProvider = curProv || 'deepseek-official';
@@ -447,17 +498,16 @@ export async function handleSlashCommand(
         targetEffort = effortMatched ? curEffort : targetReasoning.defaultEffort;
         const effortObj = targetReasoning.efforts.find((e) => e.id === targetEffort);
         const effortLabel = effortObj ? `${effortObj.id} (${effortObj.name})` : targetEffort;
-        effortDesc = `\n🧠 思考深度：已自动对齐为 \`${effortLabel}\`${
+        effortDesc = `\n思考深度：已自动对齐为 ${effortLabel}${
           effortMatched ? ' (继承前序设置)' : ' (模型默认)'
         }`;
       } else {
         targetEffort = undefined;
-        effortDesc = '\n🧠 思考能力：当前目标模型不支持深度思考（思考已关闭）';
+        effortDesc = '\n思考能力：当前目标模型不支持深度思考（思考已关闭）';
       }
 
       try {
         if (isGlobal) {
-          // NapCat 插件全局模式：更新插件全局默认模型，并批量同步已知的所有 QQ 会话
           context.sessionManager?.setNapcatDefaultModel(
             targetProvider,
             targetModel,
@@ -473,13 +523,12 @@ export async function handleSlashCommand(
             handled: true,
             success: true,
             reply: [
-              `✅ NapCat 插件全局 QQ 会话模型已切换为: ${targetProvider} / ${targetModel}`,
-              `🌐 范围：已同步切换所有 QQ 会话；未来新建立的 QQ 会话也将默认使用此模型。`,
-              `🛡️ 隔离：未修改 Web UI 宿主全局设置。`,
-            ].join('\n') + effortDesc,
+              `QQ全局模型已切换为：${targetProvider} / ${targetModel}`,
+              effortDesc ? effortDesc.trim() : '',
+              '范围：已同步切换所有QQ会话，新建会话也将默认使用此模型。',
+            ].filter(Boolean).join('\n'),
           };
         } else {
-          // 仅当前 QQ 会话模式：仅落位本会话，不修改插件全局默认，亦不污染宿主全局设置
           context.sessionManager?.setModelSelection(
             context.session.id,
             targetProvider,
@@ -504,9 +553,10 @@ export async function handleSlashCommand(
             handled: true,
             success: true,
             reply: [
-              `✅ 当前 QQ 会话模型已切换为: ${targetProvider} / ${targetModel}`,
-              `📌 提示：仅对当前 QQ 会话生效；如需切换所有 QQ 会话请加 --global 参数。`,
-            ].join('\n') + effortDesc,
+              `当前会话模型已切换为：${targetProvider} / ${targetModel}`,
+              effortDesc ? effortDesc.trim() : '',
+              '提示：仅对当前会话生效；全局切换请追加 -g 或 --全局。',
+            ].filter(Boolean).join('\n'),
           };
         }
       } catch (err: any) {
@@ -518,22 +568,33 @@ export async function handleSlashCommand(
       }
     }
 
-    case 'think': {
-      // 1. 参数拆解：分离 --global / -g 与目标思考深度参数
+    case '思考': {
       let isGlobal = false;
       const rawArgs = (args || '').trim();
       const tokens = rawArgs.split(/\s+/).filter(Boolean);
       const filteredTokens: string[] = [];
       for (const tok of tokens) {
-        if (tok === '--global' || tok === '-g') {
+        if (tok === '--global' || tok === '-g' || tok === '--全局') {
           isGlobal = true;
         } else {
           filteredTokens.push(tok);
         }
       }
-      const thinkArg = filteredTokens.join(' ').trim();
+      let thinkArg = filteredTokens.join(' ').trim();
+      const zhEffortMap: Record<string, string> = {
+        关: 'off',
+        关闭: 'off',
+        低: 'low',
+        高: 'high',
+        最大: 'max',
+        极高: 'max',
+        默认: 'default',
+        重置: 'reset',
+      };
+      if (zhEffortMap[thinkArg]) {
+        thinkArg = zhEffortMap[thinkArg];
+      }
 
-      // 2. 获取当前会话生效的模型选择与思考深度
       const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
       const agent = agents?.get(context.session.id);
       const curSel =
@@ -543,26 +604,21 @@ export async function handleSlashCommand(
       const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
       const explicitEffort = curSel?.reasoningEffort;
 
-      // 3. 从 DSH 动态获取当前模型的思考能力与支持档位
       const reasoningInfo = await getModelReasoningInfo(context.ctx, curProv, curMod, explicitEffort);
 
-      // 4. 空参数时：展示当前思考强度与该模型实际支持的档位列表
       if (!thinkArg) {
         if (!reasoningInfo.supported) {
           return {
             handled: true,
             success: true,
-            reply: [
-              `🤖 当前会话模型: \`${curProv} / ${curMod}\``,
-              '🧠 思考能力: 当前模型不支持思考强度设置（该模型无深度思考能力或被提供商禁用）',
-            ].join('\n'),
+            reply: '当前模型不支持思考强度设置（该模型无深度思考能力或被提供商禁用）',
           };
         }
 
         const curName =
           reasoningInfo.efforts.find((e) => e.id === reasoningInfo.currentEffort)?.name ||
           reasoningInfo.currentEffort;
-        const currentLine = `🧠 当前思考强度: \`${reasoningInfo.currentEffort}\`${
+        const currentLine = `当前思考强度：${reasoningInfo.currentEffort}${
           curName && curName !== reasoningInfo.currentEffort ? ` (${curName})` : ''
         }${reasoningInfo.isDefault ? ' [默认]' : ''}`;
 
@@ -570,20 +626,20 @@ export async function handleSlashCommand(
           const isDef = e.id === reasoningInfo.defaultEffort ? ' [默认]' : '';
           const isCur = e.id === reasoningInfo.currentEffort ? ' (当前)' : '';
           const desc = e.description ? ` - ${e.description}` : '';
-          return `• \`${e.id}\` (${e.name})${isDef}${isCur}${desc}`;
+          return `- ${e.id} (${e.name})${isDef}${isCur}${desc}`;
         });
 
         const reply = [
-          `🤖 当前会话模型: \`${curProv} / ${curMod}\``,
+          `当前模型：${curProv} / ${curMod}`,
           currentLine,
           '',
-          '📋 支持的思考档位:',
+          '支持的思考档位：',
           listLines.join('\n'),
           '',
-          '💡 切换方法:',
-          '• 仅当前 QQ 会话: /think <档位> (例如: /think low)',
-          '• 恢复模型默认: /think default (或 /think reset)',
-          '• 所有 QQ 会话全局: /think <档位> --global (例如: /think low --global)',
+          '切换说明：',
+          '- 仅当前会话：/思考 <档位>（例如：/思考 low 或 /思考 max）',
+          '- 恢复模型默认：/思考 default',
+          '- 所有会话全局生效：/思考 <档位> -g（或 --全局）',
         ].join('\n');
 
         return {
@@ -593,16 +649,14 @@ export async function handleSlashCommand(
         };
       }
 
-      // 5. 有参数时：检查模型是否支持思考能力
       if (!reasoningInfo.supported) {
         return {
           handled: true,
           success: false,
-          error: `⚠️ 切换失败: 当前模型 [${curProv} / ${curMod}] 不支持思考强度设置`,
+          error: `切换失败: 当前模型 [${curProv} / ${curMod}] 不支持思考强度设置`,
         };
       }
 
-      // 6. 支持 default / reset 恢复模型默认档位
       const lowerArg = thinkArg.toLowerCase();
       let targetEffort: string | undefined;
       let targetName = '';
@@ -616,19 +670,18 @@ export async function handleSlashCommand(
         );
         if (!matched) {
           const validList = reasoningInfo.efforts
-            .map((e) => `\`${e.id}\` (${e.name})`)
+            .map((e) => `${e.id} (${e.name})`)
             .join(', ');
           return {
             handled: true,
             success: false,
-            error: `⚠️ 无效的思考深度: [${thinkArg}]\n当前模型 [${curProv} / ${curMod}] 实际支持的档位为: ${validList}`,
+            error: `无效的思考深度: [${thinkArg}]\n当前模型 [${curProv} / ${curMod}] 实际支持的档位为: ${validList}`,
           };
         }
         targetEffort = matched.id;
         targetName = `${matched.id} (${matched.name})`;
       }
 
-      // 7. 执行切换与会话/全局同步
       try {
         if (isGlobal) {
           context.sessionManager?.setNapcatDefaultModel(curProv, curMod, targetEffort);
@@ -640,9 +693,8 @@ export async function handleSlashCommand(
             handled: true,
             success: true,
             reply: [
-              `✅ NapCat 插件全局 QQ 会话思考深度已切换为: ${targetName}`,
-              `🌐 范围：已同步切换所有 QQ 会话；未来新建立的 QQ 会话也将默认使用此思考深度。`,
-              `🛡️ 隔离：未修改 Web UI 宿主全局设置。`,
+              `QQ全局思考深度已切换为：${targetName}`,
+              '范围：已同步切换所有QQ会话，新建会话也将默认使用此思考深度。',
             ].join('\n'),
           };
         } else {
@@ -666,8 +718,8 @@ export async function handleSlashCommand(
             handled: true,
             success: true,
             reply: [
-              `✅ 当前 QQ 会话思考深度已切换为: ${targetName}`,
-              `📌 提示：仅对当前 QQ 会话生效；如需切换所有 QQ 会话请加 --global 参数。`,
+              `当前会话思考深度已切换为：${targetName}`,
+              '提示：仅对当前会话生效；全局切换请追加 -g 或 --全局。',
             ].join('\n'),
           };
         }
@@ -680,7 +732,7 @@ export async function handleSlashCommand(
       }
     }
 
-    case 'stop': {
+    case '停止': {
       const sessionController =
         context.ctx.get('sessionController') || (context.ctx as any).sessionController;
       if (!sessionController?.cancel) {
@@ -695,7 +747,7 @@ export async function handleSlashCommand(
         return {
           handled: true,
           success: true,
-          reply: '⏹️ 已停止当前生成。',
+          reply: '已停止当前生成。',
         };
       } catch (err: any) {
         return {
@@ -706,15 +758,12 @@ export async function handleSlashCommand(
       }
     }
 
-    case 'new':
-    case 'clear': {
-      // 真正执行"开启新会话"：推进该 peer 的会话版本号并失效缓存（不归档旧会话）。
-      // 下一次唤醒将自动创建全新会话，上下文真正清空 (用户确认语义: 直接开启新对话)。
+    case '新建': {
       if (!context.sessionManager) {
         return {
           handled: true,
           success: false,
-          error: `执行 /${command} 失败: 当前环境缺少 SessionManager 服务`,
+          error: '执行 /新建 失败: 当前环境缺少 SessionManager 服务',
         };
       }
       try {
@@ -722,60 +771,95 @@ export async function handleSlashCommand(
         return {
           handled: true,
           success: true,
-          reply: '✅ 会话已开启新对话（原会话保留，不再接收新消息；新消息将计入全新会话）。',
+          reply: '已开启新会话（原会话已保留归档，新消息将计入新会话）。',
         };
       } catch (err: any) {
         return {
           handled: true,
           success: false,
-          error: `执行 /${command} 失败: ${err?.message || String(err)}`,
+          error: `执行 /新建 失败: ${err?.message || String(err)}`,
         };
       }
     }
 
-    case 'resume': {
+    case '会话': {
       const sm = context.sessionManager;
       if (!sm) {
         return {
           handled: true,
           success: false,
-          error: '执行 /resume 失败: 当前环境缺少 SessionManager 服务',
+          error: '执行 /会话 失败: 当前环境缺少 SessionManager 服务',
         };
       }
       const peer = sm.sessionIdToPeer(context.session.id);
+      const peerName = sm.getPeerName(peer);
+      const sessions = sm.listPeerSessionIds(peer); // 升序：旧→新
+
       if (!args) {
-        const sessions = sm.listPeerSessionIds(peer); // 升序：旧→新
-        // 渲染：最新在最上面（编号 N），最旧的编号 1 在最下面
-        const lines = [...sessions].reverse().map((sid, i) => `${sessions.length - i}. ${sid}`);
+        const currentSid = sm.peerToSessionId(peer);
+        const lines = [...sessions].reverse().map((sid, i) => {
+          const num = sessions.length - i;
+          const isCurrent = sid === currentSid ? ' [当前]' : '';
+          const title = formatSessionTitle(peer, sid, peerName);
+          return `${num}.${isCurrent} ${title} (${sid})`;
+        });
+        const peerDesc = formatSessionTitle(peer, currentSid, peerName).replace(/#\d+.*$/, '').trim();
         return {
           handled: true,
           success: true,
-          reply: `📂 ${peer} 的会话：\n${lines.join('\n')}\n\n用法: /resume <序号>`,
+          reply: `历史会话列表（${peerDesc}）：\n${lines.join('\n')}\n\n切换方法：\n- 按序号切换：/会话 <序号>\n- 按标题切换：/会话 <标题>`,
         };
       }
-      const idx = parseInt(args, 10);
-      const sessions = sm.listPeerSessionIds(peer);
-      if (isNaN(idx) || idx < 1 || idx > sessions.length) {
+
+      let targetSid: string | undefined;
+      const numArg = parseInt(args, 10);
+      if (!isNaN(numArg) && /^\d+$/.test(args)) {
+        if (numArg < 1 || numArg > sessions.length) {
+          return {
+            handled: true,
+            success: false,
+            error: `序号无效，范围 1~${sessions.length}`,
+          };
+        }
+        targetSid = sessions[numArg - 1];
+      } else {
+        const matched = sessions.filter((sid) => {
+          const title = formatSessionTitle(peer, sid, peerName);
+          return title.toLowerCase().includes(args.toLowerCase()) || sid.toLowerCase().includes(args.toLowerCase());
+        });
+        if (matched.length === 1) {
+          targetSid = matched[0];
+        } else if (matched.length > 1) {
+          const candidates = matched.map((sid) => `- ${formatSessionTitle(peer, sid, peerName)} (${sid})`).join('\n');
+          return {
+            handled: true,
+            success: false,
+            error: `发现多个匹配的会话，请使用序号切换：\n${candidates}`,
+          };
+        } else {
+          return {
+            handled: true,
+            success: false,
+            error: '切换失败：未找到匹配的会话，请输入 /会话 查看可用列表',
+          };
+        }
+      }
+
+      if (!targetSid) {
         return {
           handled: true,
           success: false,
-          error: `序号无效，范围 1~${sessions.length}`,
+          error: '切换失败：未找到匹配的会话，请输入 /会话 查看可用列表',
         };
       }
-      const target = sessions[idx - 1]; // 1=最旧 → sessions[0]
-      if (!target) {
-        return {
-          handled: true,
-          success: false,
-          error: `序号无效，范围 1~${sessions.length}`,
-        };
-      }
-      const ok = sm.resumeSession(peer, target);
+
+      const ok = sm.resumeSession(peer, targetSid);
+      const targetTitle = formatSessionTitle(peer, targetSid, peerName);
       return ok
         ? {
             handled: true,
             success: true,
-            reply: `✅ 已切换到会话 ${target}`,
+            reply: `已切换到会话：${targetTitle} (${targetSid})`,
           }
         : {
             handled: true,
@@ -784,7 +868,7 @@ export async function handleSlashCommand(
           };
     }
 
-    case 'ctx': {
+    case '用量': {
       const tokenMeter =
         context.ctx.get('tokenMeter') || (context.ctx as any).tokenMeter;
       if (!tokenMeter?.measure) {
@@ -807,8 +891,6 @@ export async function handleSlashCommand(
       }
 
       const totalTokens = usage?.totalTokens ?? 0;
-
-      // 1. 上下文上限 contextWindow
       let contextWindow: number | undefined;
       const sessionProjections =
         context.ctx.get('sessionProjections') || (context.ctx as any).sessionProjections;
@@ -845,7 +927,6 @@ export async function handleSlashCommand(
         } catch {}
       }
 
-      // 2. 分段明细 (系统提示词 / 工具 / 对话消息)
       let systemTokens = breakdown?.systemTokens ?? 0;
       let toolsTokens = breakdown?.toolsTokens ?? 0;
       let messageTokens = breakdown?.messageTokens ?? (usage?.surfaceTokens ?? 0);
@@ -858,15 +939,13 @@ export async function handleSlashCommand(
       }
 
       const fmt = (v: number) => (v > 0 ? `~${formatTokens(v)}` : '0');
-
-      const lines: string[] = [`🧠 上下文已用 ${fmt(totalTokens)}`];
-      const details: string[] = [];
-
+      let lineHeader = `上下文已用：${fmt(totalTokens)}`;
       if (contextWindow && contextWindow > 0) {
         const percent = Math.min(100, Math.round((totalTokens / contextWindow) * 100));
-        details.push(`${fmt(totalTokens)} / ${formatTokens(contextWindow)} (${percent}%)`);
+        lineHeader += ` / ${formatTokens(contextWindow)} (${percent}%)`;
       }
 
+      const lines = [lineHeader];
       const hasBreakdown =
         breakdown !== undefined ||
         systemTokens > 0 ||
@@ -874,13 +953,9 @@ export async function handleSlashCommand(
         messageTokens > 0;
 
       if (hasBreakdown) {
-        details.push(`系统提示词 ${fmt(systemTokens)}`);
-        details.push(`工具 ${fmt(toolsTokens)}`);
-        details.push(`对话消息 ${fmt(messageTokens)}`);
-      }
-
-      if (details.length > 0) {
-        lines.push('', details.join('\n'));
+        lines.push(`- 系统提示词：${fmt(systemTokens)}`);
+        lines.push(`- 工具声明：${fmt(toolsTokens)}`);
+        lines.push(`- 对话消息：${fmt(messageTokens)}`);
       }
 
       return {
@@ -890,17 +965,109 @@ export async function handleSlashCommand(
       };
     }
 
-    case 'help': {
+    case '状态': {
+      const sm = context.sessionManager;
+      const peer = sm ? sm.sessionIdToPeer(context.session.id) : context.session.id;
+      const activeTurn = sm?.getActiveTurn?.(peer);
+      const isBusy = activeTurn !== undefined || sm?.isSessionBusy?.(context.session.id);
+
+      let statusStr = '空闲';
+      if (activeTurn !== undefined) {
+        statusStr = `正在运行（轮次 #${activeTurn}）`;
+      } else if (isBusy) {
+        statusStr = '正在运行';
+      }
+
+      const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
+      const agent = agents?.get?.(context.session.id);
+      const curSel = sm?.getModelSelection(context.session.id) || (agent as any)?.modelSelection?.current;
+      const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
+      const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
+      const curEffort = curSel?.reasoningEffort;
+
+      const reasoningInfo = await getModelReasoningInfo(context.ctx, curProv, curMod, curEffort);
+      let effortStr = '不支持';
+      if (reasoningInfo.supported) {
+        const matched = reasoningInfo.efforts.find((e) => e.id === reasoningInfo.currentEffort);
+        effortStr = matched ? `${matched.id} (${matched.name})` : (reasoningInfo.currentEffort || '默认');
+      } else {
+        effortStr = '当前模型不支持';
+      }
+
+      const permissionPresets = context.ctx.get('permissionPresets') || (context.ctx as any).permissionPresets;
+      const rawMode = permissionPresets?.current?.(context.session) || 'workspace-write';
+      let zhMode = '编辑';
+      if (rawMode === 'danger-full-access' || rawMode === 'yolo') zhMode = '完全';
+      else if (rawMode === 'readonly' || rawMode === 'read-only') zhMode = '只读';
+
+      let ctxUsageStr = '0';
+      const tokenMeter = context.ctx.get('tokenMeter') || (context.ctx as any).tokenMeter;
+      if (tokenMeter?.measure) {
+        try {
+          const usage = tokenMeter.measure(context.session);
+          const totalTokens = usage?.totalTokens ?? 0;
+          let contextWindow: number | undefined;
+          const sessionProjections = context.ctx.get('sessionProjections') || (context.ctx as any).sessionProjections;
+          if (sessionProjections && typeof sessionProjections.snapshot === 'function') {
+            try {
+              const snap = sessionProjections.snapshot(context.session, ['contextPressure']);
+              if (snap?.values?.contextPressure?.contextWindow) {
+                contextWindow = snap.values.contextPressure.contextWindow;
+              }
+            } catch {}
+          }
+          if (contextWindow === undefined) {
+            const llm = context.ctx.get('llm') || (context.ctx as any).llm;
+            if (llm && typeof llm.resolveModel === 'function') {
+              try {
+                const info = await llm.resolveModel(curProv, curMod);
+                if (info?.context?.contextWindow) contextWindow = info.context.contextWindow;
+              } catch {}
+            }
+          }
+          const fmt = (v: number) => (v > 0 ? `~${formatTokens(v)}` : '0');
+          if (contextWindow && contextWindow > 0) {
+            const percent = Math.min(100, Math.round((totalTokens / contextWindow) * 100));
+            ctxUsageStr = `${fmt(totalTokens)} / ${formatTokens(contextWindow)} (${percent}%)`;
+          } else {
+            ctxUsageStr = fmt(totalTokens);
+          }
+        } catch {}
+      }
+
+      const parsed = parseSessionId(context.session.id);
+      const versionStr = parsed ? ` (版本: ${parsed.version})` : '';
+      const sessionIdent = `${context.session.id}${versionStr}`;
+
+      const lines = [
+        '【当前会话状态】',
+        `运行状态：${statusStr}`,
+        `当前模型：${curProv} / ${curMod}`,
+        `思考等级：${effortStr}`,
+        `权限模式：${zhMode}`,
+        `上下文用量：${ctxUsageStr}`,
+        `会话标识：${sessionIdent}`,
+      ];
+
+      return {
+        handled: true,
+        success: true,
+        reply: lines.join('\n'),
+      };
+    }
+
+    case '帮助': {
       const helpText = [
-        '【DSH × NapCat 快捷指令】',
-        '• /model <model_id> : 切换当前会话 LLM 模型',
-        '• /mode <readonly|edit|yolo> : 切换权限模式',
-        '• /think [档位] : 查看或切换当前思考深度',
-        '• /new (clear) : 开启新会话（原会话保留）',
-        '• /resume : 列出并切换历史会话 (/resume <序号>)',
-        '• /ctx : 查看当前会话上下文用量',
-        '• /stop : 停止当前生成',
-        '• /help : 查看帮助',
+        '【快捷指令帮助】',
+        '- /状态 : 查看当前运行状态、模型、权限与上下文总览',
+        '- /模型 [模型名] : 查看或切换当前使用的模型',
+        '- /权限 [只读|编辑|完全] : 查看或切换权限模式',
+        '- /思考 [档位] : 查看或设置深度思考等级（如 off, low, high, max）',
+        '- /会话 [序号|标题] : 列出历史会话或进行切换',
+        '- /新建 : 开启全新会话（保留历史）',
+        '- /用量 : 查看会话上下文用量明细',
+        '- /停止 : 中断当前正在生成的回复',
+        '- /帮助 : 查看本帮助说明',
       ].join('\n');
 
       return {
@@ -914,7 +1081,7 @@ export async function handleSlashCommand(
       return {
         handled: true,
         success: false,
-        error: `未知命令: /${command}，输入 /help 查看可用指令`,
+        error: `未知指令：/${command}，输入 /帮助 查看可用指令`,
       };
     }
   }

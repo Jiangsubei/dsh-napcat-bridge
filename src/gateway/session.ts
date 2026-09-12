@@ -121,6 +121,10 @@ export class SessionManager {
     return this.outboundBridge;
   }
 
+  getActiveTurn(peer: string): number | undefined {
+    return (this.outboundBridge as any)?.getActiveTurn?.(peer);
+  }
+
   private readonly dshHome: string;
 
   constructor(

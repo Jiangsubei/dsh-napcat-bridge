@@ -76,25 +76,49 @@ describe('契约测试: 串行多题问答状态机 (Serial Multi-Question Ask)'
     );
     expect(provider.handleInboundReply('user_2000000001', '2')).toBe(true);
     await new Promise((r) => setTimeout(r, 10));
-    expect(gateway.sends).toHaveLength(2);
-    expect(gateway.sends[1].message).toContain('问题二');
+    // 答完第 1 题，应收到第 1 题回执 + 下发第 2 题卡片
+    expect(gateway.sends.map((s) => s.message)).toContain('已收到第 1/3 题回答');
+    expect(gateway.sends.some((s) => s.message.includes('问题二'))).toBe(true);
     expect(settled).toBe(false);
 
-    // 答第 2 题 → 发第 3 题卡片
+    // 答第 2 题 → 收到第 2 题回执 + 发第 3 题卡片
     expect(provider.handleInboundReply('user_2000000001', '1')).toBe(true);
     await new Promise((r) => setTimeout(r, 10));
-    expect(gateway.sends).toHaveLength(3);
-    expect(gateway.sends[2].message).toContain('问题三');
+    expect(gateway.sends.map((s) => s.message)).toContain('已收到第 2/3 题回答');
+    expect(gateway.sends.some((s) => s.message.includes('问题三'))).toBe(true);
     expect(settled).toBe(false);
 
-    // 答第 3 题（纯自定义，无选项）→ 一次性 resolve 3 个 answer
+    // 答第 3 题（纯自定义，无选项）→ 收到最终回执“已成功回答”并一次性 resolve 3 个 answer
     expect(provider.handleInboundReply('user_2000000001', '自定义内容')).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(gateway.sends.map((s) => s.message)).toContain('已成功回答');
     const answer = await askPromise;
     expect(settled).toBe(true);
     expect(answer.answers).toHaveLength(3);
     expect(answer.answers[0]).toEqual({ id: 'q1', selected: ['B'] });
     expect(answer.answers[1]).toEqual({ id: 'q2', selected: ['C'] });
     expect(answer.answers[2]).toEqual({ id: 'q3', selected: [], custom: '自定义内容' });
+  });
+
+  it('单道题问答：答完直接回复“已成功回答”', async () => {
+    const gateway = makeGateway();
+    const provider = makeProvider(gateway, (id) => `user_${id.slice(8)}`);
+
+    const askPromise = provider.ask({
+      agent: QQ_USER_AGENT,
+      questions: [{ id: 'q1', question: '确认操作？', options: [{ label: '是' }, { label: '否' }] }],
+      signal: new AbortController().signal,
+    } as any);
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(gateway.sends).toHaveLength(1);
+
+    expect(provider.handleInboundReply('user_2000000001', '1')).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(gateway.sends.map((s) => s.message)).toContain('已成功回答');
+    const res = await askPromise;
+    expect(res.answers[0].selected).toEqual(['是']);
   });
 
   it('群聊引用锚定：未引用 / 引用错误消息不 consume；引用当前题卡片才命中并逐题推进', async () => {
@@ -119,10 +143,11 @@ describe('契约测试: 串行多题问答状态机 (Serial Multi-Question Ask)'
     expect(provider.handleInboundReply(GROUP_PEER, '1', { replyId: 999 })).toBe(false);
     // 引用当前题卡片 → 命中，推进第 2 题
     expect(provider.handleInboundReply(GROUP_PEER, '1', { replyId: card1Id })).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(gateway.sends.map((s) => s.message)).toContain('已收到第 1/2 题回答');
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(gateway.sends).toHaveLength(2);
-    const card2Id = gateway.sends[1].message_id;
+    const card2Id = gateway.sends[gateway.sends.length - 1].message_id;
     // 第 2 题仍须引用它自己的卡片（引用第 1 题卡片不命中）
     expect(provider.handleInboundReply(GROUP_PEER, '1', { replyId: card1Id })).toBe(false);
     expect(provider.handleInboundReply(GROUP_PEER, '2', { replyId: card2Id })).toBe(true);
@@ -221,7 +246,7 @@ describe('契约测试: 回复解析规则 (Answer Parsing)', () => {
 });
 
 describe('契约测试: 卡片分场景展示 (Two-Tier Card)', () => {
-  it('私聊档卡：题文 + detail + 选项行 + 自定义回答标记 + 直接回复提示（自定义标记不占数字位）', () => {
+  it('私聊档卡：题文 + detail + 选项行 + 或者输入自定义答案 + 直接回复提示（自定义标记不占数字位）', () => {
     const card = NapCatQuestionProvider.formatQuestionCard(
       {
         id: 'q1',
@@ -237,9 +262,9 @@ describe('契约测试: 卡片分场景展示 (Two-Tier Card)', () => {
     expect(card).toContain('选项:');
     expect(card).toContain('1. 生产');
     expect(card).toContain('2. 测试 (含 mock 数据)');
-    expect(card).toContain('自定义回答');
-    expect(card).toContain('请直接回复数字序号选择对应选项，或输入你的答案');
-    // 自定义回答标记不占数字位：没有 "3. 自定义回答"
+    expect(card).toContain('或者输入自定义答案');
+    expect(card).toContain('请直接回复数字序号，或者直接输入你的答案');
+    // 自定义回答标记不占数字位：没有 "3. 自定义"
     expect(card).not.toContain('3. 自定义');
   });
 
@@ -252,16 +277,16 @@ describe('契约测试: 卡片分场景展示 (Two-Tier Card)', () => {
       { id: 'q1', question: '部署到哪个环境？', options: [{ label: '生产' }] },
       false
     );
-    expect(groupCard).toContain('请引用本消息并回复数字序号选择对应选项，或输入你的答案');
-    expect(privateCard).toContain('请直接回复数字序号选择对应选项，或输入你的答案');
-    expect(groupCard).toContain('自定义回答');
-    expect(privateCard).toContain('自定义回答');
+    expect(groupCard).toContain('请引用本消息并回复数字序号，或者直接输入你的答案');
+    expect(privateCard).toContain('请直接回复数字序号，或者直接输入你的答案');
+    expect(groupCard).toContain('或者输入自定义答案');
+    expect(privateCard).toContain('或者输入自定义答案');
   });
 
   it('无选项卡片：跳过选项头，恒保留自定义回答标记与操作提示', () => {
     const card = NapCatQuestionProvider.formatQuestionCard({ id: 'q1', question: '用途说明' }, true);
     expect(card).not.toContain('选项:');
-    expect(card).toContain('自定义回答');
-    expect(card).toContain('请引用本消息并回复数字序号选择对应选项，或输入你的答案');
+    expect(card).toContain('或者输入自定义答案');
+    expect(card).toContain('请引用本消息并回复数字序号，或者直接输入你的答案');
   });
 });
