@@ -98,6 +98,13 @@ export class OutboundStreamBridge {
   }
 
   /**
+   * 获取某 peer 当前正在执行的活跃轮次号（未在运行则为 undefined）
+   */
+  getActiveTurn(peer: string): number | undefined {
+    return this.activeTurns.get(peer);
+  }
+
+  /**
    * 记录某 peer 最近一次唤醒的入站消息上下文（唤醒源 msg_id 与提问者 QQ），
    * 供出方向按开关组装引用/@ 前缀。由入方向消息处理路径在判定唤醒后调用。
    */

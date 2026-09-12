@@ -167,11 +167,27 @@ export class NapCatQuestionProvider {
     pending.cardMessageId = messageId;
   }
 
+  private async sendReceipt(peer: string, text: string): Promise<void> {
+    const gateway = this.options?.gateway;
+    if (!gateway) return;
+    const sender = this.options?.sender;
+    const sendTask = () => gateway.sendMsg(peer, text);
+    try {
+      if (sender) {
+        await sender.enqueue(peer, sendTask);
+      } else {
+        await sendTask();
+      }
+    } catch {
+      // 回执下发异常不阻塞主状态机
+    }
+  }
+
   /**
    * 卡片分场景展示（2 档，恒带自定义）：
-   * - 私聊：... + 末尾恒拼「自定义回答」标记项 + 「请直接回复数字序号选择对应选项，或输入你的答案」
-   * - 群聊：同上，操作提示改为「请引用本消息并回复数字序号选择对应选项，或输入你的答案」
-   * 「自定义回答」标记项参与展示但不参与数字匹配（用户输非数字文本才走自定义）。
+   * - 私聊：... + 末尾恒拼「或者输入自定义答案」标记项 + 「请直接回复数字序号，或者直接输入你的答案」
+   * - 群聊：同上，操作提示改为「请引用本消息并回复数字序号，或者直接输入你的答案」
+   * 「或者输入自定义答案」标记项参与展示但不参与数字匹配（用户输非数字文本才走自定义）。
    */
   static formatQuestionCard(q: AskUserQuestionItem, isGroup: boolean): string {
     const lines: string[] = ['【请回答问题】'];
@@ -185,11 +201,11 @@ export class NapCatQuestionProvider {
         lines.push(`${idx + 1}. ${opt.label}${desc}`);
       });
     }
-    lines.push('自定义回答');
+    lines.push('或者输入自定义答案');
     lines.push(
       isGroup
-        ? '请引用本消息并回复数字序号选择对应选项，或输入你的答案'
-        : '请直接回复数字序号选择对应选项，或输入你的答案'
+        ? '请引用本消息并回复数字序号，或者直接输入你的答案'
+        : '请直接回复数字序号，或者直接输入你的答案'
     );
     return lines.join('\n');
   }
@@ -266,11 +282,18 @@ export class NapCatQuestionProvider {
     const answer = NapCatQuestionProvider.parseAnswerForQuestion(q, text);
     pending.answers.push(answer);
 
+    const totalQuestions = pending.request.questions.length;
+    const currentIndex = pending.index;
+
     if (pending.index === pending.request.questions.length - 1) {
-      // 最后一道答完 → 一次性 resolve 全部答案交回 agent（agent 感知不到多题拆分）
+      // 最后一道答完 → 下发“已成功回答”回执，并一次性 resolve 全部答案交回 agent（agent 感知不到多题拆分）
+      void this.sendReceipt(pending.peer, '已成功回答');
       pending.resolve({ answers: pending.answers });
       return true;
     }
+
+    // 中间题答完：下发“已收到第 x/N 题回答”回执
+    void this.sendReceipt(pending.peer, `已收到第 ${currentIndex + 1}/${totalQuestions} 题回答`);
 
     // 串行推进下一题：不 resolve 不丢 agent，只换发下一张卡片
     pending.index += 1;
