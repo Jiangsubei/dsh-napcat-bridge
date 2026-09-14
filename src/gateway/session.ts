@@ -999,39 +999,17 @@ export class SessionManager {
       }
     }
 
-    // 2. 检测内存中已存在的 agent
+    // 2. 内存中已存在该会话的 live agent（可能由 Web UI 会话控制器等其它 owner 创建/持有）：
+    //    DSH 0.1.5 契约下 `ctx.agents.get(id)` 只返回 bare Agent —— AgentHandle { agent, dispose }
+    //    仅暴露给创建它的 owner，插件无从取得、也无从"夺锁"。因此这里**只复用同一 agent**，
+    //    让新消息经 agent.followup() 排队等待上一条回合结束后再开新回合（同 peer 串行，Spec §7.3）。
+    //    ⚠️ 严禁抢占式 cancel：`Agent.cancel(cause)` 默认清空 inbox 并中断在途回合，
+    //    会在唤醒路径上直接打断上一条回复（详见 docs/根因分析-入站消息串行失效与0.1.5抢占取消_260914.md）。
     const existingAgent = agents?.get?.(sessionId as any);
     if (existingAgent && !this.isSessionArchived(sessionId)) {
-      // QQ 优先抢占：若在途生成中，优先取消生成
-      try {
-        existingAgent.cancel?.({ kind: 'user-request' } as any);
-      } catch {
-        try {
-          (existingAgent as any).cancel?.('user-request');
-        } catch {}
-      }
-
-      // 若测试桩或外部显式绑定了 handle.dispose，配合抢占释放句柄
-      if (typeof (existingAgent as any).handle?.dispose === 'function') {
-        try {
-          await (existingAgent as any).handle.dispose();
-        } catch {}
-        const sessions = this.ctx.get?.('sessions') || (this.ctx as any).sessions;
-        if (sessions && typeof sessions.detachEntered === 'function') {
-          try {
-            const live = sessions.get?.(sessionId);
-            if (live) {
-              const entry = typeof sessions.liveEntryFor === 'function' ? sessions.liveEntryFor(live) : live;
-              await sessions.detachEntered(entry).catch(() => {});
-            }
-          } catch {}
-        }
-        await new Promise((res) => setTimeout(res, 150));
-      } else {
-        (existingAgent as any).modelSelection = selectionRef;
-        this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
-        return existingAgent;
-      }
+      (existingAgent as any).modelSelection = selectionRef;
+      this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
+      return existingAgent;
     }
 
     const cwd = this.resolveCwd(sessionId);
@@ -1096,7 +1074,7 @@ export class SessionManager {
     let handle: AgentHandle | undefined;
     let isSessionLocked = false;
 
-    // 3. 若该会话此前已持久化在磁盘上，优先通过 agents.resume 恢复会话（带锁冲突重试与抢占保护）
+    // 3. 若该会话此前已持久化在磁盘上，优先通过 agents.resume 恢复会话（带锁冲突退避重试；不抢占他方在途回合）
     if (typeof agents?.resume === 'function') {
       const delays = this.options?.retryDelays || [300, 600, 900];
       const maxRetries = delays.length;
@@ -1128,25 +1106,9 @@ export class SessionManager {
               `[SessionManager] 会话 ${sessionId} 正在被其他进程或控制台占用 (SessionAlreadyOwnedError)，正在进行第 ${attempt + 1}/${maxRetries} 次重试...`
             );
 
-            // 再次尝试抢占并关闭可能占用的非 QQ 写句柄
-            const occAgent = agents?.get?.(sessionId as any);
-            if (occAgent && !this.activeHandles.has(sessionId)) {
-              try {
-                occAgent.cancel?.({ kind: 'user-request' } as any);
-              } catch {
-                try { (occAgent as any).cancel?.('user-request'); } catch {}
-              }
-              try {
-                if (typeof (occAgent as any).handle?.dispose === 'function') {
-                  await (occAgent as any).handle.dispose();
-                } else if (typeof (occAgent as any).dispose === 'function') {
-                  await (occAgent as any).dispose();
-                } else if (typeof (occAgent as any).ctx?.scope?.dispose === 'function') {
-                  await (occAgent as any).ctx.scope.dispose();
-                }
-              } catch {}
-            }
-
+            // 纯退避重试：不再抢占在途回合（cancel）或拆解他方句柄（handle/scope.dispose）——
+            // 0.1.5 的 AgentHandle 仅暴露给创建者，且 cancel 会中断他人正在进行的回合；
+            // 锁被占用时只按退避重试，重试耗尽如实上报（见根因分析文档 2.3 / 3）。
             if (attempt < maxRetries - 1) {
               await new Promise((res) => setTimeout(res, delays[attempt]));
               continue;
