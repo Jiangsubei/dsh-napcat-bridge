@@ -9,6 +9,24 @@
 
 ---
 
+## 最终结论更正（2026-09-12 追加，优先于正文）
+
+本文档正文中关于 **"Web UI 输入框隐藏基于 Workspaces 工作区维度"** 的设计（见 2.x 客户端相关章节）
+已于 2026-09-11 被后续实现推翻并**废弃**，请勿据此重新实现：
+
+| 项 | 正文旧方案（已废弃） | 最终落地结论（以代码为准） |
+|---|---|---|
+| 只读输入框隐藏判定 | 命中 NapCat 固定工作区（title + path 匹配）即隐藏，覆盖工作区内全部会话与欢迎页 | **只依据会话 ID**：仅 `qq-group-` / `qq-user-` / `qq-` 前缀的插件自建 QQ 会话隐藏 |
+| 欢迎页（Hero / 无 sessionId） | 隐藏 | **必须保留原生输入框** |
+| NapCat 工作区内 Web 端新建会话（`session-uuid`） | 隐藏（只读） | **必须保留原生输入框**，允许 Web 端发消息 |
+| 判定函数 | `isFixedNapCatWorkspace` + 工作区模糊匹配 | `isNapCatWorkspaceOrSession({ sessionId })`（工作区维度与相关死代码已于 2026-09-12 清理） |
+
+**遗留铁律**：严禁再使用 `includes('napcat')` 之类的模糊关键字匹配判定工作区，防止误伤名称或路径含
+napcat 的普通开发工作区；客户端也不再注入 `workspaces` 服务（幽灵依赖已清理）。相关回归契约见
+`tests/contract/webui-readonly-composer.test.ts`。
+
+---
+
 ## 目录
 
 1. [执行摘要与审查汇总 (Executive Summary)](#1-执行摘要与审查汇总-executive-summary)
