@@ -150,8 +150,13 @@ describe('契约测试: 提问拦截装配闭环 (Question Interception Assembly
     client.send(JSON.stringify(inboundGroupMessage('1')));
     await expectNoAction('send_group_msg');
 
-    // 引用当前题卡片 → 拦截消费 → 立即发第 2 题卡片
+    // 引用当前题卡片 → 拦截消费 → 先下发本题回执，再立即发第 2 题卡片（同 peer 串行队列保序）
     client.send(JSON.stringify(inboundGroupMessage('2', { replyTo: 9001 })));
+    const receipt1 = await waitForAction('send_group_msg');
+    expect(String(receipt1.params.message)).toBe('已收到第 1/2 题回答');
+    expect(String(receipt1.params.group_id)).toBe(String(GROUP_ID));
+    // 回执同样是 send_group_msg action：必须回执应答，否则同 peer 串行队列阻塞、下一张卡片无法下发
+    respond(receipt1, 9003);
     const card2 = await waitForAction('send_group_msg');
     expect(String(card2.params.message)).toContain('回滚策略?');
     expect(String(card2.params.message)).not.toContain('部署环境?');
@@ -161,6 +166,11 @@ describe('契约测试: 提问拦截装配闭环 (Question Interception Assembly
     client.send(JSON.stringify(inboundGroupMessage('1', { replyTo: 9001 })));
     await expectNoAction('send_group_msg');
     client.send(JSON.stringify(inboundGroupMessage('1', { replyTo: 9002 })));
+
+    // 最后一道答完 → 下发"已成功回答"终局回执，并一次性 resolve 全部答案
+    const finalReceipt = await waitForAction('send_group_msg');
+    expect(String(finalReceipt.params.message)).toBe('已成功回答');
+    respond(finalReceipt, 9004);
 
     const answer = await askPromise;
     expect(answer.answers).toHaveLength(2);
