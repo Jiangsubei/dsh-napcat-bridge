@@ -11,7 +11,7 @@ import {
 } from '../../src/gateway/session.js';
 import { MessageDatabase } from '../../src/storage/database.js';
 
-describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、QQ 优先抢占与 Web UI 只读守护 (Session Lock & Concurrency Contract)', () => {
+describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、live agent 复用不抢占与 Web UI 只读守护 (Session Lock & Concurrency Contract)', () => {
   let tmpHome: string;
   let booted: BootedDsh | null = null;
   let db: MessageDatabase | null = null;
@@ -100,34 +100,28 @@ describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、QQ 优先抢�
     expect(mockAgents.create).not.toHaveBeenCalled();
   });
 
-  it('契约 3: QQ 优先抢占：检测到非 QQ handle 占有会话时，主动 cancel 取消生成、关闭旧写句柄并夺回专属写句柄', async () => {
+  it('契约 3: 内存中存在 live agent（0.1.5 bare Agent，无 handle）时只复用：绝不 cancel 在途回合、绝不重建会话', async () => {
     const ctx = new Context();
     const sessionId = 'qq-group-2000000003';
 
-    // 模拟非 QQ 端（如 Web 控制台）持有的旧 Agent 与 Handle
+    // 模拟其它 owner（如 Web UI 会话控制器）持有的 live agent：
+    // 0.1.5 下 ctx.agents.get() 只返回 bare Agent —— 真实 Agent **没有** handle 属性
+    // （AgentHandle { agent, dispose } 只暴露给创建者），故此处 mock 不得再挂 handle。
     const oldCancelMock = vi.fn();
-    const oldDisposeMock = vi.fn().mockResolvedValue(undefined);
-    const fakeOldAgent = {
+    const fakeLiveAgent = {
       id: sessionId,
       session: { id: sessionId },
+      status: 'running',
       cancel: oldCancelMock,
-      handle: { dispose: oldDisposeMock },
-      dispose: oldDisposeMock,
-      ctx: { scope: { dispose: oldDisposeMock } },
+      followup: vi.fn(),
     };
 
     // 内存中有该 agent，但 QQ 的 activeHandles 中没有
-    const agentStore = new Map<string, any>([[sessionId, fakeOldAgent]]);
-
-    const newAgent = { id: sessionId, session: { id: sessionId }, cancel: vi.fn() };
-    const newHandle = { agent: newAgent, dispose: vi.fn().mockResolvedValue(undefined) };
+    const agentStore = new Map<string, any>([[sessionId, fakeLiveAgent]]);
 
     const mockAgents = {
       get: vi.fn().mockImplementation((id: string) => agentStore.get(id)),
-      resume: vi.fn().mockImplementation(async () => {
-        agentStore.set(sessionId, newAgent);
-        return newHandle;
-      }),
+      resume: vi.fn(),
       create: vi.fn(),
     };
     (ctx as any).agents = mockAgents;
@@ -141,14 +135,12 @@ describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、QQ 优先抢�
     // QQ 收到消息触发 getOrCreateAgent
     const agent = await sessionManager.getOrCreateAgent('group_2000000003');
 
-    // 验证原 agent 被执行取消操作
-    expect(oldCancelMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'user-request' }));
-    // 验证旧写句柄被尝试关闭释放锁
-    expect(oldDisposeMock).toHaveBeenCalled();
-    // 验证 QQ 夺回了专属写句柄
-    expect(agent).toBe(newAgent);
-    expect(sessionManager.hasActiveHandle(sessionId)).toBe(true);
-    expect(sessionManager.getActiveHandle(sessionId)).toBe(newHandle);
+    // 核心红线：复用同一 live agent（串行排队交给 followup），绝不取消在途回合
+    expect(agent).toBe(fakeLiveAgent);
+    expect(oldCancelMock).not.toHaveBeenCalled();
+    // 不得为"抢占"而 resume / create 重建会话
+    expect(mockAgents.resume).not.toHaveBeenCalled();
+    expect(mockAgents.create).not.toHaveBeenCalled();
   });
 
   it('契约 4: Web UI 只读锁定与拦截守护：QQ 独占活跃时拒绝 Web prompt 并返回标准 RemoteError', async () => {
