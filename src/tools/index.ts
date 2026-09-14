@@ -492,7 +492,7 @@ export function renderGroupFilesText(result: ListGroupFilesResult): string {
   const lines: string[] = [`共找到 ${result.total} 个群文件 (本次展示 ${result.files.length} 个):`];
   for (const f of result.files) {
     const sizeStr = f.size ? ` (${(f.size / 1024).toFixed(1)} KB)` : '';
-    lines.push(`- 📄 ${f.file_name}${sizeStr}`);
+    lines.push(`- ${f.file_name}${sizeStr}`);
     lines.push(`  • file_id: ${f.file_id}`);
     lines.push(`  • busid: ${f.busid}`);
     lines.push(`  • 上传者: ${f.sender_name} (${f.user_id})`);

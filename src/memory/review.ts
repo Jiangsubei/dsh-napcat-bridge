@@ -168,7 +168,7 @@ export interface ReviewResult {
 export function summarizeMemoryReviewActions(actions: string[]): string {
   const unique = Array.from(new Set(actions.filter(Boolean)));
   if (unique.length === 0) return '';
-  return `💾 记忆与用户画像自动优化：${unique.join(' · ')}`;
+  return `记忆与用户画像自动优化：${unique.join(' · ')}`;
 }
 
 /**

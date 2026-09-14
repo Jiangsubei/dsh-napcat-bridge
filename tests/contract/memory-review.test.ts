@@ -158,7 +158,7 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
   it('契约 5: 回顾变更汇总与通知事件 (memory/review/notify)', async () => {
     const actions = ['已更新群聊记忆 (group_3000000001)', '已更新用户画像 (2000000001)'];
     const summary = summarizeMemoryReviewActions(actions);
-    expect(summary).toContain('💾 记忆与用户画像自动优化：已更新群聊记忆 (group_3000000001) · 已更新用户画像 (2000000001)');
+    expect(summary).toContain('记忆与用户画像自动优化：已更新群聊记忆 (group_3000000001) · 已更新用户画像 (2000000001)');
 
     // 模拟子代理 review 产生变更并通过 ctx.emit 发送通知
     mockCtx.agents.create.mockResolvedValueOnce({

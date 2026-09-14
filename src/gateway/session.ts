@@ -165,7 +165,7 @@ export class SessionManager {
         if (sid && (this.activeHandles.has(sid) || (this.isQQSession(sid) && this.isSessionBusy(sid)))) {
           throw new RemoteError(
             'session/agent-busy',
-            '⚠️ 该会话当前正由 QQ 独占使用中，Web 端处于只读监视模式。请在 QQ 端发送消息。',
+            '该会话当前正由 QQ 独占使用中，Web 端处于只读监视模式。请在 QQ 端发送消息。',
             { reason: 'EXCLUSIVE_QQ_SESSION', sessionId: sid }
           );
         }
