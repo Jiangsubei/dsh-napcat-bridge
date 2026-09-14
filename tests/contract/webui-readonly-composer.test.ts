@@ -8,7 +8,6 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 
 import {
   isQQSessionId,
-  isFixedNapCatWorkspace,
   isNapCatWorkspaceOrSession,
   syncReadonlyAttribute,
   ensureReadonlyStyle,
@@ -75,66 +74,7 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
     (globalThis as any).document = createMockDocument();
   });
 
-  describe('1. 固定工作区判定契约 (isFixedNapCatWorkspace) - 防关键字误伤', () => {
-    it('固定工作区 title 为 NapCat 且路径规范匹配 .dsh/workspace/napcat 时判定为 true', () => {
-      expect(
-        isFixedNapCatWorkspace({
-          title: 'NapCat',
-          path: '/home/nyara/.dsh/workspace/napcat',
-        })
-      ).toBe(true);
-
-      // Windows 路径
-      expect(
-        isFixedNapCatWorkspace({
-          title: 'NapCat',
-          path: 'C:\\Users\\Nyara\\.dsh\\workspace\\napcat',
-        })
-      ).toBe(true);
-    });
-
-    it('严禁关键字模糊匹配：名称或路径包含 napcat 但非插件专属固定工作区判定为 false', () => {
-      // 名字包含 napcat 的普通开发工作区
-      expect(
-        isFixedNapCatWorkspace({
-          title: 'NapCat Tools',
-          path: '/home/nyara/.dsh/workspace/napcat',
-        })
-      ).toBe(false);
-
-      expect(
-        isFixedNapCatWorkspace({
-          title: 'napcat-dev',
-          path: '/home/nyara/projects/napcat-plugin',
-        })
-      ).toBe(false);
-
-      // 路径包含 napcat 但不是 .dsh/workspace/napcat
-      expect(
-        isFixedNapCatWorkspace({
-          title: 'NapCat',
-          path: '/home/nyara/projects/napcat',
-        })
-      ).toBe(false);
-    });
-  });
-
-  describe('2. 插件会话专属判定与欢迎页保留契约 (isNapCatWorkspaceOrSession)', () => {
-    const mockWorkspaces = [
-      {
-        workspaceId: 'ws-napcat-fixed',
-        title: 'NapCat',
-        path: '/home/nyara/.dsh/workspace/napcat',
-        sessionIds: ['qq-group-123456#0.1', 'session-webui-custom-uuid-1'],
-      },
-      {
-        workspaceId: 'ws-user-project',
-        title: 'My NapCat Project',
-        path: '/home/nyara/projects/napcat-app',
-        sessionIds: ['session-project-1'],
-      },
-    ];
-
+  describe('1. 插件会话专属判定与欢迎页保留契约 (isNapCatWorkspaceOrSession)', () => {
     it('以 qq- 前缀开头的会话始终判定为 true (插件自己创建的 QQ 会话)', () => {
       expect(isNapCatWorkspaceOrSession({ sessionId: 'qq-group-123456#0.1' })).toBe(true);
       expect(isNapCatWorkspaceOrSession({ sessionId: 'qq-user-987654#0.1' })).toBe(true);
@@ -145,8 +85,6 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       expect(
         isNapCatWorkspaceOrSession({
           sessionId: undefined,
-          currentWorkspaceId: 'ws-napcat-fixed',
-          workspaces: mockWorkspaces,
         })
       ).toBe(false);
     });
@@ -155,8 +93,6 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       expect(
         isNapCatWorkspaceOrSession({
           sessionId: 'session-webui-custom-uuid-1',
-          currentWorkspaceId: 'ws-napcat-fixed',
-          workspaces: mockWorkspaces,
         })
       ).toBe(false);
     });
@@ -165,8 +101,6 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       expect(
         isNapCatWorkspaceOrSession({
           sessionId: 'session-project-1',
-          currentWorkspaceId: 'ws-user-project',
-          workspaces: mockWorkspaces,
         })
       ).toBe(false);
 
@@ -181,7 +115,7 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
     });
   });
 
-  describe('3. 全局 Body 属性与样式契约 (syncReadonlyAttribute & ensureReadonlyStyle)', () => {
+  describe('2. 全局 Body 属性与样式契约 (syncReadonlyAttribute & ensureReadonlyStyle)', () => {
     it('ensureReadonlyStyle 向 document.head 注入隐藏样式规则', () => {
       ensureReadonlyStyle();
       const style = document.getElementById('dsh-napcat-readonly-style');
@@ -205,7 +139,7 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
     });
   });
 
-  describe('4. QQComposerHider 组件渲染契约 (只管 QQ 会话，欢迎页与非 QQ 会话返回 null)', () => {
+  describe('3. QQComposerHider 组件渲染契约 (只管 QQ 会话，欢迎页与非 QQ 会话返回 null)', () => {
     it('当传入 QQ 会话 sessionId 时，渲染局部隐藏样式', () => {
       const html = renderToStaticMarkup(
         React.createElement(QQComposerHider, {
@@ -269,13 +203,11 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
     });
   });
 
-  describe('5. 前端插件 apply 装配与运行时联动契约', () => {
+  describe('4. 前端插件 apply 装配与运行时联动契约', () => {
     it('apply(ctx) 仅在切换到 QQ 会话时设置 body 属性，欢迎页与非 QQ 会话保持原生', () => {
       let sessionListener: (() => void) | undefined;
-      let workspaceListener: (() => void) | undefined;
 
       let currentSessionId: string | undefined = 'session-normal';
-      let currentWorkspaceId = 'ws-normal';
 
       const mockSessions = {
         list: {
@@ -287,37 +219,10 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
         },
       };
 
-      const mockWorkspaces = {
-        list: {
-          getSnapshot: () => ({
-            current: currentWorkspaceId,
-            items: [
-              {
-                workspaceId: 'ws-napcat-fixed',
-                title: 'NapCat',
-                path: '/home/nyara/.dsh/workspace/napcat',
-                sessionIds: ['qq-group-123456#0.1', 'session-napcat-webui-1'],
-              },
-              {
-                workspaceId: 'ws-normal',
-                title: 'Normal',
-                path: '/home/nyara/app',
-                sessionIds: ['session-normal'],
-              },
-            ],
-          }),
-          subscribe: vi.fn((fn: () => void) => {
-            workspaceListener = fn;
-            return () => {};
-          }),
-        },
-      };
-
       const registeredSlots: Record<string, any[]> = {};
       const mockCtx: any = {
         get: (name: string) => {
           if (name === 'sessions') return mockSessions;
-          if (name === 'workspaces') return mockWorkspaces;
           return undefined;
         },
         effect: vi.fn((fn: () => any) => fn()),
@@ -341,7 +246,6 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
 
       // 2. 切换当前会话为插件创建的 QQ 会话 -> 激活只读属性（隐藏卡片，保留指标）
       currentSessionId = 'qq-group-123456#0.1';
-      currentWorkspaceId = 'ws-napcat-fixed';
       sessionListener?.();
       expect(document.body.getAttribute('data-dsh-napcat-readonly')).toBe('true');
 
@@ -355,10 +259,9 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       sessionListener?.();
       expect(document.body.hasAttribute('data-dsh-napcat-readonly')).toBe(false);
 
-      // 5. 彻底离开 NapCat 工作区，切换到普通工作区
-      currentWorkspaceId = 'ws-normal';
+      // 5. 彻底离开 QQ 会话，切换到普通会话
       currentSessionId = 'session-normal';
-      workspaceListener?.();
+      sessionListener?.();
       expect(document.body.hasAttribute('data-dsh-napcat-readonly')).toBe(false);
 
       // 验证插槽注册正常

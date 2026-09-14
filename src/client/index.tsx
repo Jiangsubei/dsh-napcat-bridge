@@ -8,7 +8,7 @@ import { NapCatSettingsCard } from './card.js';
 import { SETTINGS_NAMESPACE } from '../constants/index.js';
 
 export const name = 'dsh-napcat-bridge/client';
-export const inject = ['slots', 'connection', 'settingsScope', 'sessions', 'workspaces'];
+export const inject = ['slots', 'connection', 'settingsScope', 'sessions'];
 
 export const READONLY_STYLE_ID = 'dsh-napcat-readonly-style';
 export const READONLY_BODY_ATTR = 'data-dsh-napcat-readonly';
@@ -182,23 +182,8 @@ export function buildSettingsBridge(ctx: any, namespace: string = SETTINGS_NAMES
   };
 }
 
-/**
- * 精准判断指定 Workspace 是否为插件专用的固定工作区：
- * 插件工作区固定为 title === 'NapCat' 且路径以 `.dsh/workspace/napcat` 结尾（规范化斜杠）。
- * 严禁使用 includes 模糊关键字匹配，防止误伤名称或路径包含 napcat 的其他工作区。
- */
-export function isFixedNapCatWorkspace(ws: any): boolean {
-  if (!ws || typeof ws !== 'object') return false;
-  const title = typeof ws.title === 'string' ? ws.title.trim() : '';
-  if (title !== 'NapCat') return false;
-  const p = typeof ws.path === 'string' ? ws.path.replace(/\\/g, '/').toLowerCase() : '';
-  return p.endsWith('/.dsh/workspace/napcat') || p === '.dsh/workspace/napcat';
-}
-
 export interface IsNapCatOptions {
   sessionId?: string;
-  currentWorkspaceId?: string;
-  workspaces?: any[] | { items?: any[] };
 }
 
 /**
@@ -207,6 +192,10 @@ export interface IsNapCatOptions {
  * 2. 欢迎页（sessionId 为空或 Hero 状态）必须判定为 false，保留原生输入框！
  * 3. 在 NapCat 工作区中由用户在 Web UI 新建的普通会话（session-uuid 等非 QQ 会话）必须判定为 false，允许用户在 Web 端发消息；
  * 4. 其他任何非 QQ 会话或工作区，一律判定为 false。
+ *
+ * 注：本判定**只依据会话 ID**，不依赖工作区（workspaces 维度已按最终结论废弃：欢迎页与 Web 端
+ * 新建会话必须保留原生输入框）。若后续要重新引入工作区维度，请先阅读
+ * `docs/DSH-0.1.5-rc.1升级全量修改适配方案.md` 的「最终结论更正」一节，严禁再用 includes 模糊匹配。
  */
 export function isNapCatWorkspaceOrSession(options: IsNapCatOptions): boolean {
   const { sessionId } = options;
@@ -266,15 +255,14 @@ export interface QQComposerHiderProps {
   sessionId?: string;
   useSession?: (selector?: (session: any) => any) => any;
   useConversation?: (selector?: (conv: any) => any) => any;
-  useWorkspaces?: (selector?: (workspaces: any) => any) => any;
 }
 
 /**
  * QQ 会话只读输入框卡片隐藏控制器：
- * 当处于 QQ 会话或 NapCat 工作区时，仅隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
+ * 仅当处于**插件创建的 QQ 会话**时，隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
  * 提示文案、附件/模式切换以及右侧模型切换与发送按钮），
  * 下方的监控指标行（位于 conversation.composer.dock，显示轮步/速率/Token/命中率）完全不受影响。
- * 离开 QQ 会话切换到其他常规工作区会话时，自动返回 null 恢复原生输入框。
+ * 欢迎页（Hero）、NapCat 工作区内由 Web 端新建的普通会话、以及其他常规会话一律返回 null 恢复原生输入框。
  */
 export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element | null {
   const sessionId =
@@ -286,22 +274,7 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
       ? props.useConversation((c: any) => c?.sessionId ?? c?.id)
       : undefined);
 
-  const workspacesData =
-    typeof props?.useWorkspaces === 'function'
-      ? props.useWorkspaces((w: any) => w)
-      : undefined;
-
-  const workspaces = Array.isArray(workspacesData)
-    ? workspacesData
-    : workspacesData?.items;
-
-  const currentWorkspaceId = workspacesData?.current;
-
-  const isReadonly = isNapCatWorkspaceOrSession({
-    sessionId,
-    currentWorkspaceId,
-    workspaces,
-  });
+  const isReadonly = isNapCatWorkspaceOrSession({ sessionId });
 
   if (!isReadonly) {
     return null;
@@ -311,6 +284,9 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
     <style
       data-dsh-napcat="hide-composer"
       dangerouslySetInnerHTML={{
+        // 此处刻意不加 body[data-dsh-napcat-readonly="true"] 前缀（局部样式不带作用域）：
+        // 组件本身只在 QQ 会话渲染、其余会话返回 null，因此该前提已由渲染条件保证；
+        // 若后续改为无条件渲染，必须改回带 body 属性前缀的双重互锁写法（见 f8ea52d）。
         __html: `
 [data-composer-card] {
   display: none !important;
@@ -325,25 +301,15 @@ export function apply(ctx: any) {
   // 1. 客户端预热注入只读样式表
   ensureReadonlyStyle();
 
-  // 2. 监听 sessions 与 workspaces 响应式 Store
+  // 2. 监听 sessions 响应式 Store（只读判定仅依赖当前会话 ID）
   const sessions = ctx.get ? ctx.get('sessions') : ctx.sessions;
-  const workspaces = ctx.get ? ctx.get('workspaces') : ctx.workspaces;
 
   const updateReadonly = () => {
     try {
       const sessionsSnap = sessions?.list?.getSnapshot?.() ?? sessions?.getSnapshot?.();
-      const workspacesSnap = workspaces?.list?.getSnapshot?.() ?? workspaces?.getSnapshot?.();
-
       const currentSessionId = sessionsSnap?.current;
-      const currentWorkspaceId = workspacesSnap?.current;
-      const workspaceItems =
-        workspacesSnap?.items ?? (Array.isArray(workspacesSnap) ? workspacesSnap : undefined);
 
-      const isReadonly = isNapCatWorkspaceOrSession({
-        sessionId: currentSessionId,
-        currentWorkspaceId,
-        workspaces: workspaceItems,
-      });
+      const isReadonly = isNapCatWorkspaceOrSession({ sessionId: currentSessionId });
 
       syncReadonlyAttribute(isReadonly);
     } catch {
@@ -361,7 +327,6 @@ export function apply(ctx: any) {
   };
 
   let unsubSessions: (() => void) | undefined;
-  let unsubWorkspaces: (() => void) | undefined;
 
   if (sessions?.list) {
     unsubSessions = subscribeList(sessions.list);
@@ -369,18 +334,11 @@ export function apply(ctx: any) {
     unsubSessions = subscribeList(sessions);
   }
 
-  if (workspaces?.list) {
-    unsubWorkspaces = subscribeList(workspaces.list);
-  } else if (workspaces) {
-    unsubWorkspaces = subscribeList(workspaces);
-  }
-
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => {
       updateReadonly();
       return () => {
         unsubSessions?.();
-        unsubWorkspaces?.();
         syncReadonlyAttribute(false);
       };
     }, 'dsh-napcat-bridge: sync readonly state');
