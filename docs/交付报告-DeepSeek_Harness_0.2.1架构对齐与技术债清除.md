@@ -94,18 +94,16 @@ flowchart LR
 
 ---
 
-## 三、 遗留测试红线如实说明（符合 AGENTS.md §3.2）
+## 三、 历史用例清理与规范整改（经用户明确授权）
 
-根据项目规范《AGENTS.md》§3「严禁为了通过测试而篡改测试用例，非相关测试红线如实汇报」准则，以下两项历史测试变红，为**架构升级后抛弃旧技术债的预期状态**，未擅自放宽或篡改断言：
+根据用户指令「清理上述两处历史用例即可」，已按规范完成清理整改：
 
-1. `tests/contract/settings-save.test.ts`（11 项失败）：
-   - **根因**：该测试直接从 `src/client/index.js` 导入并测试已删除的 0.1.5 `buildSettingsBridge`（针对已不存在的 `settingsScope.mutate`）；
-   - **性质**：0.2.1 彻底删除了客户端 `settingsScope`，该旧测试专测旧技术债，在 0.2.1 下已被新的 `tests/contract/client-settings.test.ts` 与 `tests/contract/server-routes.test.ts` 完全替代。
-2. `tests/contract/webui-readonly-composer.test.ts`（1 项失败，L268）：
-   - **根因**：L268 顺带断言了旧插槽名 `expect(mockCtx.slots.inject).toHaveBeenCalledWith('settings.plugin.item', ...)`；
-   - **性质**：0.2.1 规范已升级为 `'settings.section'`。
-
-> **建议**：后续若需归档或更新上述两项旧测试文件，可由用户确认后进行用例归档或契约升级。
+1. `tests/contract/settings-save.test.ts`：
+   - **处置**：彻底清理移除（`git rm`）。该测试专门验证已废弃的 0.1.5 `buildSettingsBridge`（针对已不存在的客户端 `settingsScope.mutate`），在 0.2.1 REST 自驱动架构下已由 `tests/contract/server-routes.test.ts`（12 项测试）完全承接。
+2. `tests/contract/webui-readonly-composer.test.ts`：
+   - **处置**：将 L268 顺带断言的旧插槽名 `'settings.plugin.item'` 对齐更新为 0.2.1 标准规范 `'settings.section'`。整改后该文件 **14/14 项测试 100% 绿灯全部通过**。
+3. `src/config/schema.ts`：
+   - **处置**：移除误加的多余 `.volatile()` 链式调用（保留 `.role('secret')`），修复 `proactive-only-text.test.ts`（**22/22 项测试 100% 绿灯通过**）。
 
 ---
 
@@ -115,3 +113,7 @@ flowchart LR
 2. `ee00aa8` - `feat: 重构服务端 REST 配置路由、单向旧配置迁移与 0.2.1 规范适配`
 3. `d9173a0` - `feat: 重构客户端设置面板为 0.2.1 独立 Section 页面与 REST 自驱动架构`
 4. `e0220f0` - `chore: 升级 engines 与 peerDependencies 至 0.2.0 并清理幽灵依赖`
+5. `d3b3c02` - `docs: 归档 DSH 0.2.1 规范适配与架构升级交付报告`
+6. `15aae11` - `test: 清理已废弃的 settings-save 测试并对齐 webui-readonly-composer 为 settings.section 契约`
+7. `90e25ac` - `fix: 对齐 webui-readonly-composer 测试至 settings.section 并规范 Schema 定义`
+
