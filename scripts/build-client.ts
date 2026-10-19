@@ -43,7 +43,7 @@ async function buildClientBundle() {
   // Wrap in DSH lazy-CJS module loader format
   const wrappedBundle = [
     'window.__ModuleLoader__.load({',
-    '  id: "dsh-napcat-bridge/client",',
+    '  id: "dsh-napcat-bridge",',
     '  factory: (require) => {',
     '    var module = { exports: {} };',
     '    var exports = module.exports;',

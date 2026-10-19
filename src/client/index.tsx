@@ -4,183 +4,13 @@
  */
 
 import React from 'react';
-import { NapCatSettingsCard } from './card.js';
-import { SETTINGS_NAMESPACE } from '../constants/index.js';
+import { NapCatSettingsSection, NapCatSettingsCard } from './card.js';
 
-export const name = 'dsh-napcat-bridge/client';
-export const inject = ['slots', 'connection', 'settingsScope', 'sessions'];
+export const name = 'dsh-napcat-bridge';
+export const inject = ['slots', 'sessions'];
 
 export const READONLY_STYLE_ID = 'dsh-napcat-readonly-style';
 export const READONLY_BODY_ATTR = 'data-dsh-napcat-readonly';
-
-/**
- * Build the card props bridge for one settings namespace.
- */
-export function buildSettingsBridge(ctx: any, namespace: string = SETTINGS_NAMESPACE) {
-  const describe = ctx.settingsScope?.describe?.() ?? null;
-  const scope = ctx.settingsScope?.bind?.({ namespace }) ?? null;
-
-  const readNamespace = () => {
-    const view = describe?.getSnapshot?.().view;
-    const row = view?.namespaces?.find((n: any) => n.ns === namespace);
-    if (row) return row;
-    const scopeSnap = scope?.getSnapshot?.();
-    if (scopeSnap && scopeSnap.status !== 'unavailable') {
-      return {
-        value: scopeSnap.value ?? scopeSnap.user,
-        revision: scopeSnap.revision,
-        base: scopeSnap.base,
-      };
-    }
-    return undefined;
-  };
-
-  return {
-    get initialConfig() {
-      return readNamespace()?.value ?? {};
-    },
-    get revision() {
-      return readNamespace()?.revision ?? 0;
-    },
-    get baseDefaults() {
-      return readNamespace()?.base ?? {};
-    },
-    get hasSecret() {
-      return false;
-    },
-    onSaveSettings: async (
-      values: Record<string, unknown>,
-      options: { expectedRevision: number }
-    ) => {
-      const targetScope = scope ?? ctx.settingsScope?.bind?.({ namespace }) ?? ctx.settingsScope;
-      if (!targetScope?.mutate) throw new Error('settings API 不可用');
-
-      const ops = Object.entries(values ?? {}).map(([field, value]) => ({
-        op: 'set' as const,
-        path: [field],
-        value,
-      }));
-
-      const latestRow = readNamespace();
-      const expectedRevision =
-        latestRow?.revision !== undefined ? latestRow.revision : options.expectedRevision;
-
-      let res: any;
-      try {
-        res = await targetScope.mutate(ops, expectedRevision);
-      } catch (err: any) {
-        const errMsg = String(err?.message || '');
-        if (
-          errMsg.includes('changed since it was read') ||
-          errMsg.includes('SETTINGS_CONFLICT') ||
-          errMsg.includes('expected revision') ||
-          errMsg.includes('conflict') ||
-          err?.code === 'SETTINGS_CONFLICT'
-        ) {
-          const freshRow = readNamespace();
-          const freshRev = freshRow?.revision ?? targetScope.getSnapshot?.().revision;
-          if (freshRev !== undefined && freshRev !== expectedRevision) {
-            res = await targetScope.mutate(ops, freshRev);
-            if (res && typeof res === 'object') {
-              const retryOk = res.ok ?? res.result?.ok;
-              if (retryOk === false) {
-                const retryErr = res.error || res.result?.error;
-                throw new Error(retryErr?.message || 'settings.mutate 重试被拒绝');
-              }
-              return {
-                revision:
-                  res.value?.revision ?? res.result?.value?.revision ?? readNamespace()?.revision,
-              };
-            }
-            const afterRetryRow = readNamespace();
-            return { revision: afterRetryRow?.revision ?? targetScope.getSnapshot?.().revision };
-          }
-        }
-        throw err;
-      }
-
-      // 1. If res returned an object (e.g. mock or RPC response)
-      if (res && typeof res === 'object') {
-        const isOk = res.ok ?? res.result?.ok;
-        if (isOk === false) {
-          const errMsg = String(res.error?.message || res.result?.error?.message || '');
-          const isConflict =
-            errMsg.includes('changed since it was read') ||
-            errMsg.includes('SETTINGS_CONFLICT') ||
-            errMsg.includes('expected revision') ||
-            errMsg.includes('conflict') ||
-            res.error?.code === 'SETTINGS_CONFLICT' ||
-            res.result?.error?.code === 'SETTINGS_CONFLICT';
-
-          if (isConflict || res.ok === false) {
-            const freshRow = readNamespace();
-            const freshRev = freshRow?.revision ?? targetScope.getSnapshot?.().revision;
-            if (freshRev !== undefined && freshRev !== expectedRevision) {
-              res = await targetScope.mutate(ops, freshRev);
-            }
-          }
-        }
-
-        const finalOk = res.ok ?? res.result?.ok;
-        if (finalOk === false) {
-          const err = res.error || res.result?.error;
-          throw new Error(err?.message || 'settings.mutate 被拒绝');
-        }
-
-        const finalRev =
-          res.value?.revision ?? res.result?.value?.revision ?? readNamespace()?.revision;
-        return { revision: finalRev };
-      }
-
-      // 2. If res is undefined (official SettingsScopeController returns void)
-      const afterRow = readNamespace();
-      const afterRevision = afterRow?.revision ?? targetScope.getSnapshot?.().revision;
-
-      if (afterRevision !== undefined && afterRevision > expectedRevision) {
-        return { revision: afterRevision };
-      }
-
-      // Check if values landed
-      const currentValues = afterRow?.value ?? targetScope.getSnapshot?.().value;
-      const valuesLanded = Object.entries(values ?? {}).every(([k, v]) => {
-        return JSON.stringify(currentValues?.[k]) === JSON.stringify(v);
-      });
-
-      if (valuesLanded) {
-        return { revision: afterRevision };
-      }
-
-      // Values didn't land -> check if recover() reloaded a fresher revision
-      if (afterRevision !== undefined && afterRevision !== expectedRevision) {
-        const retryRes = await targetScope.mutate(ops, afterRevision);
-        if (retryRes && typeof retryRes === 'object') {
-          if (retryRes.ok ?? retryRes.result?.ok) {
-            return {
-              revision:
-                retryRes.value?.revision ??
-                retryRes.result?.value?.revision ??
-                readNamespace()?.revision,
-            };
-          }
-          throw new Error(
-            retryRes.error?.message || retryRes.result?.error?.message || 'settings.mutate 重试被拒绝'
-          );
-        }
-        const retryRow = readNamespace();
-        const retryRev = retryRow?.revision ?? targetScope.getSnapshot?.().revision;
-        const retryValues = retryRow?.value ?? targetScope.getSnapshot?.().value;
-        const retryLanded = Object.entries(values ?? {}).every(([k, v]) => {
-          return JSON.stringify(retryValues?.[k]) === JSON.stringify(v);
-        });
-        if (retryLanded || (retryRev !== undefined && retryRev > afterRevision)) {
-          return { revision: retryRev };
-        }
-      }
-
-      throw new Error('settings.mutate 被拒绝或保存冲突');
-    },
-  };
-}
 
 export interface IsNapCatOptions {
   sessionId?: string;
@@ -346,15 +176,18 @@ export function apply(ctx: any) {
 
   if (!ctx?.slots?.inject) return;
 
-  // 3. 注册设置卡片
-  ctx.slots.inject('settings.plugin.item', function* () {
+  // 3. 注册 0.2.1 规范侧边栏独立设置板块 (settings.section)
+  ctx.slots.inject('settings.section', function* () {
     yield ctx.slots.register(
       {
-        name: 'settings.plugin.item',
-        key: 'dsh-napcat-bridge',
-        inject: () => buildSettingsBridge(ctx, SETTINGS_NAMESPACE),
+        name: 'settings.section',
+        id: 'napcat',
+        order: 55,
+        locale: 'dsh-napcat-bridge',
+        label: () => 'QQ NapCat',
+        inject: () => ({}),
       },
-      NapCatSettingsCard
+      NapCatSettingsSection
     );
   });
 
@@ -372,5 +205,6 @@ export function apply(ctx: any) {
   });
 }
 
-export { NapCatSettingsCard };
+export { NapCatSettingsSection, NapCatSettingsCard };
+
 

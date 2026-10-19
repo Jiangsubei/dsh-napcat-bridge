@@ -55,6 +55,12 @@ const NAPCAT_CARD_CSS = `
 .napcat_tab:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-1px}
 .napcat_tabPanel{display:flex;flex-direction:column}
 .napcat_tabPanelHidden{display:none !important}
+.napcat_section{display:flex;flex-direction:column;width:100%;min-height:0;flex:1;padding:4px 0 24px;box-sizing:border-box}
+.napcat_sectionHead{margin-bottom:16px;display:flex;flex-direction:column;gap:6px}
+.napcat_sectionTitleRow{display:flex;align-items:center;gap:12px}
+.napcat_sectionTitle{color:var(--dsw-alias-label-primary);font-size:20px;font-weight:600;line-height:1.4;margin:0}
+.napcat_sectionDescription{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5;margin:0}
+.napcat_sectionBody{display:flex;flex-direction:column;flex:1}
 `;
 
 export function injectCardStyles(): void {
@@ -87,6 +93,25 @@ export const cardStyle = {
   failed: 'napcat_failed',
   discard: 'napcat_discard',
   save: 'napcat_save',
+};
+
+export const sectionStyle = {
+  section: 'napcat_section',
+  head: 'napcat_sectionHead',
+  titleRow: 'napcat_sectionTitleRow',
+  title: 'napcat_sectionTitle',
+  description: 'napcat_sectionDescription',
+  body: 'napcat_sectionBody',
+  tabBar: 'napcat_tabBar',
+  tab: 'napcat_tab',
+  tabActive: 'napcat_tabActive',
+  tabPanel: 'napcat_tabPanel',
+  tabPanelHidden: 'napcat_tabPanelHidden',
+  footer: 'napcat_footer',
+  failed: 'napcat_failed',
+  discard: 'napcat_discard',
+  save: 'napcat_save',
+  badgePending: 'napcat_badgePending',
 };
 
 export const fieldStyle = {
