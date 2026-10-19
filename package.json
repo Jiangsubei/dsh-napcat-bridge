@@ -101,7 +101,7 @@
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
     "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
     "@deepseek-ai/dsh-user-questions": "0.1.5-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/schemastery": "^3.18.5",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.0",
     "@types/react": "^19.2.18",
