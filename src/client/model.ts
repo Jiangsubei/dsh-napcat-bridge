@@ -27,6 +27,19 @@ export class NapCatFormModel {
     this.baseDefaults = { ...options.baseDefaults };
   }
 
+  setInitialValues(values: Partial<BridgePluginConfig>) {
+    this.initialValues = { ...values };
+    this.draft = { ...values };
+  }
+
+  setBaseDefaults(defaults: Partial<BridgePluginConfig>) {
+    this.baseDefaults = { ...defaults };
+  }
+
+  markClean() {
+    this.initialValues = { ...this.draft };
+  }
+
   setRevision(revision: number) {
     this.revision = revision;
   }
