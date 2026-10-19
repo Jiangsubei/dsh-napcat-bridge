@@ -1,10 +1,26 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives';
+import * as DshPrimitives from '@deepseek-ai/dsh-client-ui-primitives';
 import { NapCatFormModel, SettingsConflictError } from './model.js';
 import { ValueField, TextAreaField, SwitchField } from './fields.js';
-import { cardStyle, injectCardStyles } from './card-styles.js';
+import { cardStyle, sectionStyle, injectCardStyles } from './card-styles.js';
 import type { BridgePluginConfig } from '../types/index.js';
 import { DEFAULT_WS_PORT } from '../constants/index.js';
+
+function resolveChevronDownIcon(): React.ComponentType<{ className?: string }> {
+  try {
+    const P = DshPrimitives as any;
+    if (typeof P?.IconChevronDownOutlineMedium === 'function') return P.IconChevronDownOutlineMedium;
+    if (typeof P?.IconChevronDownOutlineRegular === 'function') return P.IconChevronDownOutlineRegular;
+    if (typeof P?.IconChevronDownOutline14 === 'function') return P.IconChevronDownOutline14;
+  } catch {
+    // ignore
+  }
+  return () => null;
+}
+
+const SafeIconChevronDown: React.ComponentType<{ className?: string }> = resolveChevronDownIcon();
+
+export { DEFAULT_BASE_CONFIG };
 
 export type SettingsTabId = 'connection' | 'reply' | 'persona' | 'proactive' | 'memory';
 
@@ -39,6 +55,7 @@ export interface CardController {
 }
 
 export interface CardProps {
+  layoutMode?: 'card' | 'section';
   initialConfig?: Partial<BridgePluginConfig>;
   hasSecret?: boolean;
   revision?: number;
@@ -99,7 +116,15 @@ function parseStringToArray(str: string): string[] {
 
 export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   injectCardStyles();
-  const [expanded, setExpanded] = useState(props.initialExpanded ?? false);
+  const isSection = props.layoutMode === 'section';
+  const [expandedState, setExpandedState] = useState(props.initialExpanded ?? false);
+  const expanded = isSection ? true : expandedState;
+  const setExpanded = useCallback(
+    (exp: boolean) => {
+      if (!isSection) setExpandedState(exp);
+    },
+    [isSection]
+  );
   const [activeTabState, setActiveTabState] = useState<SettingsTabId>(
     props.initialTab ?? 'connection'
   );
@@ -156,6 +181,52 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     setRerenderKey((k) => k + 1);
   }, []);
 
+  const isExternalControlled = Boolean(
+    (props.initialConfig && Object.keys(props.initialConfig).length > 0) ||
+      props.onSaveSettings
+  );
+
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteLoadError, setRemoteLoadError] = useState<string | null>(null);
+  const [remoteHasSecret, setRemoteHasSecret] = useState(false);
+
+  const loadRemoteConfig = useCallback(async () => {
+    setRemoteLoading(true);
+    setRemoteLoadError(null);
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/config');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data?.ok) {
+        if (data.config) {
+          model.setInitialValues(data.config);
+          setAdminsInput(formatArrayToString(data.config.admins));
+          setAliasesInput(formatArrayToString(data.config.aliases));
+        }
+        if (data.baseDefaults) {
+          model.setBaseDefaults(data.baseDefaults);
+        }
+        setRemoteHasSecret(Boolean(data.hasSecret));
+        setRemoteLoaded(true);
+        forceUpdate();
+      } else {
+        throw new Error(data?.error || 'Failed to load configuration');
+      }
+    } catch (err: any) {
+      console.warn('[dsh-napcat-bridge] Failed to fetch remote config:', err);
+      setRemoteLoadError(err?.message || '加载配置失败');
+    } finally {
+      setRemoteLoading(false);
+    }
+  }, [model, forceUpdate]);
+
+  useEffect(() => {
+    if (!isExternalControlled && !remoteLoaded) {
+      void loadRemoteConfig();
+    }
+  }, [isExternalControlled, remoteLoaded, loadRemoteConfig]);
+
   const handleTabClick = (tabId: SettingsTabId) => {
     activeTabRef.current = tabId;
     setActiveTabState(tabId);
@@ -205,15 +276,34 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   };
 
   const handleSave = async () => {
-    if (!props.onSaveSettings) return;
     savingRef.current = true;
     setSaving(true);
     updateError(null);
 
     try {
-      await model.save({
-        saveSettings: props.onSaveSettings,
-      });
+      if (props.onSaveSettings) {
+        await model.save({
+          saveSettings: props.onSaveSettings,
+        });
+      } else {
+        const dirtyDraft = model.getDraft();
+        const res = await fetch('/plugins/dsh-napcat-bridge/config', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(dirtyDraft),
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!data?.ok) {
+          throw new Error(data?.error || '保存失败');
+        }
+        if (data.hasSecret !== undefined) {
+          setRemoteHasSecret(Boolean(data.hasSecret));
+        }
+        model.markClean();
+      }
       forceUpdate();
     } catch (err: any) {
       if (err instanceof SettingsConflictError || err?.code === 'SETTINGS_CONFLICT') {
@@ -230,6 +320,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const draft = model.getDraft();
   const isDirty = model.isDirty();
   const blocked = !isDirty || saving;
+  const hasSecret = Boolean(props.hasSecret ?? remoteHasSecret);
 
   const controller: CardController = {
     get activeTab() {
@@ -269,93 +360,73 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
     }
   }
 
-  return (
-    <div
-      className={[cardStyle.card, expanded ? cardStyle.cardOpen : ''].filter(Boolean).join(' ')}
-      data-testid="napcat-bridge-card"
-    >
-      <button
-        type="button"
-        className={cardStyle.header}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? '收起' : '展开'}: QQ 机器人桥接 (dsh-napcat-bridge)`}
-        onClick={() => setExpanded(!expanded)}
+  const formContent = (
+    <>
+      <div className={cardStyle.tabBar} role="tablist" aria-label="设置分区">
+        {SETTINGS_TABS.map((tab) => {
+          const isSelected = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`napcat-tab-${tab.id}`}
+              data-testid={`napcat-tab-${tab.id}`}
+              aria-selected={isSelected}
+              aria-controls={`napcat-tabpanel-${tab.id}`}
+              tabIndex={isSelected ? 0 : -1}
+              className={[
+                cardStyle.tab,
+                isSelected ? cardStyle.tabActive : '',
+              ].filter(Boolean).join(' ')}
+              onClick={() => handleTabClick(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        id="napcat-tabpanel-connection"
+        data-testid="napcat-tabpanel-connection"
+        role="tabpanel"
+        aria-labelledby="napcat-tab-connection"
+        hidden={activeTab !== 'connection'}
+        className={[
+          cardStyle.tabPanel,
+          activeTab !== 'connection' ? cardStyle.tabPanelHidden : '',
+        ].filter(Boolean).join(' ')}
+        style={activeTab !== 'connection' ? { display: 'none' } : undefined}
       >
-        <span className={cardStyle.headText}>
-          <span className={cardStyle.name}>QQ 机器人桥接 (dsh-napcat-bridge)</span>
-          <span className={cardStyle.description}>
-            NapCat (OneBot 11) 反向 WebSocket 接入、消息入库、Agent 工具与群聊/私聊对话桥接
-          </span>
-        </span>
-        {isDirty && <span className={cardStyle.badgePending}>未保存修改</span>}
-        <IconChevronDownOutline14
-          className={[cardStyle.chevron, expanded ? cardStyle.chevronOpen : ''].filter(Boolean).join(' ')}
+        <ValueField
+          id="napcat-ws-port"
+          label="WebSocket 监听端口 (ws_port)"
+          hint="NapCat 连接的反向 WebSocket 服务端端口 (默认 8080)"
+          placeholder="8080"
+          numeric
+          value={String(draft.ws_port ?? DEFAULT_WS_PORT)}
+          disabled={saving}
+          overridden={model.isOverridden('ws_port')}
+          onReset={() => handleResetField('ws_port')}
+          onChange={(val) => handleFieldChange('ws_port', parseInt(val, 10) || DEFAULT_WS_PORT)}
         />
-      </button>
 
-      {expanded && (
-        <div className={cardStyle.body}>
-          <div className={cardStyle.tabBar} role="tablist" aria-label="设置分区">
-            {SETTINGS_TABS.map((tab) => {
-              const isSelected = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  id={`napcat-tab-${tab.id}`}
-                  data-testid={`napcat-tab-${tab.id}`}
-                  aria-selected={isSelected}
-                  aria-controls={`napcat-tabpanel-${tab.id}`}
-                  tabIndex={isSelected ? 0 : -1}
-                  className={[
-                    cardStyle.tab,
-                    isSelected ? cardStyle.tabActive : '',
-                  ].filter(Boolean).join(' ')}
-                  onClick={() => handleTabClick(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div
-            id="napcat-tabpanel-connection"
-            data-testid="napcat-tabpanel-connection"
-            role="tabpanel"
-            aria-labelledby="napcat-tab-connection"
-            hidden={activeTab !== 'connection'}
-            className={[
-              cardStyle.tabPanel,
-              activeTab !== 'connection' ? cardStyle.tabPanelHidden : '',
-            ].filter(Boolean).join(' ')}
-            style={activeTab !== 'connection' ? { display: 'none' } : undefined}
-          >
-            <ValueField
-            id="napcat-ws-port"
-            label="WebSocket 监听端口 (ws_port)"
-            hint="NapCat 连接的反向 WebSocket 服务端端口 (默认 8080)"
-            placeholder="8080"
-            numeric
-            value={String(draft.ws_port ?? DEFAULT_WS_PORT)}
-            disabled={saving}
-            overridden={model.isOverridden('ws_port')}
-            onReset={() => handleResetField('ws_port')}
-            onChange={(val) => handleFieldChange('ws_port', parseInt(val, 10) || DEFAULT_WS_PORT)}
-          />
-
-          <ValueField
-            id="napcat-ws-token"
-            label="WebSocket 鉴权 Token (ws_token)"
-            hint="NapCat 请求 Authorization 头 Bearer Token 鉴权 (可选)"
-            placeholder="留空不鉴权"
-            value={draft.ws_token || ''}
-            disabled={saving}
-            overridden={model.isOverridden('ws_token')}
-            onReset={() => handleResetField('ws_token')}
-            onChange={(val) => handleFieldChange('ws_token', val)}
-          />
+        <ValueField
+          id="napcat-ws-token"
+          label="WebSocket 鉴权 Token (ws_token)"
+          hint={
+            hasSecret
+              ? '当前已配置鉴权 Token；留空保存将保留现有 Token，输入新值将覆盖更新'
+              : 'NapCat 请求 Authorization 头 Bearer Token 鉴权 (可选)'
+          }
+          placeholder={hasSecret ? '已配置（已脱敏，留空保持不变）' : '留空不鉴权'}
+          value={draft.ws_token || ''}
+          disabled={saving}
+          overridden={model.isOverridden('ws_token')}
+          onReset={() => handleResetField('ws_token')}
+          onChange={(val) => handleFieldChange('ws_token', val)}
+        />
 
           <ValueField
             id="napcat-bot-qq"
@@ -688,33 +759,132 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('review_model')}
             onChange={(val) => handleFieldChange('review_model', val)}
           />
-          </div>
+        </div>
 
-          <div className={cardStyle.footer}>
-            {errorMessage && (
-              <p className={cardStyle.failed} role="alert">
-                {errorMessage}
-              </p>
-            )}
-            <button
-              type="button"
-              className={cardStyle.discard}
-              disabled={blocked}
-              onClick={handleDiscard}
-            >
-              放弃修改
-            </button>
-            <button
-              type="button"
-              className={cardStyle.save}
-              disabled={blocked}
-              onClick={handleSave}
-            >
-              {saving ? '保存中...' : '保存更改'}
-            </button>
+        <div className={cardStyle.footer}>
+          {errorMessage && (
+            <p className={cardStyle.failed} role="alert">
+              {errorMessage}
+            </p>
+          )}
+          <button
+            type="button"
+            className={cardStyle.discard}
+            disabled={blocked}
+            onClick={handleDiscard}
+          >
+            放弃修改
+          </button>
+          <button
+            type="button"
+            className={cardStyle.save}
+            disabled={blocked}
+            onClick={handleSave}
+          >
+            {saving ? '保存中...' : '保存更改'}
+          </button>
+        </div>
+    </>
+  );
+
+  if (isSection) {
+    return (
+      <div className={sectionStyle.section} data-testid="napcat-bridge-section">
+        <div className={sectionStyle.head}>
+          <div className={sectionStyle.titleRow}>
+            <h2 className={sectionStyle.title}>QQ NapCat 机器人配置</h2>
+            {isDirty && <span className={sectionStyle.badgePending}>未保存修改</span>}
+            {remoteLoading && <span className={sectionStyle.badgePending}>加载中...</span>}
           </div>
+          <p className={sectionStyle.description}>
+            NapCat (OneBot 11) 反向 WebSocket 接入、消息入库、Agent 工具与群聊/私聊对话桥接
+          </p>
+          {remoteLoadError && (
+            <p className={cardStyle.failed} role="alert">
+              配置加载异常：{remoteLoadError}
+            </p>
+          )}
+        </div>
+
+        <div className={sectionStyle.body}>
+          {formContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={[cardStyle.card, expanded ? cardStyle.cardOpen : ''].filter(Boolean).join(' ')}
+      data-testid="napcat-bridge-card"
+    >
+      <button
+        type="button"
+        className={cardStyle.header}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? '收起' : '展开'}: QQ 机器人桥接 (dsh-napcat-bridge)`}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={cardStyle.headText}>
+          <span className={cardStyle.name}>QQ 机器人桥接 (dsh-napcat-bridge)</span>
+          <span className={cardStyle.description}>
+            NapCat (OneBot 11) 反向 WebSocket 接入、消息入库、Agent 工具与群聊/私聊对话桥接
+          </span>
+        </span>
+        {isDirty && <span className={cardStyle.badgePending}>未保存修改</span>}
+        <SafeIconChevronDown
+          className={[cardStyle.chevron, expanded ? cardStyle.chevronOpen : ''].filter(Boolean).join(' ')}
+        />
+      </button>
+
+      {expanded && (
+        <div className={cardStyle.body}>
+          {formContent}
         </div>
       )}
     </div>
   );
 }
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class SectionErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[dsh-napcat-bridge] Section render error:', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '24px', color: '#ff6b6b' }}>
+          <h3>QQ NapCat 设置加载异常</h3>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px' }}>
+            {this.state.error?.stack || this.state.error?.message || String(this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function NapCatSettingsSection(props: CardProps): React.JSX.Element {
+  return (
+    <SectionErrorBoundary>
+      <NapCatSettingsCard {...props} layoutMode="section" initialExpanded={true} />
+    </SectionErrorBoundary>
+  );
+}
+
