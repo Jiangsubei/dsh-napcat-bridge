@@ -5,7 +5,14 @@
 
 import * as path from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
-import { PLUGIN_NAME, SETTINGS_NAMESPACE, DEFAULT_WS_PORT, DEFAULT_MEMORY_DIR } from './constants/index.js';
+import {
+  PLUGIN_NAME,
+  SETTINGS_NAMESPACE,
+  DEFAULT_WS_PORT,
+  DEFAULT_MEMORY_DIR,
+  DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
+  DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
+} from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
 import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
@@ -25,6 +32,9 @@ import { isSlashCommand, handleSlashCommand } from './commands/index.js';
 import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
 
+import { registerConfigRoute } from './server/routes.js';
+import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
+
 export * from './memory/index.js';
 
 
@@ -34,9 +44,66 @@ export const Config = BridgeConfigSchema;
 
 export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const logger = ctx.logger ? ctx.logger(PLUGIN_NAME) : console;
-  let currentConfig = () => {
-    const raw = (ctx as any).get('settings')?.get?.(SETTINGS_NAMESPACE);
-    return { ...config, ...(raw || {}) };
+  const dshHome = path.resolve(
+    process.env.DSH_HOME || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.dsh')
+  );
+
+  const extractConfig = (cfg: unknown): BridgePluginConfig => {
+    if (!cfg || typeof cfg !== 'object') return {};
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(cfg as Record<string, unknown>)) {
+      if (val && typeof val === 'object' && typeof (val as { get?: unknown }).get === 'function') {
+        out[key] = (val as { get: () => unknown }).get();
+      } else {
+        out[key] = val;
+      }
+    }
+    return out as BridgePluginConfig;
+  };
+
+  const readSettingsConfig = (): BridgePluginConfig => {
+    const settingsService = (ctx as any).get?.('settings');
+    if (!settingsService) return {};
+    try {
+      if (typeof settingsService.get === 'function') {
+        const val = settingsService.get(SETTINGS_NAMESPACE);
+        if (val && typeof val === 'object') return val;
+      }
+      if (typeof settingsService.describe === 'function') {
+        const desc = settingsService.describe().find(
+          (d: any) => d.ns === SETTINGS_NAMESPACE || d.id === SETTINGS_NAMESPACE
+        );
+        if (desc?.value) return desc.value as BridgePluginConfig;
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  };
+
+  const mergeConfigs = (base: BridgePluginConfig, overrides: BridgePluginConfig): BridgePluginConfig => {
+    const result: Record<string, unknown> = { ...base };
+    for (const [key, val] of Object.entries(overrides)) {
+      if (val !== undefined && val !== '') {
+        result[key] = val;
+      } else if (result[key] === undefined) {
+        result[key] = val;
+      }
+    }
+    return result as BridgePluginConfig;
+  };
+
+  const currentConfig = (): BridgePluginConfig => {
+    const fromSettings = readSettingsConfig();
+    const fromArgs = extractConfig(config);
+    let merged = mergeConfigs(fromSettings, fromArgs);
+    if (!fromSettings.bot_qq && !fromSettings.ws_token) {
+      const legacy = readLegacyConfig(dshHome);
+      if (legacy) {
+        merged = mergeConfigs(legacy, merged);
+      }
+    }
+    return merged;
   };
 
   // B6: bot_qq 为 Spec 必填项 (Spec §8.2 / §1.1)；缺失时明确告警，避免自循环防护静默降级
@@ -57,6 +124,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const waitRegistry = new MessageWaitRegistry();
 
   let memoryService: any = null;
+  let isDisposed = false;
 
   // C2: Notice 事件 (group_upload / poke) 无真实 message_id 时的稳定正数主键策略
   //     FNV-1a 32-bit，避免 -Date.now() 负数假 id 在极高并发下撞主键
@@ -76,42 +144,78 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger,
   });
 
-  (ctx as any).inject(['settings'], (settingsCtx: any) => {
-    settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, BridgeConfigSchema, config, {
-      setSource: (source: () => BridgePluginConfig) => {
-        currentConfig = () => {
-          const raw = source();
-          return { ...config, ...(raw || {}) };
-        };
-      },
-      onChange: async () => {
-        const active = currentConfig();
-        logger.info?.('dsh-napcat-bridge 配置已更新:', active);
+  // 声明自定义设置卡片，跳过官方粗糙默认表单 (DSH 0.2.1 规范)
+  (ctx as any).inject(['settings'], (s: any) => (s as any).settings?.configure?.({ auto: false }, ctx.fiber));
 
-        const targetPort = active.ws_port || DEFAULT_WS_PORT;
-        const targetToken = active.ws_token || '';
+  // Reconciler 状态机：配置变更时对齐运行状态
+  const reconcile = async (forcedConfig?: BridgePluginConfig): Promise<void> => {
+    if (isDisposed) return;
+    const active = forcedConfig
+      ? { ...currentConfig(), ...extractConfig(forcedConfig) }
+      : currentConfig();
 
-        if (server.options.port !== targetPort || (server.options.token || '') !== targetToken) {
-          logger.info?.(`[Plugin] 检测到 WS 端口/Token 变更 (${server.options.port} -> ${targetPort})，正在热重启 WS 服务端...`);
-          try {
-            await server.restart({
-              port: targetPort,
-              token: targetToken,
-            });
-            logger.info?.(`[Plugin] WS 服务端热重启成功，正在监听端口 ${targetPort}`);
-          } catch (err) {
-            logger.error?.('[Plugin] WS 服务端热重启失败:', err);
-          }
-        }
+    logger.info?.('[Plugin] 对齐并应用最新配置:', active);
 
-        if (active.memory_storage_dir) {
-          const updatedMemoryDir = resolveDshPath(dshHome, active.memory_storage_dir, DEFAULT_MEMORY_DIR);
-          if (memoryService?.storage && memoryService.storage.getBaseDir() !== updatedMemoryDir) {
-            memoryService.storage.setBaseDir(updatedMemoryDir, dshHome);
-          }
-        }
-      },
-    });
+    const targetPort = active.ws_port || DEFAULT_WS_PORT;
+    const targetToken = active.ws_token || '';
+
+    if (server.options.port !== targetPort || (server.options.token || '') !== targetToken) {
+      logger.info?.(`[Plugin] 检测到 WS 端口/Token 变更 (${server.options.port} -> ${targetPort})，正在热重启 WS 服务端...`);
+      try {
+        await server.restart({
+          port: targetPort,
+          token: targetToken,
+        });
+        logger.info?.(`[Plugin] WS 服务端热重启成功，正在监听端口 ${targetPort}`);
+      } catch (err) {
+        logger.error?.('[Plugin] WS 服务端热重启失败:', err);
+      }
+    }
+
+    if (active.memory_storage_dir) {
+      const updatedMemoryDir = resolveDshPath(dshHome, active.memory_storage_dir, DEFAULT_MEMORY_DIR);
+      if (memoryService?.storage && memoryService.storage.getBaseDir() !== updatedMemoryDir) {
+        memoryService.storage.setBaseDir(updatedMemoryDir, dshHome);
+      }
+    }
+  };
+
+  let reconcileRunning = false;
+  let hasPendingReconcile = false;
+  let pendingConfig: BridgePluginConfig | undefined = undefined;
+
+  const queueReconcile = async (newVal?: BridgePluginConfig): Promise<void> => {
+    if (newVal) pendingConfig = newVal;
+    hasPendingReconcile = true;
+    if (reconcileRunning) return;
+    reconcileRunning = true;
+    try {
+      while (hasPendingReconcile) {
+        hasPendingReconcile = false;
+        const nextCfg = pendingConfig;
+        pendingConfig = undefined;
+        await reconcile(nextCfg);
+      }
+    } finally {
+      reconcileRunning = false;
+    }
+  };
+
+  // 挂载服务端配置 REST 路由
+  const unregisterConfigRoute = registerConfigRoute(ctx, currentConfig, queueReconcile);
+
+  // 监听 0.2.1 原生 volatile 配置热更新与 settings document-updated 事件
+  (ctx as any).on('loader/volatile-update', () => {
+    if (isDisposed) return;
+    logger.info?.('[Plugin] 收到 loader/volatile-update 事件，正在对齐运行状态...');
+    void queueReconcile();
+  });
+  (ctx as any).on('settings/document-updated', (ns: string) => {
+    if (isDisposed) return;
+    if (!ns || ns === SETTINGS_NAMESPACE) {
+      logger.info?.('[Plugin] 收到 settings/document-updated 事件，正在对齐运行状态...');
+      void queueReconcile();
+    }
   });
 
   // 立即按当前有效配置启动 WebSocket 服务端
@@ -140,9 +244,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   );
 
   // 3. 初始化存储、媒体管理器与会话管理器
-  const dshHome = path.resolve(
-    process.env.DSH_HOME || path.join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.dsh')
-  );
   const dbPath = path.resolve(dshHome, 'workspace/napcat/messages.sqlite');
   const db = new MessageDatabase(dbPath);
   db.init();
@@ -193,10 +294,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     privateBudgetChars: currentConfig().private_memory_budget_chars,
     getGroupBudgetChars: () =>
       currentConfig().group_memory_budget_chars ??
-      currentConfig().memory_budget_chars,
+      currentConfig().memory_budget_chars ??
+      DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
     getPrivateBudgetChars: () =>
       currentConfig().private_memory_budget_chars ??
-      currentConfig().memory_budget_chars,
+      currentConfig().memory_budget_chars ??
+      DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
     reviewEnabled: currentConfig().review_enabled,
     reviewTurnsInterval: currentConfig().review_turns_interval,
     reviewToolCallsInterval: currentConfig().review_tool_calls_interval,
@@ -1028,6 +1131,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }));
   };
 
+  (ctx as any).on('ready', () => {
+    void migrateLegacyConfig(ctx, currentConfig());
+  });
   (ctx as any).on('ready', startServer);
   // 若插件在 ready 事件后挂载（如动态加载/装配运行时），自动触发 startServer
   startServer().catch(() => {});
@@ -1040,6 +1146,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   process.once('beforeExit', onProcessExit);
 
   (ctx as any).on('dispose', async () => {
+    isDisposed = true;
+    try {
+      unregisterConfigRoute();
+    } catch {
+      // ignore
+    }
     logger.info?.(`${PLUGIN_NAME} 插件正在卸载`);
     process.removeListener('SIGINT', onProcessExit);
     process.removeListener('SIGTERM', onProcessExit);
