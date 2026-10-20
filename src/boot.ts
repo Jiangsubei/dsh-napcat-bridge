@@ -102,18 +102,8 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
   const storagesDir = path.join(dshHome, 'storages');
   await fsp.mkdir(storagesDir, { recursive: true });
 
-  const configPath = options.configPath || path.join(dshHome, 'settings.yaml');
-
   const defaultOverlays: any[] = [
     { id: 'hmr', disabled: true },
-    {
-      id: 'settings',
-      config: {
-        path: configPath,
-        dshHome,
-        watch: false,
-      },
-    },
     {
       id: 'credentials',
       config: {
