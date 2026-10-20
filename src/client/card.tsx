@@ -11,7 +11,6 @@ function resolveChevronDownIcon(): React.ComponentType<{ className?: string }> {
     const P = DshPrimitives as any;
     if (typeof P?.IconChevronDownOutlineMedium === 'function') return P.IconChevronDownOutlineMedium;
     if (typeof P?.IconChevronDownOutlineRegular === 'function') return P.IconChevronDownOutlineRegular;
-    if (typeof P?.IconChevronDownOutline14 === 'function') return P.IconChevronDownOutline14;
   } catch {
     // ignore
   }
@@ -879,7 +878,11 @@ class SectionErrorBoundary extends React.Component<{ children: React.ReactNode }
   }
 }
 
-export function NapCatSettingsSection(props: CardProps): React.JSX.Element {
+export interface SettingsSectionProps extends CardProps {
+  close?: () => void;
+}
+
+export function NapCatSettingsSection(props: SettingsSectionProps): React.JSX.Element {
   return (
     <SectionErrorBoundary>
       <NapCatSettingsCard {...props} layoutMode="section" initialExpanded={true} />

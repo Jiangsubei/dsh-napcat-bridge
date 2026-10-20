@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  IconChevronDownOutline14: () => null,
+  IconChevronDownOutlineRegular: () => null,
+  IconChevronDownOutlineMedium: () => null,
 }));
 
 import { BridgeConfigSchema } from '../../src/config/schema.js';
