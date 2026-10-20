@@ -42,7 +42,7 @@ export class RemoteError extends Error {
 }
 
 /**
- * DSH 0.1.5 文件级排他锁 (session.lock) 冲突异常
+ * DSH 0.2.x 文件级排他锁 (session.lock) 冲突异常
  */
 export class SessionAlreadyOwnedError extends Error {
   readonly sessionId: string;
@@ -74,14 +74,14 @@ export function parseSessionId(sessionId: string): ParsedSessionId | null {
   if (groupMatch) {
     const id = groupMatch[1];
     const round = groupMatch[2] ? parseInt(groupMatch[2], 10) : 0;
-    const version = groupMatch[3] ? parseInt(groupMatch[3], 10) : (round > 0 ? 1 : 1);
+    const version = groupMatch[3] ? parseInt(groupMatch[3], 10) : 1;
     return { peer: `group_${id}`, id, round, version, isGroup: true };
   }
   const userMatch = sessionId.match(/^qq-user-([0-9a-zA-Z_]+?)(?:-r(\d+))?(?:-(\d+))?$/);
   if (userMatch) {
     const id = userMatch[1];
     const round = userMatch[2] ? parseInt(userMatch[2], 10) : 0;
-    const version = userMatch[3] ? parseInt(userMatch[3], 10) : (round > 0 ? 1 : 1);
+    const version = userMatch[3] ? parseInt(userMatch[3], 10) : 1;
     return { peer: `user_${id}`, id, round, version, isGroup: false };
   }
   return null;
@@ -508,7 +508,8 @@ export class SessionManager {
   }
 
   /**
-   * 异步精确检查物理会话状态（优先利用 DSH 0.1.5 sessionPersistence.stat API）
+   * 异步精确检查物理会话状态（利用 DSH 0.2.x sessionPersistence.stat API）
+   * [D3 预留能力]: 保留供测试与外部模块引用
    */
   async isSessionPhysicallyPresentAsync(sessionId: string): Promise<boolean> {
     if (this.activeHandles.has(sessionId)) return true;
@@ -1026,11 +1027,11 @@ export class SessionManager {
     }
 
     // 2. 内存中已存在该会话的 live agent（可能由 Web UI 会话控制器等其它 owner 创建/持有）：
-    //    DSH 0.1.5 契约下 `ctx.agents.get(id)` 只返回 bare Agent —— AgentHandle { agent, dispose }
+    //    DSH 0.2.x 契约下 `ctx.agents.get(id)` 只返回 bare Agent —— AgentHandle { agent, dispose }
     //    仅暴露给创建它的 owner，插件无从取得、也无从"夺锁"。因此这里**只复用同一 agent**，
     //    让新消息经 agent.followup() 排队等待上一条回合结束后再开新回合（同 peer 串行，Spec §7.3）。
     //    ⚠️ 严禁抢占式 cancel：`Agent.cancel(cause)` 默认清空 inbox 并中断在途回合，
-    //    会在唤醒路径上直接打断上一条回复（详见 docs/根因分析-入站消息串行失效与0.1.5抢占取消_260914.md）。
+    //    会在唤醒路径上直接打断上一条回复。
     const existingAgent = agents?.get?.(sessionId as any);
     if (existingAgent && !this.isSessionArchived(sessionId)) {
       (existingAgent as any).modelSelection = selectionRef;
@@ -1133,7 +1134,7 @@ export class SessionManager {
             );
 
             // 纯退避重试：不再抢占在途回合（cancel）或拆解他方句柄（handle/scope.dispose）——
-            // 0.1.5 的 AgentHandle 仅暴露给创建者，且 cancel 会中断他人正在进行的回合；
+            // 0.2.x 的 AgentHandle 仅暴露给创建者，且 cancel 会中断他人正在进行的回合；
             // 锁被占用时只按退避重试，重试耗尽如实上报（见根因分析文档 2.3 / 3）。
             if (attempt < maxRetries - 1) {
               await new Promise((res) => setTimeout(res, delays[attempt]));

@@ -604,7 +604,7 @@ export class BackgroundReviewManager {
 
   /**
    * 物理删除已完成的 Review Session（用完即焚）
-   * 严格对齐 DSH 0.1.5 销毁时序：内核锁释放先行 -> 内存与持久化解绑 -> 投影清理 -> Spill 清理 -> 工作区解绑 -> 最终物理删除
+   * 严格对齐 DSH 0.2.x 销毁时序：内核锁释放先行 -> 内存与持久化解绑 -> 投影清理 -> 工作区解绑 -> 最终物理删除
    */
   public async cleanupReviewSession(
     sessionId: string,
