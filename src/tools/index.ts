@@ -1126,17 +1126,22 @@ export function registerAgentTools(
     );
   };
 
-  const initialTools = ctx.get('tools') || (ctx as any).tools;
+  const initialTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
   if (initialTools) {
     doRegister(initialTools);
   }
 
-  (ctx as any).on('ready', () => {
+  const checkReadyTools = () => {
     if (unregisters.length === 0) {
-      const readyTools = ctx.get('tools') || (ctx as any).tools;
+      const readyTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
       if (readyTools) doRegister(readyTools);
     }
-  });
+  };
+  const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
+  if (appReady && typeof appReady.onReady === 'function') {
+    appReady.onReady(checkReadyTools);
+  }
+  (ctx as any).on?.('ready', checkReadyTools);
 
   return () => {
     for (const unreg of unregisters) {

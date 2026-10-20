@@ -99,6 +99,7 @@ export function registerConfigRoute(
   queueReconcile: (cfg?: BridgePluginConfig) => Promise<void>
 ): () => void {
   let unregister: (() => void) | undefined;
+  let isDisposed = false;
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const method = (req.method || 'GET').toUpperCase();
@@ -175,26 +176,33 @@ export function registerConfigRoute(
   };
 
   const doRegister = (server: any) => {
+    if (isDisposed) return;
     if (typeof server?.register === 'function') {
-      unregister = server.register({
-        kind: 'exact',
-        path: CONFIG_ROUTE_PATH,
-        handler,
-      });
+      try {
+        unregister = server.register({
+          kind: 'exact',
+          path: CONFIG_ROUTE_PATH,
+          handler,
+        });
+      } catch (err: any) {
+        const logger = typeof (ctx as any).logger === 'function' ? (ctx as any).logger(SETTINGS_NAMESPACE) : console;
+        logger.warn?.(`[routes] Failed to register ${CONFIG_ROUTE_PATH}: ${err?.message || err}`);
+      }
     }
   };
 
-  const directServer = (ctx as any).get?.('webServer');
+  const directServer = typeof (ctx as any).get === 'function' ? (ctx as any).get('webServer') : undefined;
   if (directServer) {
     doRegister(directServer);
   } else if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (subCtx: any) => {
-      const server = subCtx?.webServer ?? (ctx as any).get?.('webServer');
+      const server = subCtx?.webServer ?? (typeof (ctx as any).get === 'function' ? (ctx as any).get('webServer') : undefined);
       doRegister(server);
     });
   }
 
-  return () => {
+  const disposeRoute = () => {
+    isDisposed = true;
     if (typeof unregister === 'function') {
       try {
         unregister();
@@ -204,4 +212,12 @@ export function registerConfigRoute(
       unregister = undefined;
     }
   };
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => {
+      disposeRoute();
+    });
+  }
+
+  return disposeRoute;
 }
