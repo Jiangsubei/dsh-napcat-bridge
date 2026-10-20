@@ -18,6 +18,8 @@ export interface QuestionProviderOptions {
   sessionManager?: SessionManager;
   /** 共享 per-peer 串行发送器 (Spec §7.3)：提问与正文/审批同队列，保证同 peer 内发送顺序 */
   sender?: SerialSender;
+  /** 提问超时时间 (ms)，默认 300_000ms (5 分钟) */
+  timeoutMs?: number;
   logger?: {
     info?: (...args: any[]) => void;
     warn?: (...args: any[]) => void;
@@ -90,6 +92,15 @@ export class NapCatQuestionProvider {
       throw new Error('[NapCatQuestionProvider] 提问请求必须包含至少一道问题 (questions 不能为空)');
     }
 
+    // 顶替机制 (A7)：同一 peer 存在前序挂起提问时，显式取消前序请求，防止永久悬挂
+    if (this.pendingByPeer.has(peer)) {
+      const prev = this.pendingByPeer.get(peer)!;
+      try {
+        prev.reject(new Error('AskUserQuestion was superseded by a newer question on the same peer'));
+      } catch {}
+      this.pendingByPeer.delete(peer);
+    }
+
     // 创建挂起 Promise：agent 全程只等待一次，串行多题在插件侧逐题推进（B4 不挂死）
     let resolveHolder!: (answer: AskUserQuestionAnswer) => void;
     let rejectHolder!: (err: Error) => void;
@@ -98,7 +109,14 @@ export class NapCatQuestionProvider {
       rejectHolder = reject;
     });
 
+    const timeoutMs = this.options?.timeoutMs ?? 300_000;
+    let timer: NodeJS.Timeout | null = null;
+
     const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       this.pendingByPeer.delete(peer!);
       if (request.signal) {
         request.signal.removeEventListener('abort', abortHandler);
@@ -112,6 +130,13 @@ export class NapCatQuestionProvider {
 
     if (request.signal) {
       request.signal.addEventListener('abort', abortHandler, { once: true });
+    }
+
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        cleanup();
+        rejectHolder(new Error(`AskUserQuestion timed out after ${timeoutMs}ms without user response`));
+      }, timeoutMs);
     }
 
     const pending: PendingSerialQuestion = {
@@ -356,10 +381,14 @@ export function registerNapCatQuestionChannel(
   };
 }
 
+export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
+
 export interface ApprovalRequestPayload {
   peer: string;
   toolName: string;
+  callId?: string;
   reason?: string;
+  targetUserId?: string;
   signal?: AbortSignal;
 }
 
@@ -368,6 +397,10 @@ export interface ApprovalResponderOptions {
   sessionManager?: SessionManager;
   /** 共享 per-peer 串行发送器 (Spec §7.3)：审批与正文/提问同队列，保证同 peer 内发送顺序 */
   sender?: SerialSender;
+  /** 审批超时时间 (ms)，默认 300_000ms (5 分钟) */
+  timeoutMs?: number;
+  /** 管理员 QQ 白名单列表（群聊放行鉴权） */
+  admins?: string[];
   logger?: {
     info?: (...args: any[]) => void;
     warn?: (...args: any[]) => void;
@@ -378,7 +411,9 @@ export interface ApprovalResponderOptions {
 
 interface PendingApproval {
   req: ApprovalRequestPayload;
-  resolve: (decision: 'allowed-once' | 'rejected') => void;
+  timer: NodeJS.Timeout | null;
+  onAbort: (() => void) | null;
+  resolve: (decision: ApprovalOutcome) => void;
   reject: (err: Error) => void;
 }
 
@@ -390,9 +425,9 @@ export class NapCatApprovalResponder {
 
   constructor(private readonly options?: ApprovalResponderOptions) {}
 
-  async handleApprovalRequest(req: ApprovalRequestPayload): Promise<'allowed-once' | 'rejected'> {
+  async handleApprovalRequest(req: ApprovalRequestPayload): Promise<ApprovalOutcome> {
     if (req.signal?.aborted) {
-      return 'rejected';
+      return 'cancelled';
     }
 
     // 无 peer 或无 Gateway：直接拒绝，绝不替用户放行，也不挂起等待 (需求 §0.0)
@@ -401,6 +436,19 @@ export class NapCatApprovalResponder {
         `[NapCatApprovalResponder] ${!req.peer ? '缺少目标 peer' : '无 NapCat 连接'}，审批请求 ${req.toolName} 已拒绝`
       );
       return 'rejected';
+    }
+
+    // 顶替机制 (A4)：同一 peer 发起新审批请求时，前序挂起请求被顶替收敛为 cancelled
+    if (this.pendingByPeer.has(req.peer)) {
+      const prev = this.pendingByPeer.get(req.peer)!;
+      try {
+        if (prev.timer) clearTimeout(prev.timer);
+        if (prev.onAbort && prev.req.signal) {
+          prev.req.signal.removeEventListener('abort', prev.onAbort);
+        }
+        prev.resolve('cancelled');
+      } catch {}
+      this.pendingByPeer.delete(req.peer);
     }
 
     {
@@ -428,24 +476,45 @@ export class NapCatApprovalResponder {
       }
     }
 
-    return new Promise<'allowed-once' | 'rejected'>((resolve, reject) => {
+    return new Promise<ApprovalOutcome>((resolve, reject) => {
+      const timeoutMs = this.options?.timeoutMs ?? 300_000;
+      let timer: NodeJS.Timeout | null = null;
+      let onAbort: (() => void) | null = null;
+
       const cleanup = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (onAbort && req.signal) {
+          req.signal.removeEventListener('abort', onAbort);
+          onAbort = null;
+        }
         this.pendingByPeer.delete(req.peer);
       };
 
       if (req.signal) {
-        req.signal.addEventListener(
-          'abort',
-          () => {
-            cleanup();
-            resolve('rejected');
-          },
-          { once: true }
-        );
+        onAbort = () => {
+          cleanup();
+          resolve('cancelled');
+        };
+        req.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        timer = setTimeout(() => {
+          this.options?.logger?.warn?.(
+            `[NapCatApprovalResponder] 审批请求 ${req.toolName} 超时 (${timeoutMs}ms)，自动 fail-closed 拒绝`
+          );
+          cleanup();
+          resolve('rejected');
+        }, timeoutMs);
       }
 
       this.pendingByPeer.set(req.peer, {
         req,
+        timer,
+        onAbort,
         resolve: (decision) => {
           cleanup();
           resolve(decision);
@@ -461,7 +530,11 @@ export class NapCatApprovalResponder {
   /**
    * 处理 QQ 端用户的审批决策 (y/n)
    */
-  handleInboundReply(peer: string, text: string): boolean {
+  handleInboundReply(
+    peer: string,
+    text: string,
+    options?: { userId?: string | number; replyId?: string | number }
+  ): boolean {
     if (!this.pendingByPeer.has(peer)) {
       return false;
     }
@@ -469,12 +542,34 @@ export class NapCatApprovalResponder {
     const pending = this.pendingByPeer.get(peer)!;
     const trimmed = text.trim().toLowerCase();
 
-    if (trimmed === 'y' || trimmed === 'yes' || trimmed === '同意' || trimmed === '允许') {
+    const isApprove = trimmed === 'y' || trimmed === 'yes' || trimmed === '同意' || trimmed === '允许';
+    const isReject = trimmed === 'n' || trimmed === 'no' || trimmed === '拒绝' || trimmed === '不同意';
+
+    if (!isApprove && !isReject) {
+      return false;
+    }
+
+    // 群聊鉴权 (B4/B11)：当配置了管理员列表时，仅允许管理员或指定发起人批准
+    if (peer.startsWith('group_') && options?.userId !== undefined) {
+      const uid = String(options.userId);
+      const admins = this.options?.admins || [];
+      const isTargetUser = pending.req.targetUserId && String(pending.req.targetUserId) === uid;
+      const isAdmin = admins.includes(uid);
+
+      if (admins.length > 0 && !isAdmin && !isTargetUser) {
+        this.options?.logger?.warn?.(
+          `[NapCatApprovalResponder] 群聊非授权用户 ${uid} 尝试审批决策，已被忽略`
+        );
+        return false;
+      }
+    }
+
+    if (isApprove) {
       pending.resolve('allowed-once');
       return true;
     }
 
-    if (trimmed === 'n' || trimmed === 'no' || trimmed === '拒绝' || trimmed === '不同意') {
+    if (isReject) {
       pending.resolve('rejected');
       return true;
     }

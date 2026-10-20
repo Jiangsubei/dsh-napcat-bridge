@@ -156,4 +156,101 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     const rejected = await approvalPromise;
     expect(rejected).toBe('rejected');
   });
+
+  it('契约 7: 审批请求在 signal aborted 时返回 cancelled 语义 (D4/A5)', async () => {
+    const ac = new AbortController();
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+      } as any,
+    });
+
+    const approvalPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_dangerous_bash',
+      reason: '已取消任务',
+      signal: ac.signal,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    ac.abort();
+
+    const decision = await approvalPromise;
+    expect(decision).toBe('cancelled');
+  });
+
+  it('契约 8: 审批请求超时 fail-closed 返回 rejected (A3)', async () => {
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+      } as any,
+      timeoutMs: 50,
+    });
+
+    const approvalPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_dangerous_bash',
+      reason: '超时测试',
+    });
+
+    const decision = await approvalPromise;
+    expect(decision).toBe('rejected');
+  });
+
+  it('契约 9: 同一 peer 重复发起审批时，前序挂起请求被顶替收敛为 cancelled (A4)', async () => {
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+      } as any,
+    });
+
+    const firstPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_first',
+      reason: '首次操作',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const secondPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_second',
+      reason: '顶替操作',
+    });
+
+    const firstDecision = await firstPromise;
+    expect(firstDecision).toBe('cancelled');
+
+    responder.handleInboundReply('group_3000000001', 'y');
+    const secondDecision = await secondPromise;
+    expect(secondDecision).toBe('allowed-once');
+  });
+
+  it('契约 10: 群聊审批配置管理员白名单时，非管理员回复 y 无法放行 (B4/B11)', async () => {
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+      } as any,
+      admins: ['10001', '10002'],
+    });
+
+    const approvalPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_bash',
+      reason: '权限测试',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 非管理员（QQ: 99999）回复 y 不予放行
+    const handledStranger = responder.handleInboundReply('group_3000000001', 'y', { userId: '99999' });
+    expect(handledStranger).toBe(false);
+
+    // 管理员（QQ: 10001）回复 y 正常放行
+    const handledAdmin = responder.handleInboundReply('group_3000000001', 'y', { userId: '10001' });
+    expect(handledAdmin).toBe(true);
+
+    const decision = await approvalPromise;
+    expect(decision).toBe('allowed-once');
+  });
 });

@@ -19,14 +19,19 @@ export class PerPeerSerialSender implements SerialSender {
   enqueue<T>(peer: string, task: () => Promise<T>): Promise<T> {
     const prev = this.chains.get(peer) ?? Promise.resolve();
     const run = prev.then(() => task());
-    // 链上以"已消化结果"的 promise 接续，保证前置任务 reject 也不阻塞后续任务
-    this.chains.set(
-      peer,
-      run.then(
+    // 链上以"已消化结果"的 promise 接续，保证前置任务 reject 也不阻塞后续任务；
+    // 任务 settle 后若队列未追加新任务，则自动回收该 peer 的 chains 条目（B7 防泄漏）
+    const next: Promise<unknown> = run
+      .then(
         () => undefined,
         () => undefined
       )
-    );
+      .finally(() => {
+        if (this.chains.get(peer) === next) {
+          this.chains.delete(peer);
+        }
+      });
+    this.chains.set(peer, next);
     return run;
   }
 

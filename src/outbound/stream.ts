@@ -77,8 +77,11 @@ export class OutboundStreamBridge {
   private readonly sender: PerPeerSerialSender;
   // 保底/兼容单值上下文映射 (peer -> InboundReplyContextInput)
   private inboundContexts = new Map<string, InboundReplyContextInput>();
-  // 待激活消息上下文 (messageId -> { peer, context })
-  private pendingMessageContexts = new Map<string, { peer: string; context: InboundReplyContextInput }>();
+  // 待激活消息上下文 (messageId -> { peer, context, createdAt })
+  private pendingMessageContexts = new Map<
+    string,
+    { peer: string; context: InboundReplyContextInput; createdAt: number }
+  >();
   // Turn 级精准绑定映射 (peer -> Map<turn, InboundReplyContextInput>)
   private turnContexts = new Map<string, Map<number, InboundReplyContextInput>>();
   // 当前 peer 正在执行的活跃 Turn (peer -> turn)
@@ -119,7 +122,20 @@ export class OutboundStreamBridge {
    */
   trackPendingMessage(messageId: string, peer: string, context: InboundReplyContextInput): void {
     if (!messageId || !peer || !context) return;
-    this.pendingMessageContexts.set(messageId, { peer, context });
+    this.cleanExpiredPendingMessages();
+    this.pendingMessageContexts.set(messageId, { peer, context, createdAt: Date.now() });
+  }
+
+  /**
+   * 清理超时的待激活消息上下文 (默认 5 分钟 TTL，防内存泄漏)
+   */
+  private cleanExpiredPendingMessages(ttlMs = 300_000): void {
+    const now = Date.now();
+    for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
+      if (now - entry.createdAt > ttlMs) {
+        this.pendingMessageContexts.delete(msgId);
+      }
+    }
   }
 
   /**
@@ -225,19 +241,20 @@ export class OutboundStreamBridge {
       const turn = (event.data as any)?.turn;
       if (typeof turn === 'number') {
         this.activeTurns.set(peer, turn);
-        // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn
+        this.cleanExpiredPendingMessages();
+        // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn；
+        // 必须清空该 peer 全部前序 pending 消息，杜绝 break 遗留导致的跨轮串轮 (A23/B3)
+        let peerMap = this.turnContexts.get(peer);
+        if (!peerMap) {
+          peerMap = new Map();
+          this.turnContexts.set(peer, peerMap);
+        }
         for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
           if (entry.peer === peer) {
             this.pendingMessageContexts.delete(msgId);
-            let peerMap = this.turnContexts.get(peer);
-            if (!peerMap) {
-              peerMap = new Map();
-              this.turnContexts.set(peer, peerMap);
-            }
             if (!peerMap.has(turn)) {
               peerMap.set(turn, entry.context);
             }
-            break;
           }
         }
       }

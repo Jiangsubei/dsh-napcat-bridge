@@ -64,12 +64,10 @@ export async function getDiscoveredModels(ctx: Context): Promise<DiscoveredModel
 }
 
 let syncModelChain: Promise<void> = Promise.resolve();
-let trueOriginalSaveSelection: ((selection: any) => Promise<void>) | null = null;
-let activePatchCount = 0;
 
 /**
- * 同步宿主会话模型选择 (包含可选 reasoningEffort)，抑制 agentDefaultModel.saveSelection 避免污染 Web UI 全局设置
- * 采用 Promise 互斥链与 activePatchCount 引用计数，杜绝并发调用及 -g 批量同步时的竞态条件
+ * 同步宿主会话模型选择 (包含可选 reasoningEffort)
+ * 采用 Promise 互斥链，杜绝并发调用及 -g 批量同步时的竞态条件
  */
 export async function safeSyncSessionModel(
   ctx: Context,
@@ -82,31 +80,12 @@ export async function safeSyncSessionModel(
     const sessionController = ctx.get('sessionController') || (ctx as any).sessionController;
     if (!sessionController?.selectModel) return;
 
-    const defaultModelSvc =
-      ctx.get('agentDefaultModel') || (ctx as any).agentDefaultModel;
-    if (defaultModelSvc) {
-      if (activePatchCount === 0) {
-        trueOriginalSaveSelection = defaultModelSvc.saveSelection;
-        defaultModelSvc.saveSelection = async () => {};
-      }
-      activePatchCount++;
-    }
-    try {
-      await sessionController.selectModel({
-        sessionId,
-        provider,
-        model,
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-      });
-    } catch {} finally {
-      if (defaultModelSvc) {
-        activePatchCount--;
-        if (activePatchCount === 0 && trueOriginalSaveSelection) {
-          defaultModelSvc.saveSelection = trueOriginalSaveSelection;
-          trueOriginalSaveSelection = null;
-        }
-      }
-    }
+    await sessionController.selectModel({
+      sessionId,
+      provider,
+      model,
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    });
   };
 
   const next = syncModelChain.then(op, op);

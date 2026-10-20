@@ -171,7 +171,12 @@ export class NapCatGatewayServer {
       const msgEvent = parsed as OneBotMessageEvent;
       for (const h of this.messageHandlers) {
         try {
-          h(msgEvent);
+          const res = h(msgEvent);
+          if (res && typeof (res as Promise<any>).catch === 'function') {
+            (res as Promise<any>).catch((e) => {
+              this.options.logger?.error?.('[GatewayServer] 异步消息处理器异常:', e);
+            });
+          }
         } catch (e) {
           this.options.logger?.error?.('[GatewayServer] 消息处理器异常:', e);
         }
@@ -180,7 +185,12 @@ export class NapCatGatewayServer {
       const noticeEvent = parsed as OneBotNoticeEvent;
       for (const h of this.noticeHandlers) {
         try {
-          h(noticeEvent);
+          const res = h(noticeEvent);
+          if (res && typeof (res as Promise<any>).catch === 'function') {
+            (res as Promise<any>).catch((e) => {
+              this.options.logger?.error?.('[GatewayServer] 异步通知处理器异常:', e);
+            });
+          }
         } catch (e) {
           this.options.logger?.error?.('[GatewayServer] 通知处理器异常:', e);
         }
@@ -189,7 +199,12 @@ export class NapCatGatewayServer {
       const metaEvent = parsed as OneBotMetaEvent;
       for (const h of this.metaHandlers) {
         try {
-          h(metaEvent);
+          const res = h(metaEvent);
+          if (res && typeof (res as Promise<any>).catch === 'function') {
+            (res as Promise<any>).catch((e) => {
+              this.options.logger?.error?.('[GatewayServer] 异步元事件处理器异常:', e);
+            });
+          }
         } catch (e) {
           this.options.logger?.error?.('[GatewayServer] 元事件处理器异常:', e);
         }

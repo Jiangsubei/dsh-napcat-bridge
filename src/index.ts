@@ -12,6 +12,9 @@ import {
   DEFAULT_MEMORY_DIR,
   DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
   DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
+  DEFAULT_REVIEW_ENABLED,
+  DEFAULT_REVIEW_TURNS_INTERVAL,
+  DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
 } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
@@ -283,6 +286,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   });
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
+  const currentSpeakers = new Map<string, string>();
   const rawMemoryDir = currentConfig().memory_storage_dir;
   const normalizedMemoryDir = resolveDshPath(dshHome, rawMemoryDir, DEFAULT_MEMORY_DIR);
 
@@ -301,6 +305,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     reviewTurnsInterval: currentConfig().review_turns_interval,
     reviewToolCallsInterval: currentConfig().review_tool_calls_interval,
     reviewModel: currentConfig().review_model,
+    getReviewEnabled: () => currentConfig().review_enabled ?? DEFAULT_REVIEW_ENABLED,
+    getReviewTurnsInterval: () =>
+      currentConfig().review_turns_interval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
+    getReviewToolCallsInterval: () =>
+      currentConfig().review_tool_calls_interval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+    getReviewModel: () => currentConfig().review_model,
+    getCurrentSpeaker: (peer: string) => currentSpeakers.get(peer),
     db,
     sessionManager,
   });
@@ -417,6 +428,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     gateway: server,
     sessionManager,
     sender: serialSender,
+    admins: currentConfig().admins,
     logger,
   });
 
@@ -451,6 +463,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       return await approvalResponder.handleApprovalRequest({
         peer,
         toolName: req.toolName,
+        callId: req.callId,
         reason: req.reason,
         signal: req.signal,
       });
@@ -476,6 +489,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       try {
         senderName = (await memberResolver.resolve(event.group_id, fromUser)) || '';
       } catch {}
+    }
+    if (!isSelfMsg && fromUser) {
+      currentSpeakers.set(peer, fromUser);
     }
     const timestamp = event.time
       ? event.time < 10000000000
@@ -722,7 +738,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
 
     // 审批回复拦截 (y/n) —— 提问回复不再在此拦截（提问拦截已前置并独立处理）
-    if (approvalResponder.handleInboundReply(peer, content)) {
+    if (
+      approvalResponder.handleInboundReply(peer, content, {
+        userId: event.user_id,
+        replyId: (event as any).reply?.id,
+      })
+    ) {
       logger.info?.(`[Plugin] 审批决策已处理 (peer: ${peer}, reply: ${content})`);
       return;
     }
@@ -736,6 +757,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     try {
       const decision = await shouldWakeup(event, {
         bot_qq: botQQ,
+        bot_nickname: (currentConfig() as any).bot_nickname || (currentConfig().aliases?.[0] ?? undefined),
         aliases: currentConfig().aliases,
         proactive: currentConfig(),
         proactiveManager,
@@ -1062,6 +1084,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       try {
         const decision = await shouldWakeup(event, {
           bot_qq: botQQ,
+          bot_nickname: (currentConfig() as any).bot_nickname || (currentConfig().aliases?.[0] ?? undefined),
           aliases: currentConfig().aliases,
           resolveNickname: (gid, qq) => memberResolver.resolve(gid, qq),
         });
@@ -1171,6 +1194,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     if (typeof stopOutboundBridge === 'function') {
       stopOutboundBridge();
     }
+    try {
+      outboundBridge.dispose();
+      sessionManager.setOutboundBridge?.(null as any);
+    } catch {}
     if (typeof unregisterApproval === 'function') {
       unregisterApproval();
     }

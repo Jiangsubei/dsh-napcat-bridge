@@ -176,7 +176,9 @@ export class MediaStorageManager {
     const targetDir = this.getDownloadDir(type, sessionId);
     await fsp.mkdir(targetDir, { recursive: true });
 
-    let fileName = options.filename;
+    let fileName = options.filename
+      ? path.basename(options.filename).trim().replace(/[\\/:*?"<>|\0]/g, '_')
+      : undefined;
     if (!fileName) {
       if (type === 'image' || type === 'sticker') {
         fileName = `${fingerprint}.${ext}`;
@@ -190,7 +192,11 @@ export class MediaStorageManager {
       }
     }
 
-    const targetPath = path.join(targetDir, fileName);
+    const resolvedDir = path.resolve(targetDir);
+    const targetPath = path.resolve(targetDir, fileName);
+    if (!targetPath.startsWith(resolvedDir)) {
+      throw new Error(`[MediaStorageManager] 非法文件名检测到路径穿越: ${fileName}`);
+    }
     await fsp.writeFile(targetPath, buffer);
 
     if (options.fileId && this.db) {
