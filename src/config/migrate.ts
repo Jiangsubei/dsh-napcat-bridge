@@ -118,7 +118,13 @@ export async function migrateLegacyConfig(ctx: Context, currentConfig: BridgePlu
   try {
     // a. 若当前配置已由 profile 驱动或已配置，直接跳过
     const settingsService = (ctx as any).get?.('settings');
-    const profileSettings = settingsService?.get?.(SETTINGS_NAMESPACE);
+    let profileSettings: any = undefined;
+    if (typeof settingsService?.describe === 'function') {
+      const desc = settingsService.describe().find((d: any) => d.ns === SETTINGS_NAMESPACE);
+      if (desc?.value) profileSettings = desc.value;
+    } else if (typeof settingsService?.get === 'function') {
+      profileSettings = settingsService.get(SETTINGS_NAMESPACE);
+    }
     if (profileSettings && Object.keys(profileSettings).length > 0) {
       return;
     }
@@ -171,11 +177,7 @@ export async function migrateLegacyConfig(ctx: Context, currentConfig: BridgePlu
           path: [key],
           value,
         }));
-        try {
-          await withTimeout(svc.mutate(SETTINGS_NAMESPACE, ops), 3000);
-        } catch {
-          await withTimeout(svc.mutate(ops), 3000);
-        }
+        await withTimeout(svc.mutate(SETTINGS_NAMESPACE, ops), 3000);
         return true;
       }
       return false;
