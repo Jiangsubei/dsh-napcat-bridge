@@ -46,8 +46,6 @@
     "start": "node dist/index.js",
     "test": "pnpm run build && vitest run",
     "test:quick": "vitest run",
-    "probe": "tsx scripts/probe-server.ts",
-    "probe:analyze": "tsx scripts/analyze-probe.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc -p tsconfig.test.json",
     "clean": "rm -rf dist"

@@ -336,7 +336,7 @@ export class NapCatQuestionProvider {
 }
 
 /**
- * 接入 DSH 0.1.2-rc.1 官方 user-questions/request waterfall 提问渠道：
+ * 接入 DSH 0.2.x 官方 user-questions/request waterfall 提问渠道：
  * - 多 Answerer 官方原生级联支持；
  * - 若为 QQ 会话，由 NapCatQuestionProvider 处理并返回；
  * - 非 QQ 会话，调用 next() 委托给宿主 Web UI 或后续 provider，实现零冲突平滑共存。

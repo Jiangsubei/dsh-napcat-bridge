@@ -34,17 +34,6 @@ export interface SaveResourceResult {
   level?: 1 | 2;
 }
 
-export interface DownloadResourceOptions {
-  url?: string;
-  fileId: string;
-  busid?: number;
-  filename?: string;
-  subType?: number;
-  isSticker?: boolean;
-  type?: 'image' | 'sticker' | 'files' | 'file';
-  sessionId?: string;
-}
-
 /**
  * 根据文件头魔数推断文件扩展名
  * 支持: GIF (GIF89a/GIF87a), PNG (\x89PNG), JPEG (\xFF\xD8), WebP (RIFF....WEBP)

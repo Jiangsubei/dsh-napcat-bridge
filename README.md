@@ -13,8 +13,8 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **两层记忆体系**：群聊会话记忆 + 用户画像（跨群互通锚点），Markdown 存储，`read/create/edit` 三工具；后台自动回顾按用户记忆偏好提炼（回顾 Agent 注入既有记忆与画像）
 - **贴表情回应**：`react_message` 工具（仅群聊）给消息贴表情；入站贴表情事件后台落库可审计
 - **文件收发**：私聊文件入站落盘 + 群文件列表查询
-- **斜杠命令**：`/new`、`/resume`、`/ctx`、`/stop`、`/model`、`/mode`、`/think`、`/help`（`/clear` 为 `/new` 别名），管理员权限白名单控制
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，Tab 分区分组管理
+- **斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，两字中文指令与管理员权限白名单控制
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，settings.section 纯净注册与 Tab 分组管理
 - **人格与行为定制**：可自定义助手人格设定与行为约束准则
 
 ## 📦 安装
@@ -23,7 +23,7 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/dsh) (`npm install -g @deepseek-ai/dsh`)
 - [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 机器人协议端）
-- Node.js ^22.19 或 >=24
+- Node.js >=22.12.0
 
 ### 克隆并安装
 
@@ -79,7 +79,8 @@ dsh --profile web
 | `proactive_cooldown_mins` | 主动回复冷却时间（分钟） | `10` |
 | `proactive_night_dnd` | 夜间免打扰 (23:00-08:00) | `true` |
 | `memory_storage_dir` | 记忆文件存储目录 | `.dsh/napcat/napcat_memory` |
-| `memory_budget_chars` | 用户画像注入字符预算 | `2200` |
+| `group_memory_budget_chars` | 群聊用户画像注入总字符预算上限 | `2200` |
+| `private_memory_budget_chars` | 私聊用户画像注入总字符预算上限 | `1500` |
 | `review_enabled` | 启用后台自动回顾 | `true` |
 | `review_turns_interval` | 回顾触发轮次间隔 | `10` |
 | `review_tool_calls_interval` | 回顾触发工具调用间隔 | `10` |
