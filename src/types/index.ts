@@ -413,8 +413,6 @@ export interface BridgePluginConfig {
   group_memory_budget_chars?: number;
   /** 私聊会话规则与单用户画像注入总字符预算上限 (默认 1500) */
   private_memory_budget_chars?: number;
-  /** 兼容旧配置：群聊用户画像注入总字符预算上限 (默认 2200) */
-  memory_budget_chars?: number;
   /** 是否启用后台自动回顾 (默认 true) */
   review_enabled?: boolean;
   /** 触发后台回顾的对话轮次间隔 (默认 10) */

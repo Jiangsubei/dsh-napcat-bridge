@@ -289,16 +289,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   memoryService = setupMemoryService(ctx, {
     storageDir: normalizedMemoryDir,
     dshHome,
-    budgetChars: currentConfig().memory_budget_chars,
     groupBudgetChars: currentConfig().group_memory_budget_chars,
     privateBudgetChars: currentConfig().private_memory_budget_chars,
     getGroupBudgetChars: () =>
       currentConfig().group_memory_budget_chars ??
-      currentConfig().memory_budget_chars ??
       DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
     getPrivateBudgetChars: () =>
       currentConfig().private_memory_budget_chars ??
-      currentConfig().memory_budget_chars ??
       DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
     reviewEnabled: currentConfig().review_enabled,
     reviewTurnsInterval: currentConfig().review_turns_interval,
