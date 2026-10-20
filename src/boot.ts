@@ -13,8 +13,11 @@ import { Context } from '@deepseek-ai/cordis';
 import {
   boot,
   loadOverlayPatches,
-  healProfilesModuleFallback,
   resolveBundleDir,
+  createRuntimeResolution,
+  PluginPackages,
+  evaluatePluginCompatibility,
+  prepareProfileEntries,
 } from '@deepseek-ai/dsh-app-boot';
 import type { BridgePluginConfig } from './types/index.js';
 import * as NapCatBridgePlugin from './index.js';
@@ -46,6 +49,8 @@ export function resolveDshHome(customHome?: string): string {
 /**
  * 装配并启动真实的 DeepSeek Harness 服务栈。
  */
+export { evaluatePluginCompatibility, prepareProfileEntries };
+
 export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise<BootedDsh> {
   const dshHome = resolveDshHome(options.dshHome);
   process.env.DSH_HOME = dshHome;
@@ -61,7 +66,10 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
     );
   }
 
-  await healProfilesModuleFallback({ installAnchor, home: dshHome });
+  const resolution = await createRuntimeResolution({
+    installAnchor,
+    home: dshHome,
+  });
 
   // 2. 准备 profile 目录与 cordis.yml 根配置
   const profileDir = path.join(dshHome, 'profiles', 'napcat-test');
@@ -139,6 +147,7 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
 
   // 5. 调用 DSH 官方 boot()
   const ctx = await boot('dsh-napcat-bridge', rootConfig, [...basePatches, ...defaultOverlays], async (hostCtx) => {
+    await hostCtx.plugin(PluginPackages, { resolution });
     if (options.prepare) {
       await options.prepare(hostCtx);
     }
