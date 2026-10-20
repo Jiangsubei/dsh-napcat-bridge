@@ -21,11 +21,11 @@
  */
 
 import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // card.tsx 从 DSH 平台 seed 引入图标；契约测试不加载真实 DSH 客户端运行时。
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  IconChevronDownOutline14: () => null,
   IconChevronDownOutlineRegular: () => null,
   IconChevronDownOutlineMedium: () => null,
 }));
@@ -40,6 +40,7 @@ class MockElement {
   id = '';
   textContent = '';
   attributes: Record<string, string> = {};
+  dataset: Record<string, string> = {};
   children: MockElement[] = [];
 
   setAttribute(name: string, value: string) {
@@ -69,6 +70,7 @@ function createMockDocument() {
     body,
     createElement: () => new MockElement(),
     getElementById: () => null,
+    querySelector: () => null,
   };
 }
 
@@ -173,11 +175,11 @@ describe('契约测试: 客户端 settings.section 侧边栏独立页面与 0.2.
 
       const { meta, component } = sectionRegistration!;
 
-      // 1. 核心元数据字段断言
+      // 1. 核心元数据字段断言：按 0.2.1 规范收窄，不传入空 locale 声明
       expect(meta.name).toBe('settings.section');
       expect(meta.id).toBe('napcat');
       expect(meta.order).toBe(55);
-      expect(meta.locale).toBe('dsh-napcat-bridge');
+      expect(meta.locale).toBeUndefined();
 
       // 2. label 为函数，且调用返回包含 QQ 或 NapCat 的标题文案
       expect(typeof meta.label).toBe('function');
@@ -185,9 +187,8 @@ describe('契约测试: 客户端 settings.section 侧边栏独立页面与 0.2.
       expect(typeof labelText).toBe('string');
       expect(labelText).toMatch(/QQ|NapCat/i);
 
-      // 3. inject 为函数，返回空对象（REST 自驱动无需依赖内部属性）
-      expect(typeof meta.inject).toBe('function');
-      expect(meta.inject()).toEqual({});
+      // 3. inject 应当保持 undefined（REST 自驱动，不需要空对象注水）
+      expect(meta.inject).toBeUndefined();
 
       // 4. 注册组件必须绑定 NapCatSettingsSection
       expect(component).toBe(NapCatSettingsSection);
@@ -214,6 +215,18 @@ describe('契约测试: 客户端 settings.section 侧边栏独立页面与 0.2.
         expect(NapCatSettingsSection).toBeDefined();
       }
     });
+
+    it('NapCatSettingsSection 接收 0.2.1 owner close 回调并支持真实静态渲染', () => {
+      const closeMock = vi.fn();
+      const html = renderToStaticMarkup(
+        React.createElement(NapCatSettingsSection, {
+          close: closeMock,
+          initialConfig: { bot_qq: '123456789' },
+        })
+      );
+      expect(html).toContain('NapCat');
+      expect(html).toContain('123456789');
+    });
   });
 
   describe('4. 输入框隐藏器保留契约', () => {
@@ -225,12 +238,13 @@ describe('契约测试: 客户端 settings.section 侧边栏独立页面与 0.2.
       // 1. 保留 conversation.composer.dock 插槽注入
       expect(injectedSlots).toContain('conversation.composer.dock');
 
-      // 2. 挂载组件与元数据断言
+      // 2. 挂载组件与元数据断言（0.2.1 list 槽位收窄，禁止带 key 字段）
       const dockRegistration = registeredItems.find(
         (item) => item.meta?.name === 'conversation.composer.dock'
       );
       expect(dockRegistration, '未找到 conversation.composer.dock 注册项').toBeDefined();
       expect(dockRegistration!.meta.id).toBe('dsh-napcat-bridge-hide-composer');
+      expect(dockRegistration!.meta.key).toBeUndefined();
       expect(dockRegistration!.component).toBe(QQComposerHider);
     });
   });

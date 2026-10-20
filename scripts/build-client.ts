@@ -1,7 +1,7 @@
 /**
  * dsh-napcat-bridge Client WebUI Bundle Builder
  * Compiles src/client/index.tsx into DSH lazy-CJS bundle format:
- * window.__ModuleLoader__.load({ id: "dsh-napcat-bridge/client", factory: (require) => { ... } })
+ * window.__ModuleLoader__.load({ id: "dsh-napcat-bridge", factory: (require) => { ... } })
  */
 
 import * as esbuild from 'esbuild';

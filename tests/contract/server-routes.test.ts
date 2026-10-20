@@ -5,7 +5,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconChevronDownOutlineMedium: () => null,
   IconChevronDownOutlineRegular: () => null,
-  IconChevronDownOutline14: () => null,
 }));
 
 import {

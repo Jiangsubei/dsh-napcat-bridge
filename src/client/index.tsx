@@ -1,6 +1,6 @@
 /**
  * dsh-napcat-bridge Client WebUI Plugin Entry Point
- * Injects NapCat settings card into the DSH Web UI settings.plugin.item extension slot.
+ * Injects NapCat settings card into the DSH Web UI settings.section extension slot.
  */
 
 import React from 'react';
@@ -84,7 +84,6 @@ export function isQQSessionId(sessionId: unknown): boolean {
 export interface QQComposerHiderProps {
   sessionId?: string;
   useSession?: (selector?: (session: any) => any) => any;
-  useConversation?: (selector?: (conv: any) => any) => any;
 }
 
 /**
@@ -92,19 +91,25 @@ export interface QQComposerHiderProps {
  * 仅当处于**插件创建的 QQ 会话**时，隐藏 [data-composer-card] 输入框卡片容器（包含多行输入区、
  * 提示文案、附件/模式切换以及右侧模型切换与发送按钮），
  * 下方的监控指标行（位于 conversation.composer.dock，显示轮步/速率/Token/命中率）完全不受影响。
- * 欢迎页（Hero）、NapCat 工作区内由 Web 端新建的普通会话、以及其他常规会话一律返回 null 恢复原生输入框。
+ * 配合 body[data-dsh-napcat-readonly="true"] 实现局部组件与全局状态双重互锁。
  */
 export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element | null {
   const sessionId =
     (typeof props?.useSession === 'function'
       ? props.useSession((s: any) => s?.sessionId ?? s?.id)
       : undefined) ??
-    props?.sessionId ??
-    (typeof props?.useConversation === 'function'
-      ? props.useConversation((c: any) => c?.sessionId ?? c?.id)
-      : undefined);
+    props?.sessionId;
 
   const isReadonly = isNapCatWorkspaceOrSession({ sessionId });
+
+  React.useEffect(() => {
+    if (isReadonly) {
+      syncReadonlyAttribute(true);
+      return () => {
+        syncReadonlyAttribute(false);
+      };
+    }
+  }, [isReadonly]);
 
   if (!isReadonly) {
     return null;
@@ -114,11 +119,8 @@ export function QQComposerHider(props: QQComposerHiderProps): React.JSX.Element 
     <style
       data-dsh-napcat="hide-composer"
       dangerouslySetInnerHTML={{
-        // 此处刻意不加 body[data-dsh-napcat-readonly="true"] 前缀（局部样式不带作用域）：
-        // 组件本身只在 QQ 会话渲染、其余会话返回 null，因此该前提已由渲染条件保证；
-        // 若后续改为无条件渲染，必须改回带 body 属性前缀的双重互锁写法（见 f8ea52d）。
         __html: `
-[data-composer-card] {
+body[data-dsh-napcat-readonly="true"] [data-composer-card] {
   display: none !important;
 }
 `,
@@ -183,9 +185,7 @@ export function apply(ctx: any) {
         name: 'settings.section',
         id: 'napcat',
         order: 55,
-        locale: 'dsh-napcat-bridge',
         label: () => 'QQ NapCat',
-        inject: () => ({}),
       },
       NapCatSettingsSection
     );
@@ -197,7 +197,6 @@ export function apply(ctx: any) {
       {
         name: 'conversation.composer.dock',
         id: 'dsh-napcat-bridge-hide-composer',
-        key: 'dsh-napcat-bridge-hide-composer',
         order: -100,
       },
       QQComposerHider

@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
-  IconChevronDownOutline14: () => null,
+  IconChevronDownOutlineRegular: () => null,
+  IconChevronDownOutlineMedium: () => null,
 }));
 
 import {
@@ -140,7 +141,7 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
   });
 
   describe('3. QQComposerHider 组件渲染契约 (只管 QQ 会话，欢迎页与非 QQ 会话返回 null)', () => {
-    it('当传入 QQ 会话 sessionId 时，渲染局部隐藏样式', () => {
+    it('当传入 QQ 会话 sessionId 时，渲染包含全局 body 与局部卡片双重互锁的样式', () => {
       const html = renderToStaticMarkup(
         React.createElement(QQComposerHider, {
           sessionId: 'qq-group-123456#0.1',
@@ -150,9 +151,10 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       expect(html).toContain('<style');
       expect(html).toContain('[data-composer-card]');
       expect(html).toContain('display: none !important');
+      expect(html).toContain('body[data-dsh-napcat-readonly="true"]');
     });
 
-    it('支持 DSH 官方 SessionSnapshot 字段名 s.sessionId', () => {
+    it('支持 DSH 官方 SessionSnapshot 字段名 s.sessionId 并包含双重互锁选择器', () => {
       const mockUseSession = (selector?: (s: any) => any) => {
         const session = { sessionId: 'qq-user-987654#0.1' };
         return selector ? selector(session) : session;
@@ -167,6 +169,7 @@ describe('契约测试: Web UI 只读会话与 NapCat 工作区输入框卡片�
       expect(html).toContain('<style');
       expect(html).toContain('[data-composer-card]');
       expect(html).toContain('display: none !important');
+      expect(html).toContain('body[data-dsh-napcat-readonly="true"]');
     });
 
     it('在 NapCat 工作区新建的 Web UI 会话（session-uuid）返回 null（保留输入框）', () => {
