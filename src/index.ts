@@ -368,7 +368,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   // 执行侧：官方 monotonic guard 替换原先返回字符串 'deny' 的伪拦截 (PreToolDecision 对象契约)。
   // 非 QQ 会话调用 NapCat 专属工具时，返回拒绝原因字符串，由 ToolRuntime 物化为错误结果。
   let unregisterToolGuard: (() => void) | null = null;
-  const toolsSvc = ctx.get('tools') || (ctx as any).tools;
+  const toolsSvc = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
   if (toolsSvc && typeof toolsSvc.guard === 'function') {
     unregisterToolGuard = toolsSvc.guard((exec: any) => {
       if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
@@ -443,19 +443,23 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger.warn?.('[Plugin] 注册 QQ 提问渠道异常:', channelErr);
   }
 
-  const unregisterApproval = (ctx as any).on('approval/request', async (req: any, next: any) => {
-    const sessionId = req.agent?.session?.id;
-    if (!sessionId || !sessionManager.isQQSession(sessionId)) {
-      return next ? next() : 'unavailable';
-    }
-    const peer = sessionManager.sessionIdToPeer(sessionId);
-    return await approvalResponder.handleApprovalRequest({
-      peer,
-      toolName: req.toolName,
-      reason: req.reason,
-      signal: req.signal,
-    });
-  });
+  const unregisterApproval = (ctx as any).on(
+    'approval/request',
+    async (req: any, next: any) => {
+      const sessionId = req.agent?.session?.id;
+      if (!sessionId || !sessionManager.isQQSession(sessionId)) {
+        return next ? next() : 'unavailable';
+      }
+      const peer = sessionManager.sessionIdToPeer(sessionId);
+      return await approvalResponder.handleApprovalRequest({
+        peer,
+        toolName: req.toolName,
+        reason: req.reason,
+        signal: req.signal,
+      });
+    },
+    { prepend: true }
+  );
 
   // 7. 监听入方向消息并执行入库、审批/提问拦截与唤醒门控
   server.onMessage(async (event) => {
@@ -1131,12 +1135,17 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }));
   };
 
-  (ctx as any).on('ready', () => {
+  const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
+  if (appReady && typeof appReady.onReady === 'function') {
+    appReady.onReady(() => {
+      void migrateLegacyConfig(ctx, currentConfig());
+      void startServer().catch(() => {});
+    });
+  } else {
+    // 独立环境 / 测试环境 / 未注入 appReady 的场景兜底直接触发
     void migrateLegacyConfig(ctx, currentConfig());
-  });
-  (ctx as any).on('ready', startServer);
-  // 若插件在 ready 事件后挂载（如动态加载/装配运行时），自动触发 startServer
-  startServer().catch(() => {});
+    void startServer().catch(() => {});
+  }
 
   const onProcessExit = () => {
     server.stop().catch(() => {});
@@ -1145,7 +1154,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   process.once('SIGTERM', onProcessExit);
   process.once('beforeExit', onProcessExit);
 
-  (ctx as any).on('dispose', async () => {
+  const disposePlugin = async () => {
+    if (isDisposed) return;
     isDisposed = true;
     try {
       unregisterConfigRoute();
@@ -1182,6 +1192,16 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     await server.stop().catch(() => {});
     await sessionManager.dispose().catch(() => {});
     db.close();
+  };
+
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => {
+      void disposePlugin();
+    });
+  }
+
+  (ctx as any).on?.('dispose', () => {
+    void disposePlugin();
   });
 }
 

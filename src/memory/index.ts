@@ -51,7 +51,7 @@ export function registerMemoryPromptContext(
   db?: MessageDatabase,
   budgetInput: (() => number) | MemoryBudgetOptions = () => DEFAULT_MEMORY_BUDGET_CHARS
 ): () => void {
-  const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
+  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
   if (!systemPrompt || typeof systemPrompt.context !== 'function') {
     return () => {};
   }
@@ -169,15 +169,20 @@ export function setupMemoryService(
     }
   };
 
-  const initialTools = ctx.get('tools') || (ctx as any).tools;
+  const initialTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
   if (initialTools) {
     doRegisterTools(initialTools);
   }
 
-  (ctx as any).on?.('ready', () => {
-    const readyTools = ctx.get('tools') || (ctx as any).tools;
+  const checkReadyTools = () => {
+    const readyTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
     if (readyTools) doRegisterTools(readyTools);
-  });
+  };
+  const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
+  if (appReady && typeof appReady.onReady === 'function') {
+    appReady.onReady(checkReadyTools);
+  }
+  (ctx as any).on?.('ready', checkReadyTools);
 
   // 2. 注册 systemPrompt.context 动态记忆段
   const promptDisposer = registerMemoryPromptContext(

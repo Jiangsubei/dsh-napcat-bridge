@@ -326,22 +326,26 @@ export interface RegisterQuestionChannelOptions {
 
 export function registerNapCatQuestionChannel(
   ctx: {
-    on(event: string, handler: (...args: any[]) => void): any;
+    on(event: string, handler: (...args: any[]) => void, options?: any): any;
   },
-  options: RegisterQuestionChannelOptions
+  options: RegisterQuestionChannelOptions & { prepend?: boolean }
 ): () => void {
   const isQQSession =
     options.isQQSession || ((sessionId: string) => sessionId.startsWith('qq-'));
   const { questionProvider } = options;
 
-  const off = (ctx as any).on('user-questions/request', async (req: any, next: any) => {
-    const sessionId =
-      req.agent?.session?.id || req.agent?.id || (req.agent as any)?.sessionId || '';
-    if (sessionId && isQQSession(sessionId)) {
-      return await questionProvider.ask(req);
-    }
-    return next ? next() : Promise.reject(new Error('no user-questions answerer accepted the request'));
-  });
+  const off = (ctx as any).on(
+    'user-questions/request',
+    async (req: any, next: any) => {
+      const sessionId =
+        req.agent?.session?.id || req.agent?.id || (req.agent as any)?.sessionId || '';
+      if (sessionId && isQQSession(sessionId)) {
+        return await questionProvider.ask(req);
+      }
+      return next ? next() : Promise.reject(new Error('no user-questions answerer accepted the request'));
+    },
+    { prepend: options.prepend !== false }
+  );
 
   options.logger?.info?.('[RegisterQuestionChannel] 已接入官方 user-questions/request waterfall 提问渠道');
 
