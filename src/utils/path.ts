@@ -20,7 +20,7 @@ export function resolveDshPath(dshHome?: string, targetPath?: string, defaultRel
 }
 
 /**
- * 将字符串转义为安全的文件路径段（对齐 DSH 0.1.5 session-persistence-jsonl 的 encodeSegment 规范）
+ * 将字符串转义为安全的文件路径段（对齐 DSH 0.2.x session-persistence-jsonl 的 encodeSegment 规范）
  */
 export function encodeSegment(raw: string): string {
   if (raw.length === 0) throw new Error('cannot encode an empty path segment');
