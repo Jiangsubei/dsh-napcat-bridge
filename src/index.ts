@@ -65,15 +65,15 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     const settingsService = (ctx as any).get?.('settings');
     if (!settingsService) return {};
     try {
+      if (typeof settingsService.describe === 'function') {
+        const desc = settingsService.describe().find(
+          (d: any) => d.ns === SETTINGS_NAMESPACE
+        );
+        if (desc?.value) return desc.value as BridgePluginConfig;
+      }
       if (typeof settingsService.get === 'function') {
         const val = settingsService.get(SETTINGS_NAMESPACE);
         if (val && typeof val === 'object') return val;
-      }
-      if (typeof settingsService.describe === 'function') {
-        const desc = settingsService.describe().find(
-          (d: any) => d.ns === SETTINGS_NAMESPACE || d.id === SETTINGS_NAMESPACE
-        );
-        if (desc?.value) return desc.value as BridgePluginConfig;
       }
     } catch {
       // ignore

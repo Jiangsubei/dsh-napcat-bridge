@@ -147,11 +147,7 @@ export function registerConfigRoute(
                 path: [key],
                 value,
               }));
-              try {
-                await settings.mutate(SETTINGS_NAMESPACE, ops);
-              } catch {
-                await settings.mutate(ops);
-              }
+              await settings.mutate(SETTINGS_NAMESPACE, ops);
             } else if (typeof settings.update === 'function') {
               await settings.update(SETTINGS_NAMESPACE, cleanPayload);
             }
