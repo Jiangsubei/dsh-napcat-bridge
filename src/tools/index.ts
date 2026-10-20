@@ -842,7 +842,7 @@ export function registerAgentTools(
               peer.startsWith('qq-group-') || peer.startsWith('group_')
                 ? peer.replace(/^(qq-group-|group_)/, '').split('-')[0]
                 : undefined;
-            return (await fetchChatResource(args, {
+            const res = (await fetchChatResource(args, {
               db: options.db,
               gateway: options.gateway,
               mediaManager: options.mediaManager,
@@ -850,6 +850,10 @@ export function registerAgentTools(
               peer,
               groupId,
             })) as any;
+            if (res && res.success === false) {
+              throw new Error(res.error || 'fetch_chat_resource 失败');
+            }
+            return res;
           },
         })
       )
@@ -880,11 +884,15 @@ export function registerAgentTools(
             // FC-1: 传入 peer，内层图片落盘到 image/<peer>/ 而非 common（对齐入站图片与 Spec §4.1.1）
             const session = (exec.agent as any)?.session;
             const peer = normalizePeer(session?.id || '');
-            return (await expandForwardMessage(args, {
+            const res = (await expandForwardMessage(args, {
               gateway: options.gateway,
               mediaManager: options.mediaManager,
               ...(peer ? { peer } : {}),
             })) as any;
+            if (res && res.success === false) {
+              throw new Error(res.error || 'expand_forward_message 失败');
+            }
+            return res;
           },
         })
       )
@@ -915,11 +923,15 @@ export function registerAgentTools(
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || '';
             const peer = normalizePeer(rawPeer);
-            return (await sendFile(args, {
+            const res = (await sendFile(args, {
               gateway: options.gateway,
               sender: options.sender,
               peer,
             })) as any;
+            if (res && res.success === false) {
+              throw new Error(res.error || 'send_file 失败');
+            }
+            return res;
           },
         })
       )
@@ -953,7 +965,11 @@ export function registerAgentTools(
               peer.startsWith('qq-group-') || peer.startsWith('group_')
                 ? peer.replace(/^(qq-group-|group_)/, '').split('-')[0]
                 : undefined;
-            return (await pokeUser(args, { gateway: options.gateway, groupId })) as any;
+            const res = (await pokeUser(args, { gateway: options.gateway, groupId })) as any;
+            if (res && res.success === false) {
+              throw new Error(res.error || 'poke_user 失败');
+            }
+            return res;
           },
         })
       )
@@ -1030,15 +1046,20 @@ export function registerAgentTools(
             schema: { type: 'json' },
             render: (_args, value) => [{ type: 'text', text: renderWaitResultText(value as any) }],
           },
+          timeoutMs: 600_000,
           async execute(args, exec) {
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || '';
             const peer = normalizePeer(rawPeer);
-            return (await waitForUserMessages(args, {
+            const res = (await waitForUserMessages(args, {
               waitRegistry: options.waitRegistry,
               peer,
               signal: exec.signal,
             })) as any;
+            if (res && 'error' in res && !('messages' in res)) {
+              throw new Error(res.error || 'wait_for_user_messages 失败');
+            }
+            return res;
           },
         })
       )
@@ -1115,11 +1136,15 @@ export function registerAgentTools(
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || '';
             const peer = normalizePeer(rawPeer);
-            return (await reactMessage(args, {
+            const res = (await reactMessage(args, {
               gateway: options.gateway,
               inboundMsgIdGetter: options.inboundMsgIdGetter,
               peer,
             })) as any;
+            if (res && res.success === false) {
+              throw new Error(res.error || 'react_message 失败');
+            }
+            return res;
           },
         })
       )

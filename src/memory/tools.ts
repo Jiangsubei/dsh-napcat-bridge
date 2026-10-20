@@ -36,7 +36,10 @@ export interface EditMemoryArgs {
 /**
  * 从 SessionId 或 Context 中解析 Peer (group_xxx / user_xxx) 与 QQ 号
  */
-export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: string } {
+export function resolveContextPeerAndQQ(
+  context?: unknown,
+  getCurrentSpeaker?: (peer: string) => string | undefined
+): { peer: string; qq: string } {
   let peer = 'default';
   let qq = 'default';
 
@@ -74,10 +77,12 @@ export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: 
     }
   }
 
-  // 优先从直接字段或 agent 获取当前用户 QQ
-  const directUser = anyCtx.userId || anyCtx.user_id || anyCtx.agent?.userId || anyCtx.agent?.user_id;
-  if (typeof directUser === 'string' && directUser.trim()) {
-    qq = directUser.trim();
+  // D2/B13: 严禁伪造字段猜测 userId；真实发言人经由真实上下文与事件记录提供
+  if (getCurrentSpeaker && peer !== 'default') {
+    const speaker = getCurrentSpeaker(peer);
+    if (typeof speaker === 'string' && speaker.trim()) {
+      qq = speaker.trim();
+    }
   }
 
   return { peer, qq };
@@ -86,6 +91,7 @@ export function resolveContextPeerAndQQ(context?: unknown): { peer: string; qq: 
 export interface MemoryToolsLimits {
   getUserLimit?: () => number;
   getSessionLimit?: () => number;
+  getSessionLimitFor?: (peer: string) => number;
 }
 
 export class MemoryTools {
@@ -99,7 +105,10 @@ export class MemoryTools {
     return this.limits?.getUserLimit?.() ?? DEFAULT_USER_PROFILE_CHAR_LIMIT;
   }
 
-  private getSessionLimit(): number {
+  private getSessionLimit(peer?: string): number {
+    if (peer && this.limits?.getSessionLimitFor) {
+      return this.limits.getSessionLimitFor(peer);
+    }
     return this.limits?.getSessionLimit?.() ?? DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
   }
 
@@ -179,7 +188,7 @@ export class MemoryTools {
     const limit =
       type === 'user'
         ? this.getUserLimit()
-        : this.getSessionLimit();
+        : this.getSessionLimit(args.peer?.trim());
     if (content.length > limit) {
       return {
         success: false,
@@ -255,7 +264,6 @@ export class MemoryTools {
     }
 
     let target: string;
-    let currentContent: string;
 
     if (type === 'user') {
       const targetQQ = this.resolveUserTarget(args);
@@ -263,83 +271,78 @@ export class MemoryTools {
         return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
       }
       target = targetQQ;
-
-      if (!(await this.storage.existsUserProfile(targetQQ))) {
-        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
-      }
-
-      currentContent = await this.storage.readUserProfileRaw(targetQQ);
-      if (!currentContent || !currentContent.trim()) {
-        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
-      }
     } else {
       const targetPeer = args.peer?.trim();
       if (!targetPeer || targetPeer === 'default') {
         return { success: false, message: 'session 记忆必须指定 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）。' };
       }
       target = targetPeer;
-
-      if (!(await this.storage.existsSessionMemory(targetPeer))) {
-        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
-      }
-
-      currentContent = await this.storage.readSessionMemoryRaw(targetPeer);
-      if (!currentContent || !currentContent.trim()) {
-        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
-      }
     }
 
     const oldStr = args.old_string;
     const newStr = args.new_string ?? '';
+    let preview = '';
 
-    // 找 old_string 所有出现位置
-    let count = 0;
-    let firstIndex = -1;
-    let pos = 0;
-    while ((pos = currentContent.indexOf(oldStr, pos)) !== -1) {
-      count++;
-      if (firstIndex === -1) firstIndex = pos;
-      pos += oldStr.length;
-    }
+    const doReplace = (currentContent: string) => {
+      if (!currentContent || !currentContent.trim()) {
+        throw new Error('目标记忆不存在，请先 create_memory 创建。');
+      }
 
-    if (count === 0) {
-      return {
-        success: false,
-        message: 'old_string 未在当前记忆中找到，可能内容已变化，请先 read_memory 获取最新内容。',
-      };
-    }
+      // 找 old_string 所有出现位置
+      let count = 0;
+      let firstIndex = -1;
+      let pos = 0;
+      while ((pos = currentContent.indexOf(oldStr, pos)) !== -1) {
+        count++;
+        if (firstIndex === -1) firstIndex = pos;
+        pos += oldStr.length;
+      }
 
-    if (count >= 2) {
-      return {
-        success: false,
-        message: `old_string 出现 ${count} 次，请补充更多上下文使其唯一。`,
-      };
-    }
+      if (count === 0) {
+        throw new Error('old_string 未在当前记忆中找到，可能内容已变化，请先 read_memory 获取最新内容。');
+      }
 
-    // 唯一匹配替换（空/省略 = 删除匹配片段）
-    const newContent =
-      currentContent.slice(0, firstIndex) + newStr + currentContent.slice(firstIndex + oldStr.length);
+      if (count >= 2) {
+        throw new Error(`old_string 出现 ${count} 次，请补充更多上下文使其唯一。`);
+      }
 
-    const limit =
-      type === 'user'
-        ? this.getUserLimit()
-        : this.getSessionLimit();
-    if (newContent.length > limit) {
-      return {
-        success: false,
-        message: `${type === 'user' ? '用户画像' : 'Session 记忆'}总长度 (${newContent.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`,
-      };
-    }
+      // 唯一匹配替换（空/省略 = 删除匹配片段）
+      const newContent =
+        currentContent.slice(0, firstIndex) + newStr + currentContent.slice(firstIndex + oldStr.length);
 
+      const limit =
+        type === 'user'
+          ? this.getUserLimit()
+          : this.getSessionLimit(target);
+      if (newContent.length > limit) {
+        throw new Error(`${type === 'user' ? '用户画像' : 'Session 记忆'}总长度 (${newContent.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`);
+      }
+
+      const preStart = Math.max(0, firstIndex - 30);
+      const postEnd = Math.min(newContent.length, firstIndex + newStr.length + 30);
+      preview = newContent.slice(preStart, postEnd);
+      return newContent;
+    };
+
+    let updateResult: { success: boolean; content: string; error?: string };
     if (type === 'user') {
-      await this.storage.writeUserProfile(target, newContent);
+      if (!(await this.storage.existsUserProfile(target))) {
+        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
+      }
+      updateResult = await this.storage.updateUserProfile(target, doReplace);
     } else {
-      await this.storage.writeSessionMemory(target, newContent);
+      if (!(await this.storage.existsSessionMemory(target))) {
+        return { success: false, message: '目标记忆不存在，请先 create_memory 创建。' };
+      }
+      updateResult = await this.storage.updateSessionMemory(target, doReplace);
     }
 
-    const preStart = Math.max(0, firstIndex - 30);
-    const postEnd = Math.min(newContent.length, firstIndex + newStr.length + 30);
-    const preview = newContent.slice(preStart, postEnd);
+    if (!updateResult.success) {
+      return {
+        success: false,
+        message: updateResult.error || '编辑记忆失败。',
+      };
+    }
 
     const message = `已编辑${type === 'user' ? '用户画像' : 'Session 记忆'} (${target})：${preview}`;
 

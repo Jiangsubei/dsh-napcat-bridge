@@ -133,7 +133,9 @@ describe('契约测试: 回合锚定锁定与合成 ID 隔离防御修复 (Turn 
       })
     );
 
-    await new Promise((r) => setTimeout(r, 150));
+    for (let i = 0; i < 30 && capturedUserMsgs.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(capturedUserMsgs).toHaveLength(1);
 
     // 2. 启动 Turn 1

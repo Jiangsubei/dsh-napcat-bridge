@@ -97,9 +97,9 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(run).toBeDefined();
     expect(run!.isCancelRequested).toBe(false);
 
-    // 模拟子代理注册
-    const abortMock = vi.fn();
-    run!.beginRequest({ abort: abortMock });
+    // 模拟子代理注册 (A17: 真实 0.2.1 Agent.cancel 签名)
+    const cancelMock = vi.fn();
+    run!.beginRequest({ cancel: cancelMock });
 
     // 模拟前台 turn/start 到来触发取消
     const cancelPromise = reviewManager.cancelReviewForLiveTurn('group_3000000001');
@@ -110,7 +110,7 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
 
     await cancelPromise;
     expect(run!.isCancelRequested).toBe(true);
-    expect(abortMock).toHaveBeenCalled();
+    expect(cancelMock).toHaveBeenCalledWith({ kind: 'parent' });
   });
 
   it('契约 3: 严格工具白名单沙箱 (仅允许 read_memory, create_memory, edit_memory, read_chat_history)', () => {
@@ -265,13 +265,20 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(mockCtx.agents.create).toHaveBeenCalledWith(expect.objectContaining({
       seed: parentEvents.slice(0, 3),
       inheritedEventCount: 3,
+      setup: expect.any(Function),
       meta: expect.objectContaining({
         parentSession: 'qq-group-3000000001',
         isSeeded: true,
         cwd: '/workspace/project-root',
-        allowedTools: expect.arrayContaining(['read_chat_history', 'read_memory']),
       }),
     }));
+    // 验证 0.2.1 契约 (A16): setup 注入工具白名单
+    const createArg = mockCtx.agents.create.mock.calls[0][0];
+    const mockTools = { restrict: vi.fn() };
+    createArg.setup({ tools: mockTools });
+    expect(mockTools.restrict).toHaveBeenCalledWith({
+      allow: expect.arrayContaining(['read_chat_history', 'read_memory']),
+    });
     expect(handleMock.dispose).toHaveBeenCalled();
   });
 
@@ -393,8 +400,8 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     expect(mockCtx.agents.create).toHaveBeenCalledWith(expect.objectContaining({
       seed: parentEvents,
       inheritedEventCount: 4,
+      setup: expect.any(Function),
       meta: expect.objectContaining({
-        isBackgroundReview: true,
         parentSession: 'main-session-qq-12345',
         cwd: '/workspace/project-root',
         isSeeded: true,
@@ -519,9 +526,9 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     };
 
     const projCacheDeleteMock = vi.fn(async () => {
-      callTimeline.push('step3:sessionProjectionCache.delete');
+      callTimeline.push('step3:sessionProjections.delete');
     });
-    mockCtx.sessionProjectionCache = {
+    mockCtx.sessionProjections = {
       whenIdle: vi.fn().mockResolvedValue(undefined),
       delete: projCacheDeleteMock,
     };
@@ -545,7 +552,7 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     // 验证销毁时序：Step 1 handle.dispose 必须排在首位
     expect(callTimeline[0]).toBe('step1:agentHandle.dispose');
     expect(callTimeline).toContain('step2:sessions.detachEntered');
-    expect(callTimeline).toContain('step3:sessionProjectionCache.delete');
+    expect(callTimeline).toContain('step3:sessionProjections.delete');
     expect(callTimeline).toContain('step5:workspace.detachSession');
 
     // 验证物理目录已被彻底删除（且通过 encodeSegment 寻址找到并删除）

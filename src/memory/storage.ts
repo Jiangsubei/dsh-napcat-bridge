@@ -6,7 +6,7 @@
 import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { atomicWriteFile } from '../utils/atomic-write.js';
+import { atomicWriteFile, atomicWriteFileSync } from '../utils/atomic-write.js';
 import {
   DEFAULT_MEMORY_DIR,
   DEFAULT_MEMORY_BUDGET_CHARS,
@@ -20,6 +20,7 @@ export class MemoryStorage {
   private dshHome?: string;
   private sessionCache: Map<string, string> = new Map();
   private userCache: Map<string, string> = new Map();
+  private updateLocks: Map<string, Promise<any>> = new Map();
 
   constructor(storageDir?: string, dshHome?: string) {
     this.dshHome = dshHome;
@@ -86,6 +87,37 @@ export class MemoryStorage {
     const filePath = this.getSessionMemoryPath(key);
     await atomicWriteFile(filePath, content);
     this.sessionCache.set(key, content);
+  }
+
+  /**
+   * 线程安全 CAS / 原子更新 Session 记忆 (B10)
+   */
+  public async updateSessionMemory(
+    peer: string,
+    updater: (current: string) => Promise<string> | string
+  ): Promise<{ success: boolean; content: string; error?: string }> {
+    const key = peer || 'default';
+    const prevLock = this.updateLocks.get(key) || Promise.resolve();
+    let releaseLock!: () => void;
+    const newLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    this.updateLocks.set(key, newLock);
+
+    try {
+      await prevLock;
+      const current = await this.readSessionMemory(key);
+      const updated = await updater(current);
+      await this.writeSessionMemory(key, updated);
+      return { success: true, content: updated };
+    } catch (err: any) {
+      return { success: false, content: '', error: err?.message || String(err) };
+    } finally {
+      releaseLock();
+      if (this.updateLocks.get(key) === newLock) {
+        this.updateLocks.delete(key);
+      }
+    }
   }
 
   public async readSessionMemoryRaw(peer: string): Promise<string> {
@@ -166,6 +198,37 @@ export class MemoryStorage {
     }
   }
 
+  /**
+   * 线程安全 CAS / 原子更新 User Profile (B10)
+   */
+  public async updateUserProfile(
+    qq: string,
+    updater: (current: string) => Promise<string> | string
+  ): Promise<{ success: boolean; content: string; error?: string }> {
+    const key = qq && qq.trim() ? qq.trim() : 'default';
+    const prevLock = this.updateLocks.get(key) || Promise.resolve();
+    let releaseLock!: () => void;
+    const newLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    this.updateLocks.set(key, newLock);
+
+    try {
+      await prevLock;
+      const current = await this.readUserProfile(key);
+      const updated = await updater(current);
+      await this.writeUserProfile(key, updated);
+      return { success: true, content: updated };
+    } catch (err: any) {
+      return { success: false, content: '', error: err?.message || String(err) };
+    } finally {
+      releaseLock();
+      if (this.updateLocks.get(key) === newLock) {
+        this.updateLocks.delete(key);
+      }
+    }
+  }
+
   // ==================== 同步读写方法 (供 System Prompt 同步组装) ====================
 
   public readSessionMemorySync(peer: string): string {
@@ -186,11 +249,7 @@ export class MemoryStorage {
   public writeSessionMemorySync(peer: string, content: string): void {
     const key = peer || 'default';
     const filePath = this.getSessionMemoryPath(key);
-    const dir = path.dirname(filePath);
-    if (!fsSync.existsSync(dir)) {
-      fsSync.mkdirSync(dir, { recursive: true });
-    }
-    fsSync.writeFileSync(filePath, content, 'utf-8');
+    atomicWriteFileSync(filePath, content);
     this.sessionCache.set(key, content);
   }
 
@@ -223,11 +282,7 @@ export class MemoryStorage {
   public writeUserProfileSync(qq: string, content: string): void {
     const key = qq && qq.trim() ? qq.trim() : 'default';
     const filePath = this.getUserProfilePath(key);
-    const dir = path.dirname(filePath);
-    if (!fsSync.existsSync(dir)) {
-      fsSync.mkdirSync(dir, { recursive: true });
-    }
-    fsSync.writeFileSync(filePath, content, 'utf-8');
+    atomicWriteFileSync(filePath, content);
     this.userCache.set(key, content);
     if (key === 'default') {
       this.userCache.clear();
@@ -245,7 +300,14 @@ export class MemoryStorage {
     currentQQ?: string
   ): string {
     const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-    const sessionMemory = this.readSessionMemorySync(peer).trim();
+    let sessionMemory = this.readSessionMemorySync(peer).trim();
+
+    // 预算硬上限 (B8): 避免 sessionMemory 本身超出 maxBudget
+    if (sessionMemory && sessionMemory.length > maxBudget) {
+      const suffix = '\n...(超预算截断)';
+      const cut = Math.max(0, maxBudget - suffix.length);
+      sessionMemory = sessionMemory.slice(0, cut) + suffix;
+    }
 
     const parts: string[] = [];
     if (sessionMemory) {
@@ -257,7 +319,7 @@ export class MemoryStorage {
     }
 
     const userBlocks: string[] = [];
-    let currentLength = sessionMemory.length;
+    let currentLength = parts.length > 0 ? parts[0].length : 0;
     let truncated = false;
 
     if (isPrivate) {
@@ -302,7 +364,7 @@ export class MemoryStorage {
             const p = this.readUserProfileSync(u.qq).trim();
             if (!p) continue;
             const b = p.startsWith('#') ? p : `### ${u.name} (${u.qq})\n${p}`;
-            simLength += b.length + 1;
+            simLength += (simLength > 0 ? 2 : 0) + b.length;
 
             if (u.qq === normalizedCurrentQQ) {
               naturallyIncluded = true;
@@ -336,8 +398,15 @@ export class MemoryStorage {
         const block = profile.startsWith('#')
           ? profile
           : `### ${user.name} (${user.qq})\n${profile}`;
+
+        // 若当前长度已达上限，停止装填并标记截断
+        if (currentLength >= maxBudget) {
+          truncated = true;
+          break;
+        }
+
         userBlocks.push(block);
-        currentLength += block.length + 1;
+        currentLength += (currentLength > 0 ? 2 : 0) + block.length;
 
         if (currentLength >= maxBudget) {
           // 达到或突破预算，检查后续候选用户中是否还有未装入的有画像用户

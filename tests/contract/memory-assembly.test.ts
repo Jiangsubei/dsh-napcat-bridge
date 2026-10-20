@@ -369,6 +369,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memoryService = setupMemoryService(ctx, {
       storageDir: memDir,
       budgetChars: 2200,
+      getCurrentSpeaker: (peer) => (peer === 'group_3000000002' ? '3333333333' : undefined),
       db,
     });
 
@@ -380,10 +381,9 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
 
     const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
 
-    // 当前收到来自 UserC (3333333333) 的消息，正在组装该轮 prompt
+    // 当前收到来自 UserC (3333333333) 的消息，正在组装该轮 prompt (D2/B13: 真实上下文，不假造 userId)
     const assembledGroup = await systemPrompt.assemble({
       session: { id: 'qq-group-3000000002-1' },
-      userId: '3333333333',
     });
 
     const memCtx = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');

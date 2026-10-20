@@ -581,6 +581,32 @@ export class SessionManager {
       }
     }
 
+    // 补充内存中已存在、但尚未由 NapCat 持久化入库的 live sessions / agents
+    const sessionsSvc = this.ctx.get('sessions') || (this.ctx as any).sessions;
+    if (sessionsSvc?.list && typeof sessionsSvc.list === 'function') {
+      try {
+        for (const s of sessionsSvc.list()) {
+          const sid = s?.id ? String(s.id) : '';
+          const parsed = sid ? parseSessionId(sid) : null;
+          if (parsed) {
+            const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
+            if (expectedBase === baseId && this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+              known.set(sid, { round: parsed.round, version: parsed.version });
+            }
+          }
+        }
+      } catch {}
+    }
+    const agentsSvc = this.ctx.get('agents') || (this.ctx as any).agents;
+    if (agentsSvc?.get) {
+      try {
+        const liveAgent = agentsSvc.get(baseId as any);
+        if (liveAgent && !this.isSessionArchived(baseId)) {
+          known.set(baseId, { round: 0, version: 1 });
+        }
+      } catch {}
+    }
+
     // 同时补充来自 db 的记录，并校验物理存在性
     const dbRecord = this.db?.getSessionState(peer);
     if (dbRecord?.current_session_id) {
