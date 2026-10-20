@@ -288,5 +288,7 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     expect(idxU1_normal).toBeGreaterThan(-1);
     expect(idxU2_normal).toBeGreaterThan(-1);
     expect(idxU1_normal).toBeLessThan(idxU2_normal);
+    // 强化断言 (B8/06-测试一致性报告): u3 未被错误提拔，确被截断丢弃
+    expect(snapshotU1).not.toContain('User3 (u3)');
   });
 });

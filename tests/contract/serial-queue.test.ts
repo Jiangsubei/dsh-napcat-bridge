@@ -118,4 +118,16 @@ describe('契约测试: 共享 per-peer 串行发送器保序 (Spec §7.3 / P-02
     expect(questionIdx).toBeGreaterThan(textIdx); // 先文本后提问
     expect(approvalIdx).toBeGreaterThan(questionIdx); // 先提问后审批
   });
+
+  it('B7-契约 5: 任务 settle 后自动清理空闲 chains 映射，防止内存泄漏', async () => {
+    const sender = new PerPeerSerialSender();
+    await sender.enqueue(PEER, async () => {
+      return 42;
+    });
+
+    // 等待 microtask 清理微任务
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // 任务完成后，内部链应当已经从 chains 映射中移除
+    expect((sender as any).chains.has(PEER)).toBe(false);
+  });
 });

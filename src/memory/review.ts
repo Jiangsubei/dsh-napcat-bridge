@@ -11,7 +11,6 @@
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MemoryStorage } from './storage.js';
 import type { MessageDatabase } from '../storage/database.js';
@@ -94,9 +93,13 @@ export class BackgroundReviewRun {
       this._cancelDispatched = true;
       const agent = this._reviewAgent;
       try {
-        if (typeof agent.abort === 'function') agent.abort();
-        else if (typeof agent.interrupt === 'function') agent.interrupt();
-        else if (typeof agent.cancel === 'function') agent.cancel();
+        if (typeof agent.cancel === 'function') {
+          agent.cancel({ kind: 'parent' });
+        } else if (typeof agent.abort === 'function') {
+          agent.abort();
+        } else if (typeof agent.interrupt === 'function') {
+          agent.interrupt();
+        }
       } catch {}
       return agent;
     }
@@ -118,6 +121,10 @@ export interface BackgroundReviewConfig {
   enabled?: boolean;
   turnsInterval?: number;
   toolCallsInterval?: number;
+  getEnabled?: () => boolean;
+  getTurnsInterval?: () => number;
+  getToolCallsInterval?: () => number;
+  getReviewModel?: () => string | undefined;
   storageDir?: string;
   dshHome?: string;
   reviewModel?: string;
@@ -265,7 +272,8 @@ export class BackgroundReviewManager {
     state.turnsCount += 1;
     state.toolCallsCount += toolCallsCount;
 
-    if (this.config.enabled === false) {
+    const isEnabled = this.config.getEnabled ? this.config.getEnabled() : (this.config.enabled ?? DEFAULT_REVIEW_ENABLED);
+    if (isEnabled === false) {
       return {
         shouldReview: false,
         reason: 'Background review disabled',
@@ -274,8 +282,13 @@ export class BackgroundReviewManager {
       };
     }
 
-    const turnsInterval = this.config.turnsInterval || DEFAULT_REVIEW_TURNS_INTERVAL;
-    const toolCallsInterval = this.config.toolCallsInterval || DEFAULT_REVIEW_TOOL_CALLS_INTERVAL;
+    const turnsInterval =
+      (this.config.getTurnsInterval ? this.config.getTurnsInterval() : this.config.turnsInterval) ||
+      DEFAULT_REVIEW_TURNS_INTERVAL;
+    const toolCallsInterval =
+      (this.config.getToolCallsInterval
+        ? this.config.getToolCallsInterval()
+        : this.config.toolCallsInterval) || DEFAULT_REVIEW_TOOL_CALLS_INTERVAL;
 
     const deltaTurns = state.turnsCount - state.lastReviewedTurn;
     const deltaToolCalls = state.toolCallsCount - state.lastReviewedToolCall;
@@ -425,10 +438,11 @@ export class BackgroundReviewManager {
       if (agentsService?.create) {
         try {
           let reviewModelSelection: any = undefined;
+          const dynamicReviewModel = this.config.getReviewModel ? this.config.getReviewModel() : this.config.reviewModel;
           if (sessionContext.reviewModel) {
             reviewModelSelection = { model: sessionContext.reviewModel };
-          } else if (this.config.reviewModel) {
-            reviewModelSelection = { model: this.config.reviewModel };
+          } else if (dynamicReviewModel) {
+            reviewModelSelection = { model: dynamicReviewModel };
           } else if (
             this.sessionManager &&
             typeof this.sessionManager.getModelSelection === 'function' &&
@@ -440,24 +454,23 @@ export class BackgroundReviewManager {
             reviewModelSelection = { model: sessionContext.mainModel };
           }
 
-          const maxIterations = this.config.maxIterations || REVIEW_MAX_ITERATIONS;
-
-          // DSH 官方原生 Fork 契约：设置 parentSession 与 isSeeded，origin 设为 'fork'，不挂载工作区
+          // DSH 官方原生 Fork 契约：设置 parentSession 与 isSeeded，setup 注入工具白名单 (A16)
           agentHandle = await agentsService.create({
             sessionId: reviewSessionId,
             model: reviewModelSelection?.model,
-            maxIterations,
+            setup: (agentCtx: any) => {
+              const toolsSvc =
+                (typeof agentCtx.get === 'function' ? agentCtx.get('tools') : undefined) ||
+                agentCtx.tools;
+              if (toolsSvc && typeof toolsSvc.restrict === 'function') {
+                toolsSvc.restrict({ allow: [...ALLOWED_MEMORY_REVIEW_TOOLS] });
+              }
+            },
             ...(seed !== undefined ? { seed, inheritedEventCount } : {}),
             meta: {
-              isBackgroundReview: true,
-              // 注意：DSH validateSessionHeader 要求 origin 必须是 "subagent" 或「不传」。
-              // 传任何其他值(如 'fork')都会在 create 时抛 "origin must be subagent"。
-              // 这里不传 origin —— 通过校验，且 WebUI 侧 `origin !== 'subagent'` 不会把它当子代理显示。
               parentSession: parentSessionId,
               ...(parentCwd ? { cwd: parentCwd } : {}),
               ...(seed !== undefined ? { isSeeded: true } : {}),
-              allowedTools: ALLOWED_MEMORY_REVIEW_TOOLS,
-              maxIterations,
             },
             agentOptions: {
               provider: reviewModelSelection?.provider,
@@ -629,9 +642,12 @@ export class BackgroundReviewManager {
         }
       }
 
-      // Step 3：投影缓存清理（sessionProjectionCache.delete）
+      // Step 3：投影缓存清理（A18: 对齐 0.2.1 的 sessionProjections 官方服务名）
       const projCache =
-        this.ctx.get?.('sessionProjectionCache') || (this.ctx as any).sessionProjectionCache;
+        (typeof this.ctx.get === 'function' ? this.ctx.get('sessionProjections') : undefined) ||
+        (typeof this.ctx.get === 'function' ? this.ctx.get('sessionProjectionCache') : undefined) ||
+        (this.ctx as any).sessionProjections ||
+        (this.ctx as any).sessionProjectionCache;
       if (projCache) {
         try {
           await projCache.whenIdle?.();
@@ -641,19 +657,7 @@ export class BackgroundReviewManager {
         }
       }
 
-      // Step 4：Spill 临时目录清理（spillStore）
-      const spill = this.ctx.get?.('spillStore') || (this.ctx as any).spillStore;
-      if (spill?.root) {
-        try {
-          const spillDir = path.join(
-            spill.root,
-            `session-${createHash('sha256').update(sessionId).digest('hex').slice(0, 12)}`
-          );
-          await rm(spillDir, { recursive: true, force: true }).catch(() => {});
-        } catch {}
-      }
-
-      // Step 5：工作区解绑与记账清理（workspaceRegistry 解绑）
+      // Step 4：工作区解绑与记账清理（workspaceRegistry 解绑）
       if (parentWorkspace && typeof parentWorkspace.detachSession === 'function') {
         try {
           await parentWorkspace.detachSession(sessionId).catch(() => {});

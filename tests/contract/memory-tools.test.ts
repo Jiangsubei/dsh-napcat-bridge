@@ -286,16 +286,21 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     const names = toolDefs.map((t) => t.name);
     expect(names).toEqual(['read_memory', 'create_memory', 'edit_memory']);
 
-    // 验证 resolveContextPeerAndQQ 上下文推导
+    // 验证 resolveContextPeerAndQQ 上下文推导 (D2/B13: 真实上下文，无 speaker 时如实降级 default，有 speaker 时解析发言人)
     const execGroup = {
       agent: {
-        userId: '2000000001',
         session: { id: 'qq-group-3000000001-1' },
       },
     };
     const resolvedGroup = resolveContextPeerAndQQ(execGroup);
     expect(resolvedGroup.peer).toBe('group_3000000001');
-    expect(resolvedGroup.qq).toBe('2000000001');
+    expect(resolvedGroup.qq).toBe('default');
+
+    const resolvedWithSpeaker = resolveContextPeerAndQQ(execGroup, (peer) =>
+      peer === 'group_3000000001' ? '2000000001' : undefined
+    );
+    expect(resolvedWithSpeaker.peer).toBe('group_3000000001');
+    expect(resolvedWithSpeaker.qq).toBe('2000000001');
 
     const execPrivate = {
       agent: {

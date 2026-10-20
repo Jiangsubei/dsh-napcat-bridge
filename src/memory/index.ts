@@ -41,6 +41,11 @@ export interface MemoryServiceOptions {
   reviewTurnsInterval?: number;
   reviewToolCallsInterval?: number;
   reviewModel?: string;
+  getReviewEnabled?: () => boolean;
+  getReviewTurnsInterval?: () => number;
+  getReviewToolCallsInterval?: () => number;
+  getReviewModel?: () => string | undefined;
+  getCurrentSpeaker?: (peer: string) => string | undefined;
   db?: MessageDatabase;
   sessionManager?: SessionManager;
 }
@@ -49,7 +54,8 @@ export function registerMemoryPromptContext(
   ctx: Context,
   storage: MemoryStorage,
   db?: MessageDatabase,
-  budgetInput: (() => number) | MemoryBudgetOptions = () => DEFAULT_MEMORY_BUDGET_CHARS
+  budgetInput: (() => number) | MemoryBudgetOptions = () => DEFAULT_MEMORY_BUDGET_CHARS,
+  getCurrentSpeaker?: (peer: string) => string | undefined
 ): () => void {
   const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
   if (!systemPrompt || typeof systemPrompt.context !== 'function') {
@@ -60,9 +66,9 @@ export function registerMemoryPromptContext(
     name: 'napcat:memory',
     order: 40,
     text: (assembleCtx?: any) => {
-      const resolved = resolveContextPeerAndQQ(assembleCtx);
+      const resolved = resolveContextPeerAndQQ(assembleCtx, getCurrentSpeaker);
       const peer = resolved.peer;
-      const currentQQ = resolved.qq !== 'default' ? resolved.qq : undefined;
+      const currentQQ = resolved.qq !== 'default' ? resolved.qq : (getCurrentSpeaker ? getCurrentSpeaker(peer) : undefined);
 
       const isQQSession = Boolean(
         peer &&
@@ -138,6 +144,10 @@ export function setupMemoryService(
   const tools = new MemoryTools(storage, ctx, {
     getUserLimit: getPrivateBudget,
     getSessionLimit: getGroupBudget,
+    getSessionLimitFor: (peer: string) => {
+      const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
+      return isPrivate ? getPrivateBudget() : getGroupBudget();
+    },
   });
 
   const reviewManager = new BackgroundReviewManager(
@@ -146,6 +156,10 @@ export function setupMemoryService(
       enabled: options.reviewEnabled ?? DEFAULT_REVIEW_ENABLED,
       turnsInterval: options.reviewTurnsInterval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
       toolCallsInterval: options.reviewToolCallsInterval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+      getEnabled: options.getReviewEnabled,
+      getTurnsInterval: options.getReviewTurnsInterval,
+      getToolCallsInterval: options.getReviewToolCallsInterval,
+      getReviewModel: options.getReviewModel,
       storageDir: storage.getBaseDir(),
       dshHome: effectiveDshHome,
       reviewModel: options.reviewModel,
@@ -192,7 +206,8 @@ export function setupMemoryService(
     {
       getGroupBudget,
       getPrivateBudget,
-    }
+    },
+    options.getCurrentSpeaker
   );
   unregisters.push(promptDisposer);
 
