@@ -30,7 +30,7 @@ export function registerNapCatDynamicPrompt(
   getPersona: () => string,
   getBehavior: () => string
 ): () => void {
-  const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
+  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
   if (!systemPrompt || typeof systemPrompt.context !== 'function') {
     return () => {};
   }
