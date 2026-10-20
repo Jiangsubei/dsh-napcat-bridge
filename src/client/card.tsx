@@ -93,7 +93,6 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   proactive_cooldown_mins: 10,
   proactive_night_dnd: true,
   memory_storage_dir: '.dsh/napcat/napcat_memory',
-  memory_budget_chars: 2200,
   group_memory_budget_chars: 2200,
   private_memory_budget_chars: 1500,
   review_enabled: true,
@@ -691,7 +690,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             hint="群聊会话规则与多位活跃群友画像注入 Prompt 的字符预算上限，兼单群规则写入物理上限 (默认 2200)"
             placeholder="2200"
             numeric
-            value={String(draft.group_memory_budget_chars ?? draft.memory_budget_chars ?? 2200)}
+            value={String(draft.group_memory_budget_chars ?? 2200)}
             disabled={saving}
             overridden={model.isOverridden('group_memory_budget_chars')}
             onReset={() => handleResetField('group_memory_budget_chars')}

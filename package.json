@@ -12,10 +12,12 @@
     },
     "./client": "./dist/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*": "./locale/*",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "locale",
     "cordis.patch.yml",
     "package.json",
     "README.md"
