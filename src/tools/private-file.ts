@@ -5,7 +5,7 @@
  *   首选 get_private_file_url：拿 data.url（HTTP 直链）→ mediaManager.downloadAndSave 落盘
  *       （NapCat 源码实证该接口依赖 packet 后端，QQ 9.9.30-48762 起可能不可用，见 GetPrivateFileUrl.ts）；
  *   回退 get_file：拿 NapCat 侧本地路径 → windowsPathToWsl 翻译为 /mnt/<drive>/… → 校验存在 →
- *       拷入 napcat_download/files/<peer>/（不依赖 packet，见 GetFile.ts）；
+ *       拷入 napcat/downloads/files/<peer>/（不依赖 packet，见 GetFile.ts）；
  *   两路都失败：返回清晰错误（文件下载失败: <具体环节原因>…），绝不返回占位假路径。
  *
  * 目录约定（任务包 §3.2，沿用现有体系不新建）：落盘到 files/<peer>/（peer=user_<qq>）。
