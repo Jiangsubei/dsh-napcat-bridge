@@ -1,7 +1,7 @@
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': true
-  better-sqlite3: true
+  better-sqlite3: false
   esbuild: true
   koffi: true
   node-pty: true
