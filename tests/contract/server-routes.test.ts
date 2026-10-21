@@ -384,6 +384,118 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       expect(result.body.ok).toBe(true);
       expect(updateMock).toHaveBeenCalled();
     });
+
+    it('当持久化 settings.mutate 抛出异常时，正确记录日志并返回 HTTP 500 与错误消息', async () => {
+      let handler: any;
+      const errorMock = vi.fn();
+      const mockCtx: any = {
+        logger: () => ({ error: errorMock, info: vi.fn(), warn: vi.fn() }),
+        get: vi.fn((name) => {
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          if (name === 'settings') {
+            return {
+              mutate: vi.fn().mockRejectedValue(new Error('Config field "invalid_field" is not volatile')),
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      registerConfigRoute(mockCtx, () => ({} as BridgePluginConfig), async () => {});
+
+      const req = createMockReq('POST', { ws_port: 9000 });
+      const { res, getResult } = createMockRes();
+
+      await handler(req, res);
+      const result = await getResult();
+
+      expect(result.status).toBe(500);
+      expect(result.body.ok).toBe(false);
+      expect(result.body.error).toContain('is not volatile');
+      expect(errorMock).toHaveBeenCalledWith(
+        expect.stringContaining('持久化配置到 settings 失败'),
+        expect.any(Error)
+      );
+    });
+
+    it('保存包含 bot_qq 的配置后，后续 GET 请求能正确读取更新后的 bot_qq 与其他字段（防恢复默认值）', async () => {
+      let handler: any;
+      let persistedSettings: Record<string, unknown> = {};
+      const mutateMock = vi.fn().mockImplementation(async (_ns: string, ops: any[]) => {
+        for (const op of ops) {
+          if (op.op === 'set') {
+            persistedSettings[op.path[0]] = op.value;
+          }
+        }
+        return { ok: true };
+      });
+
+      let currentConfig: BridgePluginConfig = {
+        ws_port: 8080,
+        bot_qq: '',
+        persona: '',
+      };
+
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          if (name === 'settings') {
+            return { mutate: mutateMock };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      const reconcileMock = vi.fn().mockImplementation(async (payload) => {
+        currentConfig = { ...currentConfig, ...payload };
+      });
+
+      registerConfigRoute(mockCtx, () => currentConfig, reconcileMock);
+
+      // 1. 模拟保存包含 bot_qq、persona 与 ws_port 的修改
+      const saveReq = createMockReq('POST', {
+        ws_port: 9876,
+        bot_qq: '1234567890',
+        persona: '猫娘助手',
+      });
+      const { res: saveRes, getResult: getSaveResult } = createMockRes();
+      await handler(saveReq, saveRes);
+      const saveResult = await getSaveResult();
+
+      expect(saveResult.status).toBe(200);
+      expect(saveResult.body.ok).toBe(true);
+      expect(mutateMock).toHaveBeenCalled();
+      expect(persistedSettings.bot_qq).toBe('1234567890');
+      expect(persistedSettings.persona).toBe('猫娘助手');
+
+      // 2. 模拟面板关闭后重新打开发送 GET 请求读取配置
+      const readReq = createMockReq('GET');
+      const { res: readRes, getResult: getReadResult } = createMockRes();
+      await handler(readReq, readRes);
+      const readResult = await getReadResult();
+
+      expect(readResult.status).toBe(200);
+      expect(readResult.body.ok).toBe(true);
+      expect(readResult.body.config.bot_qq).toBe('1234567890');
+      expect(readResult.body.config.ws_port).toBe(9876);
+      expect(readResult.body.config.persona).toBe('猫娘助手');
+    });
   });
 
   describe('4. HTTP 协议规范与工具函数契约', () => {
