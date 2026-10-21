@@ -487,28 +487,26 @@ export class SessionManager {
   }
 
   /**
-   * 检查指定 Session 是否在内存或物理磁盘中有效存在
+   * 检查指定 Session 是否在物理磁盘中有效存在（以真实存在的会话日志文件为唯一依据，严禁因内存残留误判）
    */
   isSessionPhysicallyPresent(sessionId: string): boolean {
-    if (this.activeHandles.has(sessionId)) return true;
-    const live = (this.ctx.get('sessions') || (this.ctx as any).sessions)?.get?.(sessionId);
-    if (live) return true;
-
     const persistence = this.ctx.get('sessionPersistence') || (this.ctx as any).sessionPersistence;
     if (persistence && typeof (persistence as any).locate === 'function') {
       try {
         const loc = (persistence as any).locate({ id: sessionId, cwd: this.resolveCwd() });
         if (loc?.path) {
-          if (fs.existsSync(loc.path) || fs.existsSync(path.dirname(loc.path))) {
+          if (fs.existsSync(loc.path) && !fs.statSync(loc.path).isDirectory()) {
             return true;
           }
         }
       } catch {}
     }
 
-    // 文件系统直接探测：支持 V3 encodeSegment 目录编码与 V3/V2/旧版会话文件名
+    // 文件系统直接探测：支持 V4/V3 encodeSegment 目录编码与 V4/V3/V2/旧版会话文件名
     const encodedId = encodeSegment(sessionId);
     const sessionFileCandidates = [
+      'session.v4.jsonl',
+      'session.v4.jsonl.zstd',
       'session.v3.jsonl',
       'session.v3.jsonl.zstd',
       'session.v2.jsonl',
@@ -540,7 +538,7 @@ export class SessionManager {
                     const hasLog = sessionFileCandidates.some((fn) =>
                       files.includes(fn)
                     );
-                    if (hasLog || files.length === 0) return true;
+                    if (hasLog) return true;
                   } else if (st.isFile()) {
                     return true;
                   }
@@ -560,10 +558,6 @@ export class SessionManager {
    * [D3 预留能力]: 保留供测试与外部模块引用
    */
   async isSessionPhysicallyPresentAsync(sessionId: string): Promise<boolean> {
-    if (this.activeHandles.has(sessionId)) return true;
-    const live = (this.ctx.get('sessions') || (this.ctx as any).sessions)?.get?.(sessionId);
-    if (live) return true;
-
     const persistence = this.ctx.get('sessionPersistence') || (this.ctx as any).sessionPersistence;
     if (persistence && typeof persistence.stat === 'function') {
       try {
@@ -1068,8 +1062,9 @@ export class SessionManager {
     let sessionId = this.peerToSessionId(peerOrSessionId);
     const peer = this.sessionIdToPeer(peerOrSessionId);
 
-    // 二次确认：若当前 sessionId 在运行时被归档，则立即换新 session
-    if (this.isSessionArchived(sessionId)) {
+    // 二次确认：若当前 sessionId 在运行时被归档或物理文件已不存在，则销毁旧句柄并重新寻址
+    if (this.isSessionArchived(sessionId) || (this.activeHandles.has(sessionId) && !this.isSessionPhysicallyPresent(sessionId))) {
+      await this.releaseActiveHandle(sessionId);
       this.peerCurrentSessionId.delete(peer);
       sessionId = this.peerToSessionId(peer);
     }
@@ -1077,10 +1072,10 @@ export class SessionManager {
     const selectionRef = this.getOrCreateSelectionRef(sessionId);
     const agents = this.ctx.get('agents') || (this.ctx as any).agents;
 
-    // 1. 若当前会话已由 QQ 自身持有专属写句柄，直接复用
+    // 1. 若当前会话已由 QQ 自身持有专属写句柄，检查其归档状态与物理有效性
     if (this.activeHandles.has(sessionId)) {
       const handle = this.activeHandles.get(sessionId)!;
-      if (!this.isSessionArchived(sessionId)) {
+      if (!this.isSessionArchived(sessionId) && this.isSessionPhysicallyPresent(sessionId)) {
         (handle.agent as any).modelSelection = selectionRef;
         this.updateSessionTitle((handle.agent as any).session, peer, sessionId);
         return handle.agent;
@@ -1089,6 +1084,8 @@ export class SessionManager {
       if (typeof handle.dispose === 'function') {
         await Promise.resolve(handle.dispose()).catch(() => {});
       }
+      this.peerCurrentSessionId.delete(peer);
+      sessionId = this.peerToSessionId(peer);
     }
 
     // 2. 内存中已存在该会话的 live agent（可能由 Web UI 会话控制器等其它 owner 创建/持有）：
@@ -1104,7 +1101,7 @@ export class SessionManager {
       return existingAgent;
     }
 
-    const cwd = this.resolveCwd(sessionId);
+    let cwd = this.resolveCwd(sessionId);
     await fsp.mkdir(cwd, { recursive: true });
 
     const defaultSel = this.getDefaultModelSelection();
@@ -1226,16 +1223,53 @@ export class SessionManager {
       if (typeof agents?.create !== 'function') {
         throw new Error('agents.create is not available');
       }
-      handle = await agents.create({
-        sessionId: sessionId as any,
-        agentOptions: {
-          provider,
-          model,
-          ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-        },
-        meta: { cwd },
-        setup: setupFn,
-      });
+      try {
+        handle = await agents.create({
+          sessionId: sessionId as any,
+          agentOptions: {
+            provider,
+            model,
+            ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+          },
+          meta: { cwd },
+          setup: setupFn,
+        });
+      } catch (createErr: any) {
+        if (
+          typeof createErr?.message === 'string' &&
+          (createErr.message.includes('already exists') || createErr.message.includes('already attached'))
+        ) {
+          const hash = generateSessionHash();
+          const parsed = parseSessionId(sessionId);
+          const fallbackSid = parsed
+            ? buildSessionId(
+                parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`,
+                parsed.round,
+                parsed.version,
+                hash
+              )
+            : `${sessionId}-${hash}`;
+          this.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
+            `[SessionManager] 创建会话 ${sessionId} 遭遇宿主内存残留冲突 (${createErr.message})，自动切换短哈希防撞会话: ${fallbackSid}`
+          );
+          sessionId = fallbackSid;
+          this.peerCurrentSessionId.set(peer, sessionId);
+          cwd = this.resolveCwd(sessionId);
+          await fsp.mkdir(cwd, { recursive: true });
+          handle = await agents.create({
+            sessionId: sessionId as any,
+            agentOptions: {
+              provider,
+              model,
+              ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+            },
+            meta: { cwd },
+            setup: setupFn,
+          });
+        } else {
+          throw createErr;
+        }
+      }
     }
 
     if (!handle) {
