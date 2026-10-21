@@ -437,9 +437,9 @@ export async function pokeUser(
 }
 
 export function normalizePeer(peer: string): string {
-  const groupMatch = peer.match(/^qq-group-([^-]+)(?:-\d+)?$/);
+  const groupMatch = peer.match(/^qq-group-([^-]+)/);
   if (groupMatch) return `group_${groupMatch[1]}`;
-  const userMatch = peer.match(/^qq-user-([^-]+)(?:-\d+)?$/);
+  const userMatch = peer.match(/^qq-user-([^-]+)/);
   if (userMatch) return `user_${userMatch[1]}`;
   return peer;
 }
