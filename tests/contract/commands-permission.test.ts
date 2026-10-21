@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
@@ -546,6 +546,66 @@ describe('契约测试: 两字中文斜杠命令与白名单门控 (Two-Characte
     });
     expect(res3.success).toBe(true);
     expect(sessionManager.getModelSelection(session.id)?.model).toBe('deepseek-v4-pro');
+  });
+
+  it('契约 13: /思考 -g 与 /模型 -g 在存在离线或失效会话 (session not found) 时容错隔离，确保全局切换成功', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const sessionActive = booted.ctx.sessions.create('qq-group-1040' as any);
+    const admins = ['2000000001'];
+
+    // 模拟历史残留的离线/失效会话（如冷启动、旧会话已被清理等）
+    const staleSid = 'qq-user-1000000002';
+    sessionManager.getOrCreateSelectionRef(staleSid);
+
+    // 模拟宿主 sessionController: 对当前活跃会话正常放行，对失效会话抛出 DSH 官方 RemoteError/Error
+    const selectModelMock = vi.fn(async (req: any) => {
+      if (req.sessionId === staleSid) {
+        throw new Error(`session "${staleSid}" not found`);
+      }
+      return { selected: req };
+    });
+    const sessionController = booted.ctx.get('sessionController') || (booted.ctx as any).sessionController;
+    if (sessionController) {
+      sessionController.selectModel = selectModelMock;
+    } else {
+      (booted.ctx as any).provide('sessionController', { selectModel: selectModelMock });
+    }
+
+    try {
+      // 1. 测试 /思考 high -g：不应被 staleSid 的 not found 错误打断，必须返回成功
+      const thinkRes = await handleSlashCommand('/思考 high -g', {
+        userId: '2000000001',
+        admins,
+        session: sessionActive,
+        ctx: booted.ctx,
+        sessionManager,
+      });
+
+      expect(thinkRes.handled).toBe(true);
+      expect(thinkRes.success).toBe(true);
+      expect(thinkRes.reply).toContain('QQ全局思考深度已切换为：high (High)');
+      expect(sessionManager.getNapcatDefaultModel().reasoningEffort).toBe('high');
+      expect(sessionManager.getModelSelection(sessionActive.id)?.reasoningEffort).toBe('high');
+
+      // 2. 测试 /模型 deepseek-v4-flash -g：同样必须容错隔离并成功返回
+      const modelRes = await handleSlashCommand('/模型 deepseek-v4-flash -g', {
+        userId: '2000000001',
+        admins,
+        session: sessionActive,
+        ctx: booted.ctx,
+        sessionManager,
+      });
+
+      expect(modelRes.handled).toBe(true);
+      expect(modelRes.success).toBe(true);
+      expect(modelRes.reply).toContain('QQ全局模型已切换为：deepseek-official / deepseek-v4-flash');
+      expect(sessionManager.getNapcatDefaultModel().model).toBe('deepseek-v4-flash');
+      expect(sessionManager.getModelSelection(sessionActive.id)?.model).toBe('deepseek-v4-flash');
+    } finally {
+      if (sessionController && originalSelectModel) {
+        sessionController.selectModel = originalSelectModel;
+      }
+    }
   });
 });
 
