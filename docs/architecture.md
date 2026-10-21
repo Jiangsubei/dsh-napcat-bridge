@@ -85,7 +85,7 @@ NapCatGatewayServer 接收并解析 JSON
             │
             └─► 提交至 SessionManager:
                     │
-                    ├─ 按 peerId（私聊 `private:<user_id>` / 群聊 `group:<group_id>`）分配或复用 DSH 会话
+                    ├─ 按 peerId（私聊 `user_<user_id>` / 群聊 `group_<group_id>`）分配或复用 DSH 会话
                     ├─ 会话编号映射：支持空缺填补（gap-filling）与防撞短哈希
                     └─ 排队推入 DSH 消息流 (DSH Turn)
 ```
