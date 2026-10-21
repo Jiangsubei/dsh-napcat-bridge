@@ -15,6 +15,7 @@ import {
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+  DEFAULT_DATABASE_PATH,
 } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
@@ -248,7 +249,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   );
 
   // 3. 初始化存储、媒体管理器与会话管理器
-  const dbPath = path.resolve(dshHome, 'workspace/napcat/messages.sqlite');
+  const dbPath = resolveDshPath(dshHome, undefined, DEFAULT_DATABASE_PATH);
   const db = new MessageDatabase(dbPath);
   db.init();
 

@@ -47,7 +47,7 @@ describe('契约测试: 入站贴表情事件落库 (group_msg_emoji_like)', () 
   let agent: any;
 
   function dbPath(): string {
-    return path.join(tmpHome, 'workspace/napcat/messages.sqlite');
+    return path.join(tmpHome, 'napcat/messages.sqlite');
   }
 
   beforeEach(async () => {

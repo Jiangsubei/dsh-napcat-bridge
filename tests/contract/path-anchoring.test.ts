@@ -165,7 +165,7 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
       await fsp.writeFile(path.join(memUserDir, '2000000001.md'), testUserProfile, 'utf-8');
 
       // 2. 在 customDshHome 的 SQLite 数据库中写入发言活跃记录
-      const dbDir = path.resolve(customDshHome, 'workspace/napcat');
+      const dbDir = path.resolve(customDshHome, 'napcat');
       await fsp.mkdir(dbDir, { recursive: true });
       const db = new MessageDatabase(path.join(dbDir, 'messages.sqlite'));
       db.init();
@@ -211,7 +211,11 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
       expect(memCtx?.text).toContain('本群是技术研发交流群，严禁灌水');
       expect(memCtx?.text).toContain('资深架构师，关注绝对路径与安全性');
 
-      // 5. 严格验证 arbitraryCwd 绝无任何 .dsh 目录生成或被污染
+      // 5. 验证真实装配下，messages.sqlite 位于 customDshHome/napcat 下，绝不在 workspace/napcat 下
+      expect(fs.existsSync(path.resolve(customDshHome, 'napcat/messages.sqlite'))).toBe(true);
+      expect(fs.existsSync(path.resolve(customDshHome, 'workspace/napcat/messages.sqlite'))).toBe(false);
+
+      // 6. 严格验证 arbitraryCwd 绝无任何 .dsh 目录生成或被污染
       const arbitraryDshDir = path.resolve(arbitraryCwd, '.dsh');
       expect(fs.existsSync(arbitraryDshDir)).toBe(false);
     });
@@ -220,7 +224,7 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
   describe('契约 4: MediaStorageManager 路径绝对锚定与隔离验证', () => {
     it('显式传入 dshHome 时 downloadRoot 必须严格基于 dshHome 展开，绝不使用 process.cwd()', () => {
       const media = new MediaStorageManager({ dshHome: customDshHome });
-      const expectedDir = path.resolve(customDshHome, 'workspace/napcat_download');
+      const expectedDir = path.resolve(customDshHome, 'napcat/downloads');
 
       expect(media.downloadRoot).toBe(expectedDir);
       expect(media.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
@@ -229,7 +233,7 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
 
     it('未显式传参时根据 process.env.DSH_HOME 自动锚定在 customDshHome 下', () => {
       const media = new MediaStorageManager();
-      const expectedDir = path.resolve(customDshHome, 'workspace/napcat_download');
+      const expectedDir = path.resolve(customDshHome, 'napcat/downloads');
 
       expect(media.downloadRoot).toBe(expectedDir);
       expect(media.downloadRoot.startsWith(arbitraryCwd)).toBe(false);
@@ -320,7 +324,7 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
     });
 
     it('传入 customDshHome 下的路径并初始化，物理数据库严格在 dshHome 内', () => {
-      const dbPath = path.resolve(customDshHome, 'workspace/napcat/messages.sqlite');
+      const dbPath = path.resolve(customDshHome, 'napcat/messages.sqlite');
       const db = new MessageDatabase(dbPath);
       expect(db.dbPath).toBe(dbPath);
 
