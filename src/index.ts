@@ -99,8 +99,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const currentConfig = (): BridgePluginConfig => {
     const fromSettings = readSettingsConfig();
     const fromArgs = extractConfig(config);
-    let merged = mergeConfigs(fromSettings, fromArgs);
-    if (!fromSettings.bot_qq && !fromSettings.ws_token) {
+    // 0.2.1 规范优先级：以加载时传入的配置参数 (fromArgs) 为底，以用户在设置系统中配置并保存的最新项 (fromSettings) 覆盖
+    let merged = mergeConfigs(fromArgs, fromSettings);
+    if (!merged.bot_qq && !merged.ws_token) {
       const legacy = readLegacyConfig(dshHome);
       if (legacy) {
         merged = mergeConfigs(legacy, merged);

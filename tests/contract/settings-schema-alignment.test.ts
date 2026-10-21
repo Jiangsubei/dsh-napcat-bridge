@@ -41,32 +41,15 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     expect(clientKeys.includes('memory_budget_chars')).toBe(false);
   });
 
-  it('A7: 运行时热更字段标记为 .volatile()，核心身份 bot_qq 保留为非 volatile', () => {
+  it('A7: 运行时配置字段均标记为 .volatile()（包含 bot_qq），以支持 DSH 0.2.1 设置面板保存与热更新', () => {
     const schemaShape = (BridgeConfigSchema as any).dict || (BridgeConfigSchema as any).shape || {};
+    const schemaKeys = Object.keys(schemaShape);
 
-    // 验证 bot_qq 不应易失
-    expect(schemaShape.bot_qq?.meta?.volatile).toBeFalsy();
+    // 验证全量 25 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
+    expect(schemaKeys.length).toBe(25);
+    expect(schemaShape.bot_qq?.meta?.volatile).toBe(true);
 
-    // 验证可热更新的业务字段必须带有 .volatile() 标记
-    const volatileFields = [
-      'ws_port',
-      'ws_token',
-      'persona',
-      'behavior',
-      'admins',
-      'aliases',
-      'at_questioner',
-      'quote_original',
-      'image_ttl_days',
-      'proactive_reply_enabled',
-      'proactive_only_text',
-      'group_memory_budget_chars',
-      'private_memory_budget_chars',
-      'review_enabled',
-      'memory_storage_dir',
-    ];
-
-    for (const field of volatileFields) {
+    for (const field of schemaKeys) {
       expect(
         schemaShape[field]?.meta?.volatile,
         `field ${field} should be marked .volatile()`

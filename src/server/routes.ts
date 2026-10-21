@@ -98,6 +98,7 @@ export function registerConfigRoute(
   currentConfigGetter: () => BridgePluginConfig,
   queueReconcile: (cfg?: BridgePluginConfig) => Promise<void>
 ): () => void {
+  const logger = typeof (ctx as any).logger === 'function' ? (ctx as any).logger(SETTINGS_NAMESPACE) : console;
   let unregister: (() => void) | undefined;
   let isDisposed = false;
 
@@ -152,8 +153,13 @@ export function registerConfigRoute(
             } else if (typeof settings.update === 'function') {
               await settings.update(SETTINGS_NAMESPACE, cleanPayload);
             }
-          } catch {
-            // ignore persistence errors in test/mock environments
+          } catch (err: any) {
+            logger.error?.('[Plugin] 持久化配置到 settings 失败:', err);
+            sendJson(res, 500, {
+              ok: false,
+              error: err?.message || 'Failed to persist settings',
+            });
+            return;
           }
         }
 

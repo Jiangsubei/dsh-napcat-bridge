@@ -29,7 +29,7 @@ import type { BridgePluginConfig } from '../types/index.js';
 export const BridgeConfigSchema = z.object({
   ws_port: z.number().default(DEFAULT_WS_PORT).volatile().description('WebSocket 服务端监听端口 (NapCat 反向 WS 连接目标)'),
   ws_token: z.string().default('').role('secret').volatile().description('NapCat 连接鉴权 Token (留空不鉴权)'),
-  bot_qq: z.string().default('').description('机器人自身 QQ 号 (用于自循环防护与识别锚点，留空则自动降级并在启动时告警)'),
+  bot_qq: z.string().default('').volatile().description('机器人自身 QQ 号 (用于自循环防护与识别锚点，留空则自动降级并在启动时告警)'),
   admins: z.array(z.string()).default([]).volatile().description('管理员 QQ 号白名单 (斜杠命令授权)'),
   aliases: z.array(z.string()).default([]).volatile().description('助手点名别名列表 (群聊点名唤醒)'),
   at_questioner: z.boolean().default(false).volatile().description('群聊回复是否 @提问者'),
