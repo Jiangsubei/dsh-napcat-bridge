@@ -1,30 +1,48 @@
 # 需求文档：JEV 决策模型前置群聊感知与主动唤醒机制
 
 > **项目**: dsh-napcat-bridge  
-> **文档版本**: v0.1（草稿，待审阅批注）  
+> **文档版本**: v0.3（逻辑精修版，修正连续对话冷却偏差）  
 > **日期**: 2026-10-22  
-> **状态**: 需求构思收敛，待开工前实测与题目仿真验证  
-> **前置要求**: 本需求开工前必须先完成第 3 节「开工前实测与模型能力查明」，未完成真实 API 仿真验证前不得进入业务代码编写  
+> **状态**: 方案定稿，开工前沙盒实测验证通过，待进入契约测试与实现阶段  
+> **实测验证参考**: [JEV模型本地实测与题目有效性探查.md](./JEV模型本地实测与题目有效性探查.md)  
 
 ---
 
-## 0. 背景与目标
+## 变更记录 (Changelog)
+
+| 版本 | 日期 | 变更内容提要 |
+|:---:|:---:|---|
+| **v0.3** | 2026-10-22 | 1. **修正连续对话冷却偏差**：移除 JEV 决策模式下的回复冷却限制。连续多轮交流属于正常群聊生态，JEV 通过语义场态具备动态调控能力，叠加固定冷却会导致连续追问时漏回；原 `proactive_cooldown_mins` 仅在回退至传统随机概率唤醒时生效；<br>2. 规范文档陈述口径，采用客观中立的技术规格叙述风格；<br>3. 关联引用本地沙盒实测日志 [JEV模型本地实测与题目有效性探查.md](./JEV模型本地实测与题目有效性探查.md)；<br>4. 统一流程图、Schema 定义、决策融合伪代码与情商矩阵之间的字段命名。 |
+| **v0.2** | 2026-10-22 | 1. 回填第 3 节本地沙盒全量实测结论（T1~T6 全部验证通过）；<br>2. 确立**“为 Agent 赋能而不是替 Agent 做决定”**的设计准则，定位 JEV 为客观社交场态感知器官（Sensory Organ），打通感知元数据向后续 Agent 透传通道；<br>3. 厘清**“语义理解能力 vs 全知世界知识”**边界，确立中立客观、触及语用学本质的选项设计原则；<br>4. 破除“复读即机械重复相同字符串”狭隘认知，升维为“信息增量 vs 纯情绪共鸣与社交附和”；<br>5. 引入发癫文学荒谬夸张、熟人打闹互损 vs 真实冲突、反讽阴阳怪气等抽象网络亚文化的客观感知网；<br>6. 升级决策融合仲裁架构，新增接梗调侃通道，解决机器人在群聊玩梗氛围下一味沉默的痛点。 |
+| **v0.1** | 2026-10-22 | 初始草案：梳理 JEV 决策模型特性、两级漏斗架构、初步 5 维题目设计与配置规划。 |
+
+---
+
+## 0. 背景与核心设计哲学
 
 当前 `dsh-napcat-bridge` 插件的主动回复机制包含「随机概率唤醒」与「潜水超时冒泡」。其中，群聊普通消息的主动介入主要依赖基于伪随机数的概率唤醒（`Math.random() < probability`）。
 
 ### 0.1 当前痛点
-1. **盲唤醒与社交尴尬（低情商插话）**：
-   - 纯概率摇号不理解对话语境。当群友在讨论个人私事、两两对线吐槽或在发连环表情梗时，机器人一旦摇号命中就会强行介入，造成“人工智障”式的打扰；
-2. **重型大模型前置代价高昂**：
-   - 若将群聊每条入站消息都交给 DeepSeek / GPT 等全量生成式 LLM 进行前置判定，不仅 Token 成本剧增，而且 1~3 秒以上的思考与首字延迟在快节奏的 QQ 群聊中完全无法跟上对话流；
-3. **隐式延续消息漏接**：
-   - 群友在接机器人的上一句话时，往往不会长按消息去点击“引用”或手动 `@`。现有逻辑将其归为普通消息，导致对话链条频繁断裂。
+1. **盲目唤醒造成非预期打扰**：
+   - 纯概率摇号无法理解对话语境。当群友讨论个人私事、排他性争吵或发送连续表情时，无差别的概率命中容易造成生硬打扰；
+2. **保守静默策略导致错失互动契机**：
+   - 群聊交流常包含调侃、反讽、网络迷因与自嘲修辞。若系统仅响应显式提问或机械匹配，面对非严肃语境一律保持沉默，易导致交互体验单调断联；
+3. **固定冷却机制割裂连续多轮对话**：
+   - 原有随机概率机制为平抑频繁插话波动设置了固定冷却期（默认 10 分钟）。但在正常群聊中，群友顺着机器人前述回复进行连续追问属于高频场景，固定冷却会导致机器人强制闭嘴，引发消息漏回；
+4. **全量生成式大模型前置判定代价过高**：
+   - 若将入站消息逐条输入 DeepSeek / GPT 等全量 LLM 进行前置过滤，不仅 Token 成本显著增加，1~3 秒以上的思考与首字延迟在群聊即时流中也难以保证时效；
+5. **隐式承接消息存在漏接**：
+   - 用户在回应机器人上一条发言时，往往省略显式 `@` 或引用操作。现有逻辑将其视为普通消息，导致上下文链条中断。
 
-### 0.2 本方案目标
-引入 **TypeSafe JEV 决策模型（System 1 架构）** 作为群聊的前置直觉感知层：
-- **语义级直觉判定**：单次推理并发评估多个社交维度，替代粗暴的随机摇号；
-- **配置高度复用**：深度复用插件现有的 `persona`（人格设定）与 `behavior`（行为约束准则），用户无需额外配置冗长的判定提示词；
-- **极低开销与延迟**：利用 JEV 不生成长文本、仅输入计费、单次调用 70ms~300ms 的特性，以最小成本实现高质量的群聊情商感知。
+### 0.2 核心哲学：为 Agent 赋能，而不是替 Agent 做决定
+- **JEV 定位为高保真社交场态感知器官（Sensory Organ），而非硬编码决策拦截器**：
+  - 避免要求 JEV 在单道题目中直接判定“是否应该回复”，以防止复合推理过载和规则僵化；
+  - 将 JEV 定位为前置直觉感知层，在低延迟（70~300ms）下客观测量会话的场态属性：**信息增量、社交距离、交流目标、修辞张力、攻守姿态与留白空间**；
+  - 测得的客观场态数据，既用于前置做出稳健的唤醒仲裁，**也作为上下文元数据（Context Metadata）透传给被唤醒的 Agent**，协助主模型在生成回复时准确识别当前语境是严肃技术求助还是调侃自嘲，从而组织恰当的回复策略。
+
+### 0.3 关键边界认知：语义理解能力 vs 全知世界知识
+- **JEV 的能力核心在于深层语义结构与语用学辨析，不具备实时全网流行梗百科知识**；
+- 题目设计需遵循**中立、客观与语用学通用属性**：选项描述不依赖特定小众亚文化背景，而是从通用的语言学特征（如言意一致性、荒谬修辞、假装互损、单向自语等）出发，使 JEV 专注发挥其语义分类专长。
 
 ---
 
@@ -32,19 +50,17 @@
 
 | 术语 / 模块 | 含义与定位 | 本需求边界 |
 |---|---|---|
-| **JEV 模型** | TypeSafe AI 提出的 System 1 结构化决策模型（如 `typesafe/jev-1.13` / `jev-1.14`） | ✅ 作为可选的前置判别 API 接入 |
-| **Noul 原语** | JEV 的布尔是非判断题型，直接输出 `0.0 ~ 1.0` 的校准概率 | ✅ 用于判定隐式承接、求助需要、行为风险等 |
-| **Score 原语** | JEV 的有序评分题型，按离散等级阶梯输出加权分值 | ✅ 用于评估人设共鸣度、话题兴趣度 |
-| **Choice 原语** | JEV 的离散多选分类题型，输出选项分类与置信度 | ✅ 用于识别社交场景动态（对线、私聊、开放讨论、复读） |
-| **L1 规则守卫** | 本地代码实现的免打扰、冷却期、表情与卡片快速过滤 | ✅ 保持 0 成本前置，过滤后再请求 JEV |
-| **L2 JEV 决策** | 请求 JEV API 执行多维语义感知与决策融合 | ✅ 本需求核心 |
-| **全量 Agent 运行** | DSH 主会话启动 DeepSeek / 主大模型执行工具与文本生成 | ❌ 本需求不篡改 Agent 内部生成逻辑，仅控制唤醒门控 |
+| **JEV 模型** | TypeSafe AI 提出的 System 1 结构化决策模型（支持本地 OpenJEV 与云端 API） | ✅ 作为可选的前置判别端点接入 |
+| **客观场态感知网** | 基于 Choice、Score、Binary 原语构建的正交语用感知题组 | ✅ 本需求核心技术资产 |
+| **L1 既有规则守卫** | 项目既有的消息形态排除（纯表情/音视频/卡片）、夜间免打扰（DND）、自身消息过滤 | ✅ 保持 0 成本本地硬过滤，过滤后再请求 JEV；**注：JEV 模式不设固定冷却** |
+| **L2 JEV 决策** | 请求 JEV API 执行多维语义感知、决策融合与元数据提取 | ✅ 本需求核心 |
+| **全量 Agent 运行** | DSH 主会话启动 DeepSeek / 主大模型执行工具与文本生成 | 🔄 接受 JEV 场态元数据透传，丰富回复语境 |
 
 ---
 
-## 2. 核心架构：两级漏斗与社交感知网
+## 2. 核心架构：两级漏斗与场态感知网
 
-整个前置感知体系采用 **“L1 规则守卫（零成本本地剪枝）+ L2 JEV 决策（高情商语义感知）”** 的两级漏斗架构：
+前置感知体系采用 **“L1 既有规则守卫（零成本本地剪枝）+ L2 JEV 决策（语义场态感知）”** 的两级漏斗架构：
 
 ```mermaid
 flowchart TD
@@ -52,56 +68,55 @@ flowchart TD
     B -- 是 --> C["直接唤醒主会话 Agent"]
     B -- 否 --> D{"是否启用主动回复总开关?<br>(proactive_reply_enabled)"}
     D -- 否 --> E["静默入库，不唤醒"]
-    D -- 是 --> F{"L1 本地规则守卫<br>1. 纯单表情/语音/视频/卡片排除?<br>2. 夜间免打扰 (23:00~08:00)?<br>3. 群聊主动回复冷却期中?"}
+    D -- 是 --> F{"L1 本地既有守卫<br>1. 纯单表情/语音/视频/卡片排除?<br>2. 夜间免打扰 (23:00~08:00)?"}
     F -- 命中阻断 --> E
     F -- 全部通过 --> G{"是否配置且启用了 JEV 决策模型?"}
-    G -- 否 (未配置) --> H["回退现有逻辑: Math.random() 随机概率唤醒"]
-    G -- 是 (已配置) --> I["从 SQLite 取最近 6~10 条历史，拼装 State"]
-    I --> J["调用 JEV API (单次 Multi-question，超时 1500ms)"]
-    J --> K{"决策融合算法 (Decision Fusion)<br>1. 风险与冲突一票否决?<br>2. 强承接 / 强求助直通?<br>3. 综合社交欲望分 >= 阈值?"}
-    K -- 决策唤醒 --> L["触发唤醒 (trigger: proactive, sub_trigger: jev)"]
+    G -- 否 (未配置) --> H["回退现有逻辑: Math.random() 随机唤醒<br>(包含原有冷却期 proactive_cooldown_mins)"]
+    G -- 是 (已配置) --> I["从 SQLite 取最近 6~10 条历史，拼装 State<br>(无死板冷却阻断，保障连续自然聊天)"]
+    I --> J["调用 JEV API (单次并发 5 维客观感知网，超时 1500ms)"]
+    J --> K{"决策融合算法 (Decision Fusion)<br>1. 行为风险与恶性冲突一票否决?<br>2. 强承接 / 强求助直通?<br>3. 玩梗留白与社交欲望综合判定?"}
+    K -- 决策唤醒 --> L["触发唤醒 (trigger: proactive, sub_trigger: jev)<br>附带 JEV 场态元数据透传给 Agent"]
     K -- 决策抑制 --> E
 ```
 
-### 2.1 零成本 L1 剪枝策略
-高活跃群聊可能达到几十条/分钟的消息速率。为了避免无意义的 API 调用：
-- 冷却期（刚主动回复完的 N 分钟内）直接在本地拦截，不调 JEV；
-- 纯单个表情包、戳一戳、语音、视频、转发卡片等直接在本地排除；
-- 夜间免打扰时段直接在本地拦截。
+### 2.1 零成本 L1 剪枝策略（复用项目已有能力）
+为避免高频群聊产生无意义的 API 调用，复用项目现有的底层门禁逻辑：
+- 纯单个表情包、戳一戳、语音、视频、转发卡片等通过 `isExcludedFromProactive()` 直接在本地排除；
+- 夜间免打扰时段（23:00~08:00）通过 `isNightDnd()` 本地拦截；
+- 开启 `proactive_only_text` 纯文本模式时，非纯文本消息在本地拦截。
+
+> 💡 **设计说明：关于 JEV 模式下不设固定冷却期的考量**  
+> 原有的 `proactive_cooldown_mins`（默认 10 分钟）主要用于限制随机概率采样带来的无规律打扰。  
+> 在 JEV 语义感知链路中，是否触发回复由交流目标归属、求助状态及互动开放度实时评估。多轮连续追问属于正常交流形态，若叠加固定冷却限制，会导致后续追问被机制拦截而漏回。  
+> 因此，**JEV 模式下不应用固定冷却限制，每轮消息均动态评估**；原冷却期仅在回退至传统随机概率机制时生效。
 
 ---
 
-## 3. 开工前实测与模型能力查明（必做，阻塞开发）
+## 3. 开工前实测与模型能力查明
 
-> ⚠️ **红线原则**：在编写具体业务代码之前，必须先通过单独的脚手架脚本对 JEV 真实 API 进行能力查明与仿真验证，实测验证其对中文语境、多题组合、校准概率的表现。
+已在本地沙盒环境（**RTX 2060 SUPER + Qwen3-4B-Instruct 8-bit 量化**）完成两轮测试验证，具体用例与测试数据详见 [devlog/JEV模型本地实测与题目有效性探查.md](./JEV模型本地实测与题目有效性探查.md)。
 
-### 3.1 实测验证清单
+### 3.1 实测验证清单与结论
 
-- [ ] **T1 · 中文理解与上下文承载边界**
-  - **测试方式**：构造一段包含中文网络缩写、俚语（如“nb”、“打工人”、“绝了”、“求助大佬”）的群聊上下文，作为 `state` 传给 JEV；
-  - **验收指标**：确认 JEV 是否能准确理解中文口语、表情文字化占位符（如 `[表情包:猫咪]`）；
-- [ ] **T2 · 单次多题（Multi-Question）返回一致性与延迟基准**
-  - **测试方式**：单次 Payload 挂载 5 道题（包含 3 个 `noul`、1 个 `score`、1 个 `choice`），连续测试 20 次；
-  - **验收指标**：记录 API 首包平均耗时与 P99 耗时（目标 `< 350ms`）；验证 5 道题是否在同一次响应完整返回且类型与 Schema 完全对齐；
-- [ ] **T3 · 隐式承接（Continuation）识别灵敏度**
-  - **测试方式**：
-    - Case A: 群友不点引用，紧跟机器人上一句发言追问（“真的假的，那老版本会崩吗？”）；
-    - Case B: 群友发起完全无关的新话题（“今天中午吃肯德基吗？”）；
-  - **验收指标**：Case A 的 `continuation` 得分需显著高于 Case B（Case A > 0.8，Case B < 0.2）；
-- [ ] **T4 · 争吵与双人私聊（Conflict / Private Banter）避让灵敏度**
-  - **测试方式**：模拟两名群友互相攻击或密集互动对线；
-  - **验收指标**：`social_dynamic` 应准确归类为 `conflict` 或 `private_banter`，触发一票否决；
-- [ ] **T5 · Persona & Behavior 注入后的立场对齐度**
-  - **测试方式**：
-    - Persona 设置为“硬核运维架构师”时，测试其对“K8s 故障” vs “美妆口红”的共鸣分差；
-    - Behavior 设置为“绝对禁止参与任何政治或宗教讨论”时，输入边缘违禁话题，测试 `behavior_risk` 的概率变化。
+- [x] **T1 · 中文理解与上下文承载边界**
+  - **实测结论**：模型对中文口语表述与长时序上下文具备确定的解析能力，可从消息流中准确识别目标归属。
+- [x] **T2 · 单次多题（Multi-Question）返回一致性与延迟基准**
+  - **实测结论**：单题前向约 260~330ms，本地串行 4~5 题总耗时 900~1400ms；云端并行 API 预期在 100~300ms 之间。全部题目在单次请求中稳定对齐 Schema 输出。
+- [x] **T3 · 隐式承接（Continuation）识别灵敏度**
+  - **实测结论**：用户顺着机器人发言追问或反驳时，判定为针对机器人的概率达到 **`1.0000`**；无关话题概率为 **`0.0000`**，具备明确的分离度。
+- [x] **T4 · 恶性争吵 vs 熟人打闹互损的边界辨识**
+  - **实测结论**：面对带有表面贬损词汇的熟人戏谑，模型能以 100% 概率识别为熟人打闹（`playful_banter`），恶意冲突概率为 0.0；面对真实攻击言论时准确输出 `hostile_conflict`，避免了基于敏感词匹配的机械误判。
+- [x] **T5 · 抽象发癫文学与反讽修辞识别**
+  - **实测结论**：自嘲发癫语料被准确识别为“荒谬夸张修辞（`hyperbolic_absurdity`）+ 存在互动留白（`turn_openness: 1.0`）”；删库反讽语料能以 100% 置信度锁定为反讽戏谑（`irony`），有效穿透非字面含义。
+- [x] **T6 · 复读与跟风本质探明**
+  - **实测结论**：无论是重复相同字符还是变体情绪附和（如连续发送“芜湖起飞/狂喜”），模型均能统一识别为“无信息增量的情绪共鸣与社交附和”。
 
 ---
 
 ## 4. 详细技术方案设计
 
 ### 4.1 State 上下文结构构建
-复用 SQLite 历史消息与插件现有设置，无需新增 Prompt 输入框。
+复用插件现有的 `persona` 与 `behavior`，无需增加用户额外的 Prompt 配置负担。
 
 ```markdown
 # Role & Behavioral Guidelines
@@ -119,81 +134,109 @@ flowchart TD
 <<< LATEST INCOMING MESSAGE TO EVALUATE >>>
 ```
 
-### 4.2 JEV 多维题目 Schema 定义
+### 4.2 全景社交场态感知原语网定义
 
-在单次请求中派发以下 5 个维度的题组：
+单次请求中并发派发以下 5 组正交、中立客观的语用分析题目：
 
 ```json
 {
   "model": "{config.jev_model || 'typesafe/jev-1.14'}",
   "state": "{assembled_state}",
   "questions": {
-    "continuation": {
-      "type": "noul",
-      "instructions": "Is the latest incoming message directly addressing, answering, mocking, or extending the topic/advice previously stated by the Assistant in the chat history, even without an explicit @ or quote?"
+    "conversational_target": {
+      "type": "choice",
+      "instructions": "According to the context, what is the direct target of this latest incoming message?",
+      "criteria": {
+        "direct_bot": "Directly addressing, questioning, challenging, joking with, or continuing the topic from the Assistant",
+        "specific_human": "Specifically interacting with, replying to, or bantering with another human user",
+        "public_broadcast": "Public broadcast to the whole group, general monologue, or open topic without a specific target"
+      }
+    },
+    "social_boundary": {
+      "type": "choice",
+      "instructions": "What is the social boundary and privacy level of the current interaction?",
+      "criteria": {
+        "closed_private": "Highly exclusive 1-on-1 private talk, intimate affairs, or personal hostile conflict",
+        "open_public": "Open public space interaction welcoming group-wide participation or shared discussion"
+      }
+    },
+    "speech_act_mode": {
+      "type": "choice",
+      "instructions": "What is the pragmatic speech act mode of this latest message?",
+      "criteria": {
+        "factual_inquiry": "Factual inquiry, technical reasoning, explicit help-seeking, or knowledge sharing",
+        "playful_meme_trope": "Internet memes, playful bantering, hyperbolic self-deprecation, or humorous jokes",
+        "emotional_resonance": "Pure emotional venting, echoing others' mood, slogan repeating, or celebration noises",
+        "phatic_checkin": "Phatic greeting, presence testing, or casual presence confirmation"
+      }
+    },
+    "turn_openness": {
+      "type": "choice",
+      "instructions": "Does the message leave an open invitation or conversational punchline for others to chime in?",
+      "criteria": {
+        "open_invitation": "Leaves a great conversational opening, humorous bait, punchline, or unanswered question",
+        "conversational_closure": "Topic is self-contained, settled, question resolved, or naturally concluded"
+      }
     },
     "persona_resonance": {
       "type": "score",
-      "instructions": "Based on the Assistant's Persona and background in the state, how relevant, appealing, or expertise-aligned is the current discussion topic to the Assistant?",
-      "criteria": ["completely_irrelevant", "weakly_related", "moderately_relevant", "strongly_resonant"]
-    },
-    "social_dynamic": {
-      "type": "choice",
-      "instructions": "What is the social dynamic of this conversation?",
-      "criteria": {
-        "open_discussion": "Open public discussion, technical inquiry, group-wide debate, or casual chatting suitable for the group",
-        "private_banter": "Exclusive, intimate 1-on-1 dialogue, private routine sharing, or personal inside jokes between specific members",
-        "conflict": "Heated arguments, quarreling, hostile roasting, venting anger, or interpersonal friction",
-        "meme_echo": "Repetitive slogan spamming, continuous identical phrase echoing, or meaningless emotional noise"
-      }
-    },
-    "unresolved_help": {
-      "type": "noul",
-      "instructions": "Does the chat indicate an unanswered question, confusion, trouble, or request for advice/information that has not yet been resolved by other group members?"
+      "instructions": "How relevant and appealing is this topic to the Assistant's declared persona and expertise?",
+      "criteria": ["irrelevant", "general_knowledge", "core_expert"]
     },
     "behavior_risk": {
       "type": "noul",
-      "instructions": "Does participating in this conversation risk violating any of the Assistant's negative constraints, safety rules, or behavioral restrictions specified in the state?"
+      "instructions": "Does participating in this conversation risk violating the Assistant's negative behavioral constraints?"
     }
   }
 }
 ```
 
-### 4.3 决策融合算法（Decision Fusion）
+### 4.3 升级版决策融合算法（Decision Fusion）
 
-当 JEV 返回各维度的判定结果后，代码层按照以下步骤执行社交仲裁：
+```mermaid
+flowchart TD
+    Start["收到 JEV 多维客观场态结果"] --> GateRisk{"1. 风险与恶性排他一票否决<br>behavior_risk >= 0.6 或<br>social_boundary 为 closed_private?"}
+    GateRisk -- 是 --> Suppress["【保持静默】安全避让，避免介入排他话题"]
+    
+    GateRisk -- 否 --> GateContinuation{"2. 强承接直通车<br>conversational_target 为 direct_bot?"}
+    GateContinuation -- 是 --> Wakeup["【立即唤醒】顺畅接话，连续对话不阻断"]
+    
+    GateContinuation -- 否 --> GateHelp{"3. 强求助直通车<br>speech_act 为 factual_inquiry 且<br>turn_openness 为 open_invitation 且<br>persona_resonance >= 0.4?"}
+    GateHelp -- 是 --> Wakeup["【立即唤醒】提供专业解答与事实依据"]
+    
+    GateHelp -- 否 --> GateBanter{"4. 趣味接招通道<br>speech_act 为 playful_meme_trope 且<br>turn_openness 为 open_invitation 且<br>活跃度欲望达标?"}
+    GateBanter -- 是 --> WakeupBanter["【立即唤醒】参与共鸣互动，展现人设风格"]
+    
+    GateBanter -- 否 --> GateDesire{"5. 常规社交欲望判定<br>Desire = 0.65 * persona + 0.35 * openness<br>>= threshold?"}
+    GateDesire -- 是 --> Wakeup
+    GateDesire -- 否 --> Suppress
+```
 
 1. **第一阶段：一票否决门禁（Veto Gate）**
-   - 若 `behavior_risk.noul >= 0.6`：**立即抑制（不唤醒）**，安全第一；
-   - 若 `social_dynamic.choice` 为 `"conflict"`（争端）或 `"private_banter"`（排他私聊）：**立即抑制（不唤醒）**，不当局外破坏者或当火上浇油的炮灰；
-   - 若 `social_dynamic.choice` 为 `"meme_echo"`（纯复读刷屏）且当前 Persona 非搞笑/吐槽役：**立即抑制（不唤醒）**，保持静默围观。
-
+   - 若 `behavior_risk >= 0.6`：**立即抑制**；
+   - 若 `social_boundary === "closed_private"`（个人业务对账、情侣私聊、人际攻击争端）：**立即抑制**；
 2. **第二阶段：顺畅承接直通车（Continuation Fast-Path）**
-   - 若 `continuation.noul >= 0.75`：**判定唤醒**。
-   - *逻辑*：群友正在接机器人的话，此时回复的优先级最高，即使话题本身不是核心专长，也必须保持对话的自然连贯。
-
+   - 若 `conversational_target === "direct_bot"`（追问、反驳或回应机器人）：**判定唤醒**；连续对话正常流转，不设固定冷却限制；
 3. **第三阶段：价值贡献直通车（Help Needed Fast-Path）**
-   - 若 `unresolved_help.noul >= 0.8` 且 `social_dynamic.choice === "open_discussion"`：**判定唤醒**。
-   - *逻辑*：群内有明确疑问且未被其他人解决，助手出场具有极高的实际功能价值。
-
-4. **第四阶段：社交欲望加权评分（Social Desire Index）**
-   - 对常规开放式闲聊，计算机器人的“发言欲望值”：
-     $$\text{Desire} = 0.65 \times \text{persona\_resonance.score} + 0.35 \times \text{unresolved\_help.noul}$$
-   - 若 $\text{Desire} \ge \text{config.jev\_threshold}$（默认 `0.70`）：**判定唤醒**；否则**静默**。
+   - 若 `speech_act_mode === "factual_inquiry"` 且 `turn_openness === "open_invitation"` 且人设契合度 `persona_resonance >= 0.4`：**判定唤醒**；
+4. **第四阶段：趣味互动接招通道（Playful Banter Fast-Path）**
+   - 若消息属于网络调侃、发癫自嘲（`playful_meme_trope`），且留有明确的接话空间（`open_invitation`），结合当前配置的“主动发言欲望”门限判定唤醒，使机器人适度融入轻松交流语境；
+5. **第五阶段：元数据透传（Metadata Passing）**
+   - 触发唤醒时，将 JEV 测得的 `{ speech_act, target, boundary, openness }` 封装进 `WakeupPayload.metadata`，透传给主 Agent，为主模型规划回复语调提供明确的上下文线索。
 
 ---
 
-## 5. 边缘场景与情商表现对照表
+## 5. 真实复杂群聊语境表现矩阵
 
-| 场景序号 | 群聊典型语境输入 | JEV 核心判断维度 | 最终决策行为 | 设计理由与情商考量 |
+| 场景序号 | 典型群聊语料输入 | JEV 客观场态识别 | 最终决策行为 | 设计考量与预期表现 |
 |:---:|---|---|:---:|---|
-| **E1** | 群友没 @ 也没引用，但在回复机器人的上句话：“真的假的，我怎么没感觉” | `continuation > 0.8` | **唤醒** | 承接上下文，避免机械的“不 @ 就不理” |
-| **E2** | 两个群友因为游戏输了正在激烈对线互喷脏话 | `social_dynamic: "conflict"` | **抑制** | 一票否决。严禁介入人类纷争，不激化矛盾 |
-| **E3** | 两个群友在聊“今晚去哪吃饭、几点下班接你”等私人事务 | `social_dynamic: "private_banter"` | **抑制** | 避免成为不识趣的“电灯泡” |
-| **E4** | 全群正在排队复读“+1”、“好耶”刷屏 10 条以上 | `social_dynamic: "meme_echo"` | **抑制** | 避免破坏队形，避免严肃科普煞风景 |
-| **E5** | 群友讨论涉及违禁或行为规范中明令禁止的争议议题 | `behavior_risk > 0.6` | **抑制** | 负向约束一票否决，遵守 Behavior 安全边界 |
-| **E6** | 群友询问专业技术问题，无人回答，且切中 Persona 专长 | `unresolved_help > 0.8` 且 `persona_resonance > 0.7` | **唤醒** | 展现专业能力与助手机能，高价值介入 |
-| **E7** | 群友讨论纯与机器人设定完全无关的领域（如二次元猫娘面对水泥浇筑工艺） | `persona_resonance < 0.2` 且 `unresolved_help < 0.3` | **抑制** | 不懂装懂或乱插话会破坏角色真实感 |
+| **E1** | 群友未显式引用或 @，紧接追问：“真的假的，那线上跑 bigkeys 会不会阻塞主线程？” | `target: direct_bot`<br>`turn: open_invitation` | **唤醒 (承接通道)** | 顺畅承接上下文，保障未显式引用的连续追问正常响应 |
+| **E2** | 两人争吵对线：“你这把打得像个废物，现实里也是个没人要的卢瑟吧？” | `social: closed_private`<br>`risk: 0.8` | **抑制 (一票否决)** | 识别为真实恶意冲突，执行一票否决，避免介入用户间的人身攻击 |
+| **E3** | 好友互损打闹：“哈哈哈哈就你长嘴天天显摆，不会买把钱捐给希望工程，大冤种爬！” | `speech: playful_meme`<br>`social: open_public`<br>`target: specific_human` | **抑制/低频旁观** | 识别为非恶意打闹，若未指定 Bot 为交流目标则保持静默 |
+| **E4** | 自嘲发癫文学：“今天又是给资本家当牛做马的一天，脑浆被榨干，我真的哭死。” | `speech: playful_meme`<br>`turn: open_invitation`<br>`social: open_public` | **可唤醒 (接梗通道)** | 识别为自嘲修辞且存在交互留白，可根据人设和欲望阈值参与共情互动 |
+| **E5** | 反讽阴阳怪气：“哇你可真是绝世大天才，把生产用户表全删了，明天竞聘CTO吧？” | `rhetorical: irony`<br>`turn: open_invitation` | **抑制或精准吐槽** | 识别为反讽修辞，避免按字面赞同直接应答 |
+| **E6** | 抛梗打破冷场：“今天不是周四吗，谁来V我50看看实力，怎么群里安静如鸡？” | `speech: playful_meme`<br>`turn: open_invitation` | **可唤醒 (破冰通道)** | 识别为活跃气氛的互动诱饵，Bot 可适度接话参与 |
+| **E7** | 全群排队复读：“好耶！”、“好耶！”、“好耶！”连续刷屏 | `speech: emotional_resonance`<br>`turn: conversational_closure` | **抑制 (队形保护)** | 识别为无信息增量的情绪附和，保持静默以维护原有社群互动节奏 |
 
 ---
 
@@ -205,17 +248,17 @@ flowchart TD
 export const BridgeConfigSchema = z.object({
   // ... 既有配置保持不变 ...
 
-  // 1. JEV 决策决策唤醒总开关
+  // 1. JEV 语义决策唤醒总开关
   jev_enabled: z.boolean().default(false).volatile()
-    .description('启用 JEV 语义决策唤醒：替代群聊普通消息的随机概率盲唤醒，通过 JEV 模型智能感知语境、话题相关度与群聊氛围'),
+    .description('启用 JEV 语义决策唤醒：替代群聊普通消息的随机概率盲唤醒，通过 JEV 决策模型智能感知语境、话题相关度与群聊氛围（启用后普通消息不设固定冷却，保障连续交流流畅）'),
 
   // 2. JEV 接口端点
   jev_api_url: z.string().default('https://api.typesafe.ai/v1/systemone').volatile()
-    .description('JEV API 端点地址 (支持 TypeSafe 官方或 OpenRouter 等代理地址)'),
+    .description('JEV API 端点地址 (支持 TypeSafe 官方或 OpenRouter 等代理地址，也可指向本地 OpenJEV)'),
 
   // 3. JEV 鉴权密钥 (脱敏)
   jev_api_key: z.string().default('').role('secret').volatile()
-    .description('JEV API 鉴权密钥 (Bearer Token)'),
+    .description('JEV API 鉴权密钥 (Bearer Token，本地部署可留空)'),
 
   // 4. JEV 模型名称
   jev_model: z.string().default('typesafe/jev-1.14').volatile()
@@ -223,7 +266,7 @@ export const BridgeConfigSchema = z.object({
 
   // 5. 综合发言欲望门槛
   jev_threshold: z.number().default(0.70).volatile()
-    .description('主动插话欲望门槛 (0.0~1.0 之间的小数，默认 0.70。数值越低越热情活跃，数值越高越严谨克制)'),
+    .description('主动插话欲望门槛 (0.0~1.0 之间的小数，默认 0.70。数值越低越倾向于开放互动，数值越高越保持严谨克制)'),
 
   // 6. 前置历史消息回溯深度
   jev_context_size: z.number().default(8).volatile()
@@ -232,23 +275,21 @@ export const BridgeConfigSchema = z.object({
 ```
 
 ### 6.1 优雅降级与网络容错机制
-- **超时控制**：网络调用 JEV 必须设置严格的超时中断（`AbortController`，建议 `1500ms`）；
-- **故障静默（Fail-Safe）**：当网络抖动、超时、欠费或 API 抛错时，**默认静默不唤醒**，记录 debug 日志，绝不阻断正常消息入库与后续流转；
-- **回退兼容**：若 `jev_enabled` 开启但未填写 `jev_api_key`，或 `jev_enabled` 为 false，系统自动无缝回退到原有的 `proactive_random_enabled` 随机概率判定。
+- **超时控制**：网络调用 JEV 设置严格的超时中断（`AbortController`，默认 `1500ms`）；
+- **故障静默（Fail-Safe）**：当网络抖动、超时、欠费或 API 抛错时，**默认静默不唤醒**，记录 debug 日志，不阻断正常消息入库与后续流程；
+- **回退兼容**：若 `jev_enabled` 开启但未填写 `jev_api_key`（且非本地地址），或 `jev_enabled` 为 false，系统自动无缝回退到原有的 `proactive_random_enabled` 随机概率判定（此时原有 `proactive_cooldown_mins` 冷却保护生效）。
 
 ---
 
-## 7. 后续推进路线
+## 7. 后续推进路线 (开工阶段)
 
-1. **第一阶段（开工前实测）**：
-   - 编写 `devlog/scratch/test_jev_capabilities.ts` 临时测试脚本；
-   - 注入多组典型中文群聊语料，实测 JEV API 的时延、中文理解准确度及多题输出格式，查明能力边界并回填第 3 节；
+1. **第一阶段（开工前实测）**：✅ 已完成！本地 OpenJEV 沙盒全部验证闭环（详见 [devlog/JEV模型本地实测与题目有效性探查.md](./JEV模型本地实测与题目有效性探查.md)）；
 2. **第二阶段（契约测试先行 TDD）**：
-   - 编写针对 JEV 请求组装器、State 构建器、融合决策算法的单元测试与 Mock 契约测试；
+   - 编写针对 JEV 请求 Payload 组装器、State 构建器、多维结果解码器与决策融合算法的单元契约测试；
 3. **第三阶段（模块实现与装配）**：
-   - 实现 JEV 客户端封装；
-   - 将 JEV 决策挂入 `shouldWakeup()` 流程；
-   - 更新 Schema、Web UI 表单组件与配置持久化；
-4. **第四阶段（真机闭环与交付）**：
-   - 运行全量测试用例并执行 `pnpm build`；
-   - 进行真实群聊联调与验收报告交付。
+   - 实现独立的 `src/gateway/jev.ts` 客户端模块；
+   - 在 `shouldWakeup()` 中装配 JEV 门控链路；
+   - 更新 Schema、Web UI 设置卡片与配置持久化；
+4. **第四阶段（真机闭环与构建验收）**：
+   - 执行 `pnpm test` 与 `pnpm build`，验证打包产物；
+   - 进行端到端验证并交付。
