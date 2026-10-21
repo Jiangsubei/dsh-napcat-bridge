@@ -495,7 +495,14 @@ export async function handleSlashCommand(
 
           const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
           for (const sid of allSids) {
-            await safeSyncApiProxy(sid, targetProvider, targetModel, targetEffort);
+            try {
+              await safeSyncApiProxy(sid, targetProvider, targetModel, targetEffort);
+            } catch (syncErr: any) {
+              context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+                `[Command] 全局切换模型同步宿主会话 ${sid} 失败 (已跳过离线/失效会话):`,
+                syncErr?.message || syncErr
+              );
+            }
           }
 
           return {
@@ -666,7 +673,14 @@ export async function handleSlashCommand(
           context.sessionManager?.setNapcatDefaultModel(curProv, curMod, targetEffort);
           const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
           for (const sid of allSids) {
-            await safeSyncSessionModel(context.ctx, sid, curProv, curMod, targetEffort);
+            try {
+              await safeSyncSessionModel(context.ctx, sid, curProv, curMod, targetEffort);
+            } catch (syncErr: any) {
+              context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+                `[Command] 全局切换思考深度同步宿主会话 ${sid} 失败 (已跳过离线/失效会话):`,
+                syncErr?.message || syncErr
+              );
+            }
           }
           return {
             handled: true,
