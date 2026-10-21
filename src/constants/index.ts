@@ -8,7 +8,9 @@ export const DEFAULT_IMAGE_TTL_DAYS = 7;
 
 export const DEFAULT_WORKSPACE_ROOT = '.dsh/workspace/napcat';
 
-export const DEFAULT_DOWNLOAD_ROOT = '.dsh/workspace/napcat_download';
+export const DEFAULT_DATABASE_PATH = '.dsh/napcat/messages.sqlite';
+
+export const DEFAULT_DOWNLOAD_ROOT = '.dsh/napcat/downloads';
 
 export const DEFAULT_PERSONA =
   '你是一个得力的 QQ 群聊与私聊智能助手，请友好、精炼、真实地回答用户的问题。';

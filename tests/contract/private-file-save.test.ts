@@ -42,7 +42,7 @@ describe('契约测试: 私聊文件入站即时落盘装配闭环 (PF-001)', ()
   let capturedFollowups: Array<{ content: string }> = [];
 
   function dbPath(): string {
-    return path.join(tmpHome, 'workspace/napcat/messages.sqlite');
+    return path.join(tmpHome, 'napcat/messages.sqlite');
   }
 
   beforeEach(async () => {

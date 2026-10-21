@@ -69,7 +69,7 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
   });
 
   it('契约 2: 真实装配下 /clear 到 #2 后重启 DSH，唤醒必须精准恢复 #2 绝不回退至 #1', async () => {
-    const dbPath = path.resolve(tmpHome, 'workspace/napcat/messages.sqlite');
+    const dbPath = path.resolve(tmpHome, 'napcat/messages.sqlite');
     db = new MessageDatabase(dbPath);
     db.init();
 
@@ -114,7 +114,7 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
   });
 
   it('契约 3: Web UI 全部归档旧会话后，新消息自动开启 #1 (1) 并在 /clear 与重启后保持一致', async () => {
-    const dbPath = path.resolve(tmpHome, 'workspace/napcat/messages.sqlite');
+    const dbPath = path.resolve(tmpHome, 'napcat/messages.sqlite');
     db = new MessageDatabase(dbPath);
     db.init();
 
@@ -181,7 +181,7 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
   });
 
   it('契约 4: 物理删除历史会话文件后，peerToSessionId 自动回退至 #1 (版本 1)', async () => {
-    const dbPath = path.resolve(tmpHome, 'workspace/napcat/messages.sqlite');
+    const dbPath = path.resolve(tmpHome, 'napcat/messages.sqlite');
     db = new MessageDatabase(dbPath);
     db.init();
 
@@ -243,7 +243,7 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
   });
 
   it('契约 6: DSH 关闭重启后，QQ 会话与 NapCat 全局设定的模型与思考档位能从 SQLite 完整恢复，且恢复的 Agent 携带正确思考档位', async () => {
-    const dbPath = path.resolve(tmpHome, 'workspace/napcat/messages.sqlite');
+    const dbPath = path.resolve(tmpHome, 'napcat/messages.sqlite');
     db = new MessageDatabase(dbPath);
     db.init();
 
