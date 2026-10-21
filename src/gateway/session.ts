@@ -7,6 +7,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as crypto from 'node:crypto';
 import { promises as fsp } from 'node:fs';
 import type { Context } from '@deepseek-ai/cordis';
 import {
@@ -63,38 +64,84 @@ export interface ParsedSessionId {
   id: string;
   round: number;
   version: number;
+  hash?: string;
   isGroup: boolean;
 }
 
 /**
- * 解析 DSH SessionId（支持基础版本 qq-user-123 / qq-user-123-2 及多轮归档版本 qq-user-123-r1-1）
+ * 解析 DSH SessionId（支持基础版本 qq-user-123 / qq-user-123-2、多轮归档版本 qq-user-123-r1-1 及带短哈希防撞版本）
  */
 export function parseSessionId(sessionId: string): ParsedSessionId | null {
-  const groupMatch = sessionId.match(/^qq-group-([0-9a-zA-Z_]+?)(?:-r(\d+))?(?:-(\d+))?$/);
+  const groupMatch = sessionId.match(/^qq-group-([0-9a-zA-Z_]+?)(?:-r(\d+))?(?:-(\d+))?(?:-([0-9a-fA-F]{4,16}))?$/);
   if (groupMatch) {
     const id = groupMatch[1];
     const round = groupMatch[2] ? parseInt(groupMatch[2], 10) : 0;
     const version = groupMatch[3] ? parseInt(groupMatch[3], 10) : 1;
-    return { peer: `group_${id}`, id, round, version, isGroup: true };
+    const hash = groupMatch[4] || undefined;
+    return {
+      peer: `group_${id}`,
+      id,
+      round,
+      version,
+      ...(hash ? { hash } : {}),
+      isGroup: true,
+    };
   }
-  const userMatch = sessionId.match(/^qq-user-([0-9a-zA-Z_]+?)(?:-r(\d+))?(?:-(\d+))?$/);
+  const userMatch = sessionId.match(/^qq-user-([0-9a-zA-Z_]+?)(?:-r(\d+))?(?:-(\d+))?(?:-([0-9a-fA-F]{4,16}))?$/);
   if (userMatch) {
     const id = userMatch[1];
     const round = userMatch[2] ? parseInt(userMatch[2], 10) : 0;
     const version = userMatch[3] ? parseInt(userMatch[3], 10) : 1;
-    return { peer: `user_${id}`, id, round, version, isGroup: false };
+    const hash = userMatch[4] || undefined;
+    return {
+      peer: `user_${id}`,
+      id,
+      round,
+      version,
+      ...(hash ? { hash } : {}),
+      isGroup: false,
+    };
   }
   return null;
 }
 
 /**
- * 构造符合命名规范的 SessionId
+ * 生成 6 位十六进制短哈希防撞后缀
  */
-export function buildSessionId(baseId: string, round: number, version: number): string {
+export function generateSessionHash(): string {
+  return crypto.randomBytes(3).toString('hex');
+}
+
+/**
+ * 从当前未归档活跃会话的版本列表中，寻找最小未占用正整数编号 (First Missing Positive)
+ * 例如活跃集合为 [3]，返回 1；活跃集合为 [1, 3]，返回 2；活跃集合为 [1, 2, 3]，返回 4。
+ */
+export function findSmallestAvailableVersion(activeVersions: Iterable<number>): number {
+  const set = new Set(activeVersions);
+  let v = 1;
+  while (set.has(v)) {
+    v++;
+  }
+  return v;
+}
+
+/**
+ * 构造符合命名规范的 SessionId (支持短哈希后缀)
+ */
+export function buildSessionId(
+  baseId: string,
+  round: number,
+  version: number,
+  hash?: string
+): string {
+  const hashSuffix = hash ? `-${hash}` : '';
   if (round === 0) {
+    if (hash) {
+      return `${baseId}-${version}${hashSuffix}`;
+    }
     return version === 1 ? baseId : `${baseId}-${version}`;
   }
-  return `${baseId}-r${round}-${version}`;
+  return `${baseId}-r${round}-${version}${hashSuffix}`;
 }
 
 export interface OutboundBridgeLike {
@@ -108,6 +155,7 @@ export class SessionManager {
   private selectionMap = new Map<string, ModelSelectionRef>();
   /** 每 peer 的"已清空并开启新会话"版本与轮次号 (Spec §8.1 /clear: 直接开启新对话，不归档旧会话) */
   private clearedVersions = new Map<string, { round: number; version: number }>();
+  private pendingClearedSessionId = new Map<string, string>();
 
   private napcatDefaultModel?: ModelSelection;
   private outboundBridge?: OutboundBridgeLike;
@@ -541,6 +589,14 @@ export class SessionManager {
       peer = this.sessionIdToPeer(peer);
     }
 
+    const pending = this.pendingClearedSessionId.get(peer);
+    if (pending) {
+      if (!this.isSessionArchived(pending)) {
+        return pending;
+      }
+      this.pendingClearedSessionId.delete(peer);
+    }
+
     const cached = this.peerCurrentSessionId.get(peer);
     if (cached) {
       if (!this.isSessionArchived(cached) && this.isSessionPhysicallyPresent(cached)) {
@@ -665,16 +721,9 @@ export class SessionManager {
       // 分支 3: 存在未归档会话，选取最大轮次中版本号最高的活跃会话 (Highest Active Version)
       unarchived.sort((a, b) => b.round - a.round || b.version - a.version);
       const highest = unarchived[0];
-
-      if (cleared && cleared.round === highest.round && cleared.version > highest.version) {
-        targetRound = cleared.round;
-        targetVersion = cleared.version;
-        targetSessionId = buildSessionId(baseId, targetRound, targetVersion);
-      } else {
-        targetRound = highest.round;
-        targetVersion = highest.version;
-        targetSessionId = highest.sid;
-      }
+      targetRound = highest.round;
+      targetVersion = highest.version;
+      targetSessionId = highest.sid;
     }
 
     this.peerCurrentSessionId.set(peer, targetSessionId);
@@ -702,24 +751,6 @@ export class SessionManager {
   markSessionCleared(peerOrSessionId: string): string {
     const peer = this.sessionIdToPeer(peerOrSessionId);
     const currentSid = this.peerCurrentSessionId.get(peer) || (peerOrSessionId.startsWith('qq-') ? peerOrSessionId : undefined);
-    const parsed = currentSid ? parseSessionId(currentSid) : null;
-
-    let round = 0;
-    let version = 1;
-    if (parsed) {
-      round = parsed.round;
-      version = parsed.version;
-    } else {
-      const existingCleared = this.clearedVersions.get(peer);
-      if (existingCleared) {
-        round = existingCleared.round;
-        version = existingCleared.version;
-      }
-    }
-
-    const nextVersion = version + 1;
-    this.clearedVersions.set(peer, { round, version: nextVersion });
-    this.peerCurrentSessionId.delete(peer);
 
     let baseId: string;
     if (peer.startsWith('group_')) {
@@ -729,7 +760,41 @@ export class SessionManager {
     } else {
       baseId = `qq-${peer}`;
     }
-    const nextSessionId = buildSessionId(baseId, round, nextVersion);
+
+    // 1. 扫描当前 peer 的未归档活跃会话
+    const activeSessionIds = this.listPeerSessionIds(peer);
+    let maxKnownRound = 0;
+    const activeVersions: number[] = [];
+    for (const sid of activeSessionIds) {
+      const parsed = parseSessionId(sid);
+      if (parsed) {
+        if (parsed.round > maxKnownRound) {
+          maxKnownRound = parsed.round;
+        }
+        activeVersions.push(parsed.version);
+      }
+    }
+
+    let round = maxKnownRound;
+    // 使用 First Missing Positive 算法计算最小空缺版本
+    const nextVersion = findSmallestAvailableVersion(activeVersions);
+
+    // 2. 构造新 SessionId 并做防撞处理：
+    // 若 candidateId 已经存在或被归档，自动追加 6 位短哈希保证物理唯一
+    const rawCandidate = buildSessionId(baseId, round, nextVersion);
+    let nextSessionId = rawCandidate;
+    if (this.isSessionArchived(rawCandidate) || this.isSessionPhysicallyPresent(rawCandidate)) {
+      let hash = generateSessionHash();
+      nextSessionId = buildSessionId(baseId, round, nextVersion, hash);
+      while (this.isSessionArchived(nextSessionId) || this.isSessionPhysicallyPresent(nextSessionId)) {
+        hash = generateSessionHash();
+        nextSessionId = buildSessionId(baseId, round, nextVersion, hash);
+      }
+    }
+
+    this.clearedVersions.set(peer, { round, version: nextVersion });
+    this.pendingClearedSessionId.set(peer, nextSessionId);
+    this.peerCurrentSessionId.set(peer, nextSessionId);
 
     // 关键：继承前序会话的模型与思考深度，避免新建会话/清空会话后丢失思考配置
     const prevSel = currentSid ? this.selectionMap.get(currentSid)?.current : undefined;
@@ -1186,6 +1251,9 @@ export class SessionManager {
     this.updateSessionTitle(handle.agent.session, peer, sessionId);
 
     (handle.agent as any).modelSelection = selectionRef;
+    if (this.pendingClearedSessionId.get(peer) === sessionId) {
+      this.pendingClearedSessionId.delete(peer);
+    }
     return handle.agent;
   }
 
@@ -1265,6 +1333,7 @@ export class SessionManager {
     }
     this.activeHandles.clear();
     this.peerCurrentSessionId.clear();
+    this.pendingClearedSessionId.clear();
     this.peerNames.clear();
     this.busySessions.clear();
   }
