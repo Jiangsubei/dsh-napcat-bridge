@@ -207,13 +207,19 @@ export class SessionManager {
   public getAllQQSessionIds(): string[] {
     const sids = new Set<string>();
     for (const sid of this.peerCurrentSessionId.values()) {
-      sids.add(sid);
+      if (!this.isSessionArchived(sid)) {
+        sids.add(sid);
+      }
     }
     for (const sid of this.agentRunner.getActiveHandleKeys()) {
-      sids.add(sid);
+      if (!this.isSessionArchived(sid)) {
+        sids.add(sid);
+      }
     }
     for (const sid of this.modelSelector.getTrackedSessionIds()) {
-      sids.add(sid);
+      if (!this.isSessionArchived(sid)) {
+        sids.add(sid);
+      }
     }
     return Array.from(sids);
   }
