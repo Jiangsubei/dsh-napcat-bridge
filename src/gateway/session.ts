@@ -329,12 +329,6 @@ export class SessionManager {
           if (expectedBase === baseId) {
             if (this.isSessionPhysicallyPresent(sid)) {
               known.set(sid, { round: parsed.round, version: parsed.version });
-            } else {
-              try {
-                wsRegistry.headers.delete(sid);
-                wsRegistry.sessionPaths?.delete?.(sid);
-                wsRegistry.invalidSessionPaths?.delete?.(sid);
-              } catch {}
             }
           }
         }

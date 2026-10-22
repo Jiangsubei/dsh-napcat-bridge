@@ -163,4 +163,107 @@ describe('NapCat 顶层工作区与会话标题契约测试', () => {
       );
     });
   });
+
+  describe('4. DSH 0.2.x 工作区 candidateMatches 契约与未分组防掉落', () => {
+    it('契约: peerToSessionId 严禁主动从 wsRegistry.sessionPaths 中删除会话，避免触发 DSH mutate 剔除掉入未分组', () => {
+      const sessionPaths = new Map<string, string>();
+      sessionPaths.set('qq-user-9999999999', path.resolve(tmpHome, 'workspace/napcat'));
+      const wsRegistry = {
+        headers: new Map<string, any>([
+          ['qq-user-9999999999', { id: 'qq-user-9999999999', cwd: path.resolve(tmpHome, 'workspace/napcat') }],
+        ]),
+        sessionPaths,
+        invalidSessionPaths: new Map<string, string>(),
+        archivedSessionIds: [],
+      };
+      (ctx as any).workspaceRegistry = wsRegistry;
+
+      // 模拟磁盘尚未落盘（尚未 flush）
+      sessionManager.peerToSessionId('user_9999999999');
+
+      // 验证：绝对不能删除 wsRegistry.sessionPaths 中的该 sessionId！
+      expect(sessionPaths.has('qq-user-9999999999')).toBe(true);
+    });
+
+    it('契约: 真实 DSH WorkspaceEntity 经历挂载与解绑操作后，父会话必须始终保留在 sessionIds 中', async () => {
+      const canonicalPath = path.resolve(tmpHome, 'workspace/napcat');
+      const sessionPaths = new Map<string, string>();
+      sessionPaths.set('qq-user-1000000001', canonicalPath);
+
+      const candidateMatches = (id: string, p: string) =>
+        sessionPaths.get(id) === p;
+
+      const entity = {
+        record: {
+          path: canonicalPath,
+          title: 'NapCat',
+          sessionIds: ['qq-user-1000000001'],
+        },
+        get path() {
+          return this.record.path;
+        },
+        get sessionIds() {
+          return this.record.sessionIds.filter((id: string) => candidateMatches(id, this.record.path));
+        },
+        async attachSession(sessionId: string) {
+          if (!this.record.sessionIds.includes(sessionId)) {
+            sessionPaths.set(sessionId, this.record.path);
+          }
+          await this.mutate((rec: any) =>
+            rec.sessionIds.includes(sessionId) ? rec : { ...rec, sessionIds: [sessionId, ...rec.sessionIds] }
+          );
+        },
+        async detachSession(sessionId: string) {
+          await this.mutate((rec: any) =>
+            rec.sessionIds.includes(sessionId)
+              ? { ...rec, sessionIds: rec.sessionIds.filter((id: string) => id !== sessionId) }
+              : rec
+          );
+        },
+        async mutate(fn: (rec: any) => any) {
+          const changed = fn(this.record);
+          const filtered = changed.sessionIds.filter((id: string) => candidateMatches(id, changed.path));
+          this.record = {
+            ...changed,
+            sessionIds: filtered,
+          };
+        },
+      };
+
+      // 初始状态：父会话处于 NapCat 工作区中
+      expect(entity.sessionIds).toContain('qq-user-1000000001');
+
+      // 模拟后台回顾子会话挂载
+      const reviewSessionId = 'review-qq-user-1000000001-123456';
+      await entity.attachSession(reviewSessionId);
+      expect(entity.sessionIds).toContain('qq-user-1000000001');
+      expect(entity.sessionIds).toContain(reviewSessionId);
+
+      // 模拟后台回顾用完即焚解绑
+      await entity.detachSession(reviewSessionId);
+
+      // 核心断言：父会话绝对不能掉入未分组，必须依旧在 sessionIds 中！
+      expect(entity.sessionIds).toContain('qq-user-1000000001');
+      expect(entity.sessionIds).not.toContain(reviewSessionId);
+    });
+
+    it('契约: isSessionPhysicallyPresent 遇内存活跃会话 (sessions 或 agents 存在) 必须判定为有效存在', () => {
+      const sessionId = 'qq-user-live-mem-999';
+      // 磁盘上无此文件
+      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(false);
+
+      // 场景 A: ctx.sessions 中持有该 live session
+      (ctx as any).sessions = {
+        get: vi.fn((id: string) => (id === sessionId ? { id, header: { id } } : undefined)),
+      };
+      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(true);
+
+      // 场景 B: ctx.sessions 无，但 ctx.agents 中持有该 live agent
+      (ctx as any).sessions = undefined;
+      (ctx as any).agents = {
+        get: vi.fn((id: string) => (id === sessionId ? { id } : undefined)),
+      };
+      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(true);
+    });
+  });
 });

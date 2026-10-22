@@ -50,9 +50,26 @@ export class SessionPersistenceManager {
   }
 
   /**
-   * 检查指定 Session 是否在物理磁盘中有效存在（以真实存在的会话日志文件为唯一依据，严禁因内存残留误判）
+   * 检查指定 Session 是否有效存在（支持内存活跃会话与物理磁盘日志文件，确保未落盘的 live 会话不被误杀）
    */
   public isSessionPhysicallyPresent(sessionId: string): boolean {
+    // 0. 优先检查进程内存中的活跃会话或 Agent（DSH 0.2.x 延迟落盘保护，防止 live 会话因未写盘被误判死亡）
+    const sessions = this.ctx?.get?.('sessions') || (this.ctx as any)?.sessions;
+    if (sessions && typeof sessions.get === 'function') {
+      try {
+        const live = sessions.get(sessionId);
+        if (live !== undefined) return true;
+      } catch {}
+    }
+
+    const agents = this.ctx?.get?.('agents') || (this.ctx as any)?.agents;
+    if (agents && typeof agents.get === 'function') {
+      try {
+        const liveAgent = agents.get(sessionId);
+        if (liveAgent !== undefined) return true;
+      } catch {}
+    }
+
     const persistence = this.ctx?.get?.('sessionPersistence') || (this.ctx as any)?.sessionPersistence;
     if (persistence && typeof (persistence as any).locate === 'function') {
       try {
@@ -66,7 +83,8 @@ export class SessionPersistenceManager {
       } catch {}
     }
 
-    const dshHome = this.workspace?.getDshHome() || path.join(os.homedir(), '.dsh');
+    const defaultHome = path.join(os.homedir(), '.dsh');
+    const dshHome = this.workspace?.getDshHome() || defaultHome;
     const encodedId = encodeSegment(sessionId);
     const sessionFileCandidates = [
       'session.v4.jsonl',
@@ -81,7 +99,7 @@ export class SessionPersistenceManager {
 
     const checkRoots = [
       path.join(dshHome, 'sessions'),
-      path.join(os.homedir(), '.dsh', 'sessions'),
+      ...(dshHome !== defaultHome ? [] : [path.join(os.homedir(), '.dsh', 'sessions')]),
     ];
 
     for (const baseSessionsDir of checkRoots) {

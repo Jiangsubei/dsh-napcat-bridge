@@ -9,7 +9,7 @@
  */
 
 import * as path from 'node:path';
-import { promises as fsp } from 'node:fs';
+import { existsSync, promises as fsp } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MemoryStorage } from './storage.js';
@@ -492,6 +492,10 @@ export class BackgroundReviewManager {
                 parentWorkspace = list.find((ws: any) => ws?.path === parentCwd);
               }
               if (parentWorkspace && typeof parentWorkspace.attachSession === 'function') {
+                // 关键防护：确保父会话在 wsRegistry.sessionPaths 中的登记绝对不会丢失
+                if (wsRegistry.sessionPaths && typeof wsRegistry.sessionPaths.set === 'function' && parentSessionId) {
+                  wsRegistry.sessionPaths.set(parentSessionId, parentWorkspace.record?.path || parentWorkspace.path || parentCwd);
+                }
                 await parentWorkspace.attachSession(reviewSessionId);
               }
             } catch (err: any) {
@@ -657,6 +661,24 @@ export class BackgroundReviewManager {
         }
       }
 
+      // 提取父会话标识与工作目录
+      const parentSessionId =
+        parentSession?.header?.id || parentSession?.id || (typeof parentSession === 'string' ? parentSession : undefined);
+      const parentCwd = parentSession?.header?.cwd || parentSession?.cwd;
+
+      const wsRegistry =
+        this.ctx.get?.('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
+
+      // 关键防护 1：在对工作区进行任何解绑与 mutate 之前，强制加固父会话的 sessionPaths 登记，防止被意外剔除到未分组
+      if (wsRegistry && parentSessionId && parentCwd) {
+        try {
+          if (wsRegistry.sessionPaths && typeof wsRegistry.sessionPaths.set === 'function') {
+            const canonicalPath = parentWorkspace?.record?.path || parentWorkspace?.path || parentCwd;
+            wsRegistry.sessionPaths.set(parentSessionId, canonicalPath);
+          }
+        } catch {}
+      }
+
       // Step 4：工作区解绑与记账清理（workspaceRegistry 解绑）
       if (parentWorkspace && typeof parentWorkspace.detachSession === 'function') {
         try {
@@ -664,15 +686,8 @@ export class BackgroundReviewManager {
         } catch {}
       }
 
-      const wsRegistry =
-        this.ctx.get?.('workspaceRegistry') || (this.ctx as any).workspaceRegistry;
       if (wsRegistry) {
         try {
-          if (wsRegistry.headers && typeof wsRegistry.headers.delete === 'function') {
-            wsRegistry.headers.delete(sessionId);
-            wsRegistry.sessionPaths?.delete(sessionId);
-            wsRegistry.invalidSessionPaths?.delete(sessionId);
-          }
           if (typeof wsRegistry.list === 'function') {
             const workspaces = wsRegistry.list() || [];
             for (const ws of workspaces) {
@@ -683,6 +698,11 @@ export class BackgroundReviewManager {
               }
             }
           }
+          if (wsRegistry.headers && typeof wsRegistry.headers.delete === 'function') {
+            wsRegistry.headers.delete(sessionId);
+            wsRegistry.sessionPaths?.delete(sessionId);
+            wsRegistry.invalidSessionPaths?.delete(sessionId);
+          }
         } catch (err: any) {
           this.logger.warn?.(`[BackgroundReview] workspaceRegistry cleanup warning: ${err?.message}`);
         }
@@ -690,7 +710,8 @@ export class BackgroundReviewManager {
 
       // Step 6【最后步骤】：物理文件与目录彻底删除（此时文件锁已完全释放，无任何死锁与占用风险）
       let sessionPath: string | undefined;
-      if (typeof parentSession === 'string') {
+      // 严禁误删父会话目录：仅当 parentSession 传入的是临时目录且不等于父会话 id 时才采用
+      if (typeof parentSession === 'string' && parentSession !== parentSessionId && existsSync(parentSession)) {
         sessionPath = parentSession;
       }
 
