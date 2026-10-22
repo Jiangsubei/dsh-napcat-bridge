@@ -35,6 +35,7 @@ export interface AgentRunnerDelegate {
   sessionIdToPeer(sessionId: string): string;
   onSessionReassigned?(peer: string, newSessionId: string): void;
   onClearPendingCleared?(peer: string, sessionId: string): void;
+  isSessionDeleted?(sessionId: string): boolean;
 }
 
 export class SessionAgentRunner {
@@ -42,6 +43,7 @@ export class SessionAgentRunner {
   private busySessions = new Set<string>();
   private peerNames = new Map<string, string>();
   private persistedSessions = new Set<string>();
+  private pendingFirstTurnSessions = new Set<string>();
   private outboundBridge?: OutboundBridgeLike;
 
   constructor(
@@ -65,8 +67,41 @@ export class SessionAgentRunner {
     return (this.outboundBridge as any)?.getActiveTurn?.(peer);
   }
 
+  public isPendingFirstTurn(sessionId: string): boolean {
+    if (this.persistedSessions.has(sessionId)) {
+      this.pendingFirstTurnSessions.delete(sessionId);
+      return false;
+    }
+    return this.pendingFirstTurnSessions.has(sessionId);
+  }
+
+  public markPendingFirstTurn(sessionId: string): void {
+    if (!this.persistedSessions.has(sessionId)) {
+      this.pendingFirstTurnSessions.add(sessionId);
+    }
+  }
+
+  public clearPendingFirstTurn(sessionId: string): void {
+    this.pendingFirstTurnSessions.delete(sessionId);
+  }
+
+  public markSessionPersistedIfPresent(sessionId: string): boolean {
+    if (this.persistence.isSessionPhysicallyPresent(sessionId)) {
+      this.persistedSessions.add(sessionId);
+      this.pendingFirstTurnSessions.delete(sessionId);
+      return true;
+    }
+    return false;
+  }
+
   public isSessionZombie(sessionId: string): boolean {
-    return this.persistedSessions.has(sessionId) && !this.persistence.isSessionPhysicallyPresent(sessionId);
+    if (this.isPendingFirstTurn(sessionId)) {
+      return false;
+    }
+    if (this.markSessionPersistedIfPresent(sessionId)) {
+      return false;
+    }
+    return this.persistedSessions.has(sessionId);
   }
 
   public markSessionPersisted(sessionId: string): void {
@@ -96,6 +131,8 @@ export class SessionAgentRunner {
   }
 
   public async releaseActiveHandle(sessionId: string): Promise<void> {
+    this.clearPendingFirstTurn(sessionId);
+    this.persistedSessions.delete(sessionId);
     const handle = this.activeHandles.get(sessionId);
     if (handle) {
       this.activeHandles.delete(sessionId);
@@ -118,7 +155,15 @@ export class SessionAgentRunner {
   }
 
   public getAgent(peerOrSessionId: string): Agent | undefined {
-    const sessionId = this.delegate.peerToSessionId(peerOrSessionId);
+    const sessionId = isQQSession(peerOrSessionId)
+      ? peerOrSessionId
+      : this.delegate.peerToSessionId(peerOrSessionId);
+
+    const fromHandle = this.activeHandles.get(sessionId);
+    if (fromHandle?.agent) {
+      return fromHandle.agent;
+    }
+
     const agents = this.ctx.get?.('agents') || (this.ctx as any).agents;
     return agents?.get?.(sessionId as any);
   }
@@ -183,13 +228,16 @@ export class SessionAgentRunner {
 
     if (this.persistence.isSessionPhysicallyPresent(sessionId)) {
       this.persistedSessions.add(sessionId);
+      this.clearPendingFirstTurn(sessionId);
     }
 
-    // 二次确认：若当前 sessionId 在运行时被归档或已确认被外部物理删除（僵尸句柄），则销毁旧句柄并重新寻址
-    if (
+    // 二次确认：若当前已持有该会话句柄或 live agent，但在运行时被归档或底层物理文件已被删除（僵尸句柄），销毁旧句柄并重新寻址
+    const isCurrentZombie =
       this.persistence.isSessionArchived(sessionId) ||
-      this.isSessionZombie(sessionId)
-    ) {
+      this.isSessionZombie(sessionId) ||
+      Boolean(this.delegate.isSessionDeleted?.(sessionId));
+
+    if (isCurrentZombie) {
       await this.releaseActiveHandle(sessionId);
       this.delegate.onSessionReassigned?.(peer, '');
       sessionId = this.delegate.peerToSessionId(peer);
@@ -201,7 +249,12 @@ export class SessionAgentRunner {
     // 1. 若当前会话已由 QQ 自身持有专属写句柄，检查其归档状态与物理有效性
     if (this.activeHandles.has(sessionId)) {
       const handle = this.activeHandles.get(sessionId)!;
-      if (!this.persistence.isSessionArchived(sessionId) && !this.isSessionZombie(sessionId)) {
+      const isHandleValid =
+        !this.persistence.isSessionArchived(sessionId) &&
+        !this.isSessionZombie(sessionId) &&
+        !this.delegate.isSessionDeleted?.(sessionId);
+
+      if (isHandleValid) {
         (handle.agent as any).modelSelection = selectionRef;
         this.updateSessionTitle((handle.agent as any).session, peer, sessionId);
         return handle.agent;
@@ -216,11 +269,21 @@ export class SessionAgentRunner {
 
     // 2. 内存中已存在该会话的 live agent（由 Web UI 会话控制器等其它 owner 创建/持有）：
     //    只复用同一 agent，让新消息经 agent.followup() 排队等待（同 peer 串行）
+    //    但若物理文件已确认被删除或处于僵尸状态，绝不能复用残留的僵尸 Agent
     const existingAgent = agents?.get?.(sessionId as any);
     if (existingAgent && !this.persistence.isSessionArchived(sessionId)) {
-      (existingAgent as any).modelSelection = selectionRef;
-      this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
-      return existingAgent;
+      const isExistingZombie =
+        this.isSessionZombie(sessionId) ||
+        Boolean(this.delegate.isSessionDeleted?.(sessionId));
+
+      if (!isExistingZombie) {
+        (existingAgent as any).modelSelection = selectionRef;
+        this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
+        return existingAgent;
+      }
+      // 物理文件已不存在或已被删除，绝不能复用残留的僵尸 Agent
+      this.delegate.onSessionReassigned?.(peer, '');
+      sessionId = this.delegate.peerToSessionId(peer);
     }
 
     let cwd = this.workspace.resolveCwd(sessionId);
@@ -230,7 +293,7 @@ export class SessionAgentRunner {
     const provider = selectionRef.current?.provider || defaultSel.provider;
     const model = selectionRef.current?.model || defaultSel.model;
 
-    // 关键修复：确保 reasoningEffort 明确解析，防止 undefined 导致 DSH installModelSelection 清空思考档位
+    // 确保 reasoningEffort 明确解析，防止 undefined 导致 DSH installModelSelection 清空思考档位
     let effort: any = selectionRef.current?.reasoningEffort || defaultSel.reasoningEffort;
     if (effort === undefined) {
       effort = await this.modelSelector.resolveDefaultEffort(provider, model);
@@ -282,6 +345,7 @@ export class SessionAgentRunner {
 
     let handle: AgentHandle | undefined;
     let isSessionLocked = false;
+    let isResumed = false;
 
     // 3. 若该会话此前已持久化在磁盘上，优先通过 agents.resume 恢复会话（带锁冲突退避重试）
     if (typeof agents?.resume === 'function') {
@@ -298,6 +362,7 @@ export class SessionAgentRunner {
             },
             setup: setupFn,
           });
+          isResumed = true;
           break;
         } catch (err: any) {
           const isOwnedError =
@@ -393,6 +458,13 @@ export class SessionAgentRunner {
     }
 
     this.activeHandles.set(sessionId, handle);
+    if (isResumed) {
+      this.markSessionPersisted(sessionId);
+      this.clearPendingFirstTurn(sessionId);
+    } else {
+      // 全新创建的会话打入新建保护期，防止首轮交互完成落盘前被误判死亡
+      this.markPendingFirstTurn(sessionId);
+    }
 
     // 自动在 DSH workspaceRegistry 中登记单一 NapCat 顶级工作区并关联活跃会话
     await this.workspace.registerWorkspace(cwd, sessionId, 'NapCat');
@@ -460,6 +532,11 @@ export class SessionAgentRunner {
       return userMsg;
     } finally {
       this.markSessionBusy(sessionId, false);
+      // 若此时物理磁盘已完成写入落盘，解除新建保护期
+      if (this.persistence.isSessionPhysicallyPresent(sessionId)) {
+        this.clearPendingFirstTurn(sessionId);
+        this.markSessionPersisted(sessionId);
+      }
     }
   }
 
@@ -476,6 +553,8 @@ export class SessionAgentRunner {
       }
     }
     this.activeHandles.clear();
+    this.pendingFirstTurnSessions.clear();
+    this.persistedSessions.clear();
     this.peerNames.clear();
     this.busySessions.clear();
   }
