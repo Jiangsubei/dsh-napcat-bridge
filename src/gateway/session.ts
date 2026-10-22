@@ -148,6 +148,18 @@ export class SessionManager {
     return this.persistence.isSessionPhysicallyPresent(sessionId);
   }
 
+  public isSessionZombie(sessionId: string): boolean {
+    return this.agentRunner.isSessionZombie(sessionId);
+  }
+
+  public isSessionActiveOrPresent(sessionId: string): boolean {
+    if (this.isSessionArchived(sessionId)) return false;
+    if (this.agentRunner.isSessionZombie(sessionId)) return false;
+    if (this.isSessionPhysicallyPresent(sessionId)) return true;
+    if (this.agentRunner.hasActiveHandle(sessionId)) return true;
+    return false;
+  }
+
   public async isSessionPhysicallyPresentAsync(sessionId: string): Promise<boolean> {
     return this.persistence.isSessionPhysicallyPresentAsync(sessionId);
   }
@@ -309,7 +321,7 @@ export class SessionManager {
 
     const cached = this.peerCurrentSessionId.get(peer);
     if (cached) {
-      if (!this.isSessionArchived(cached) && this.isSessionPhysicallyPresent(cached)) {
+      if (this.isSessionActiveOrPresent(cached)) {
         return cached;
       }
       this.peerCurrentSessionId.delete(peer);
@@ -455,8 +467,33 @@ export class SessionManager {
       }
     }
 
+    // 保底：将当前正在被清理的会话（currentSid）强制纳入已占用版本列表
+    let currentVersion: number | undefined;
+    let currentRound = 0;
+    if (currentSid) {
+      const curParsed = parseSessionId(currentSid);
+      if (curParsed) {
+        currentRound = curParsed.round;
+        currentVersion = curParsed.version;
+        if (curParsed.round > maxKnownRound) {
+          maxKnownRound = curParsed.round;
+        }
+        activeVersions.push(curParsed.version);
+      }
+    }
+
     let round = maxKnownRound;
-    const nextVersion = findSmallestAvailableVersion(activeVersions);
+    let nextVersion = findSmallestAvailableVersion(activeVersions);
+
+    // 绝对排他：当前被清空的会话版本绝不能作为新会话版本（杜绝原地重复编号）
+    if (currentVersion !== undefined && round === currentRound && nextVersion === currentVersion) {
+      const set = new Set(activeVersions);
+      let v = currentVersion + 1;
+      while (set.has(v)) {
+        v++;
+      }
+      nextVersion = v;
+    }
 
     // 2. 构造新 SessionId 并做防撞处理
     const rawCandidate = buildSessionId(baseId, round, nextVersion);
@@ -529,10 +566,7 @@ export class SessionManager {
     if (dbRecord?.current_session_id) {
       const parsed = parseSessionId(dbRecord.current_session_id);
       if (parsed) {
-        if (
-          this.isSessionPhysicallyPresent(dbRecord.current_session_id) &&
-          !this.isSessionArchived(dbRecord.current_session_id)
-        ) {
+        if (this.isSessionActiveOrPresent(dbRecord.current_session_id)) {
           known.set(dbRecord.current_session_id, { round: parsed.round, version: parsed.version });
         }
       }
@@ -542,7 +576,7 @@ export class SessionManager {
     if (curSid) {
       const parsed = parseSessionId(curSid);
       if (parsed) {
-        if (this.isSessionPhysicallyPresent(curSid) && !this.isSessionArchived(curSid)) {
+        if (this.isSessionActiveOrPresent(curSid)) {
           known.set(curSid, { round: parsed.round, version: parsed.version });
         }
       }

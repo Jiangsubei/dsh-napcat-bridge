@@ -41,6 +41,7 @@ export class SessionAgentRunner {
   private activeHandles = new Map<string, AgentHandle>();
   private busySessions = new Set<string>();
   private peerNames = new Map<string, string>();
+  private persistedSessions = new Set<string>();
   private outboundBridge?: OutboundBridgeLike;
 
   constructor(
@@ -62,6 +63,14 @@ export class SessionAgentRunner {
 
   public getActiveTurn(peer: string): number | undefined {
     return (this.outboundBridge as any)?.getActiveTurn?.(peer);
+  }
+
+  public isSessionZombie(sessionId: string): boolean {
+    return this.persistedSessions.has(sessionId) && !this.persistence.isSessionPhysicallyPresent(sessionId);
+  }
+
+  public markSessionPersisted(sessionId: string): void {
+    this.persistedSessions.add(sessionId);
   }
 
   public setPeerName(peer: string, name: string): void {
@@ -172,10 +181,14 @@ export class SessionAgentRunner {
     let sessionId = this.delegate.peerToSessionId(peerOrSessionId);
     const peer = this.delegate.sessionIdToPeer(peerOrSessionId);
 
-    // 二次确认：若当前 sessionId 在运行时被归档或物理文件已不存在，则销毁旧句柄并重新寻址
+    if (this.persistence.isSessionPhysicallyPresent(sessionId)) {
+      this.persistedSessions.add(sessionId);
+    }
+
+    // 二次确认：若当前 sessionId 在运行时被归档或已确认被外部物理删除（僵尸句柄），则销毁旧句柄并重新寻址
     if (
       this.persistence.isSessionArchived(sessionId) ||
-      (this.activeHandles.has(sessionId) && !this.persistence.isSessionPhysicallyPresent(sessionId))
+      this.isSessionZombie(sessionId)
     ) {
       await this.releaseActiveHandle(sessionId);
       this.delegate.onSessionReassigned?.(peer, '');
@@ -188,7 +201,7 @@ export class SessionAgentRunner {
     // 1. 若当前会话已由 QQ 自身持有专属写句柄，检查其归档状态与物理有效性
     if (this.activeHandles.has(sessionId)) {
       const handle = this.activeHandles.get(sessionId)!;
-      if (!this.persistence.isSessionArchived(sessionId) && this.persistence.isSessionPhysicallyPresent(sessionId)) {
+      if (!this.persistence.isSessionArchived(sessionId) && !this.isSessionZombie(sessionId)) {
         (handle.agent as any).modelSelection = selectionRef;
         this.updateSessionTitle((handle.agent as any).session, peer, sessionId);
         return handle.agent;
@@ -414,7 +427,7 @@ export class SessionAgentRunner {
     }
 
     const agent = await this.getOrCreateAgent(payload.peer);
-    const sessionId = this.delegate.peerToSessionId(payload.peer);
+    const sessionId = (agent as any).session?.id || this.delegate.peerToSessionId(payload.peer);
 
     // 若唤醒消息携带发送者昵称，更新私聊会话标题锁定
     if (payload.from_name) {
