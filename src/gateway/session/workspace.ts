@@ -40,6 +40,9 @@ export class SessionWorkspaceManager {
       await fsp.mkdir(resolvedCwd, { recursive: true });
       const ws = await wsRegistry.create(resolvedCwd, title);
       if (ws && sessionId && typeof ws.attachSession === 'function') {
+        if (wsRegistry.sessionPaths && typeof wsRegistry.sessionPaths.set === 'function') {
+          wsRegistry.sessionPaths.set(sessionId, ws.record?.path || resolvedCwd);
+        }
         await ws.attachSession(sessionId).catch(() => {});
       }
     } catch (err) {
