@@ -559,5 +559,84 @@ describe('契约测试: EN-003 BackgroundReviewManager 后台自动回顾机制'
     const dirExists = await fsp.stat(sessionDir).then(() => true).catch(() => false);
     expect(dirExists).toBe(false);
   });
+
+  it('契约 13: 验证后台回顾 (Background Review) 销毁清理临时会话时，绝不误伤父会话在真实 WorkspaceEntity 的归属', async () => {
+    const parentSid = 'qq-user-2415112980';
+    const reviewSid = 'review-qq-user-2415112980-999999';
+    const canonicalCwd = path.resolve(tmpDir, 'workspace/napcat');
+
+    const sessionPaths = new Map<string, string>();
+    // 模拟 sessionPaths 因各种时序（如冷启动、或者被误清理）尚未注册父会话路径
+    // sessionPaths.set(parentSid, canonicalCwd);
+
+    const candidateMatches = (id: string, p: string) =>
+      sessionPaths.get(id) === p;
+
+    const workspaceEntity = {
+      record: {
+        path: canonicalCwd,
+        title: 'NapCat',
+        sessionIds: [parentSid, reviewSid],
+      },
+      get path() {
+        return this.record.path;
+      },
+      get sessionIds() {
+        return this.record.sessionIds.filter((id: string) => candidateMatches(id, this.record.path));
+      },
+      async attachSession(sessionId: string) {
+        if (!this.record.sessionIds.includes(sessionId)) {
+          sessionPaths.set(sessionId, this.record.path);
+        }
+        await this.mutate((rec: any) =>
+          rec.sessionIds.includes(sessionId) ? rec : { ...rec, sessionIds: [sessionId, ...rec.sessionIds] }
+        );
+      },
+      async detachSession(sessionId: string) {
+        await this.mutate((rec: any) =>
+          rec.sessionIds.includes(sessionId)
+            ? { ...rec, sessionIds: rec.sessionIds.filter((id: string) => id !== sessionId) }
+            : rec
+        );
+      },
+      async mutate(fn: (rec: any) => any) {
+        const changed = fn(this.record);
+        const filtered = changed.sessionIds.filter((id: string) => candidateMatches(id, changed.path));
+        this.record = {
+          ...changed,
+          sessionIds: filtered,
+        };
+      },
+    };
+
+    const wsRegistry = {
+      headers: new Map<string, any>(),
+      sessionPaths,
+      invalidSessionPaths: new Map<string, string>(),
+      list: () => [workspaceEntity],
+    };
+    mockCtx.workspaceRegistry = wsRegistry;
+
+    const parentSession = {
+      id: parentSid,
+      header: { id: parentSid, cwd: canonicalCwd },
+    };
+
+    // 执行临时会话清理
+    await reviewManager.cleanupReviewSession(
+      reviewSid,
+      { dispose: vi.fn() },
+      parentSession,
+      workspaceEntity
+    );
+
+    // 关键契约断言：
+    // 1. review 会话已被成功从工作区解绑
+    expect(workspaceEntity.sessionIds).not.toContain(reviewSid);
+    // 2. 父会话绝对不能掉落未分组，必须依旧在 sessionIds 中！
+    expect(workspaceEntity.sessionIds).toContain(parentSid);
+    // 3. wsRegistry.sessionPaths 中必须保留父会话的路径映射！
+    expect(sessionPaths.get(parentSid)).toBe(canonicalCwd);
+  });
 });
 
