@@ -50,42 +50,9 @@ export class SessionPersistenceManager {
   }
 
   /**
-   * 检查指定 Session 是否有效存在（支持内存活跃会话与物理磁盘日志文件，确保未落盘的 live 会话不被误杀）
+   * 检查指定 Session 是否有效存在于物理磁盘上（以真实日志文件为准，严禁以内存对象伪造物理存在）
    */
   public isSessionPhysicallyPresent(sessionId: string): boolean {
-    // 0. 优先检查进程内存中的活跃会话或 Agent（DSH 0.2.x 延迟落盘保护，防止 live 会话因未写盘被误判死亡）
-    const sessions = this.ctx?.get?.('sessions') || (this.ctx as any)?.sessions;
-    if (sessions && typeof sessions.get === 'function') {
-      try {
-        const live = sessions.get(sessionId);
-        if (live !== undefined) return true;
-      } catch {}
-    }
-
-    const agents = this.ctx?.get?.('agents') || (this.ctx as any)?.agents;
-    if (agents && typeof agents.get === 'function') {
-      try {
-        const liveAgent = agents.get(sessionId);
-        if (liveAgent !== undefined) return true;
-      } catch {}
-    }
-
-    const persistence = this.ctx?.get?.('sessionPersistence') || (this.ctx as any)?.sessionPersistence;
-    if (persistence && typeof (persistence as any).locate === 'function') {
-      try {
-        const cwd = this.workspace?.resolveCwd() || '';
-        const loc = (persistence as any).locate({ id: sessionId, cwd });
-        if (loc?.path) {
-          if (fs.existsSync(loc.path) && !fs.statSync(loc.path).isDirectory()) {
-            return true;
-          }
-        }
-      } catch {}
-    }
-
-    const defaultHome = path.join(os.homedir(), '.dsh');
-    const dshHome = this.workspace?.getDshHome() || defaultHome;
-    const encodedId = encodeSegment(sessionId);
     const sessionFileCandidates = [
       'session.v4.jsonl',
       'session.v4.jsonl.zstd',
@@ -96,6 +63,28 @@ export class SessionPersistenceManager {
       'session.jsonl',
       'session.jsonl.zstd',
     ];
+
+    const persistence = this.ctx?.get?.('sessionPersistence') || (this.ctx as any)?.sessionPersistence;
+    if (persistence && typeof (persistence as any).locate === 'function') {
+      try {
+        const cwd = this.workspace?.resolveCwd() || '';
+        const loc = (persistence as any).locate({ id: sessionId, cwd });
+        if (loc?.path && fs.existsSync(loc.path)) {
+          const st = fs.statSync(loc.path);
+          if (!st.isDirectory()) {
+            return true;
+          }
+          const files = fs.readdirSync(loc.path);
+          if (sessionFileCandidates.some((fn) => files.includes(fn))) {
+            return true;
+          }
+        }
+      } catch {}
+    }
+
+    const defaultHome = path.join(os.homedir(), '.dsh');
+    const dshHome = this.workspace?.getDshHome() || defaultHome;
+    const encodedId = encodeSegment(sessionId);
 
     const checkRoots = [
       path.join(dshHome, 'sessions'),

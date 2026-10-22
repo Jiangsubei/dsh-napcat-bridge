@@ -46,6 +46,7 @@ export class SessionManager {
   private peerCurrentSessionId = new Map<string, string>();
   private clearedVersions = new Map<string, { round: number; version: number }>();
   private pendingClearedSessionId = new Map<string, string>();
+  private deletedSessionIds = new Set<string>();
 
   private readonly workspace: SessionWorkspaceManager;
   private readonly persistence: SessionPersistenceManager;
@@ -82,17 +83,70 @@ export class SessionManager {
             this.pendingClearedSessionId.delete(peer);
           }
         },
+        isSessionDeleted: (sessionId: string) => this.deletedSessionIds.has(sessionId),
       },
       this.options
     );
 
     this.loadStateFromDb();
     this.agentRunner.guardSessionController();
+
     if (typeof (this.ctx as any).on === 'function') {
       (this.ctx as any).on('ready', () => {
         this.agentRunner.guardSessionController();
       });
+
+      // 实时响应 Archive Manager 插件发出的外部会话删除事件
+      (this.ctx as any).on('api-session/removed', (sessionId: any) => {
+        if (sessionId) {
+          this.handleExternalSessionRemoved(String(sessionId));
+        }
+      });
+
+      // 实时响应 DSH 原生 session teardown 事件
+      (this.ctx as any).on('session/disposed', (session: any) => {
+        const sid = session?.id ? String(session.id) : '';
+        if (sid) {
+          this.handleExternalSessionRemoved(sid);
+        }
+      });
+
+      // 实时感知任何会话的落盘事件，解除新建白名单保护并标记已持久化
+      (this.ctx as any).on('session/flush', (session: any) => {
+        const sid = session?.id ? String(session.id) : '';
+        if (sid) {
+          this.agentRunner.markSessionPersistedIfPresent(sid);
+        }
+      });
     }
+  }
+
+  // --- 外部会话删除事件自愈处理 ---
+  public handleExternalSessionRemoved(sessionId: string): void {
+    this.deletedSessionIds.add(sessionId);
+
+    // 1. 释放并淘汰 AgentHandle 及新建待写白名单
+    this.agentRunner.releaseActiveHandle(sessionId);
+
+    // 2. 找到对应 peer，清理内存映射
+    const peer = this.sessionIdToPeer(sessionId);
+    if (this.peerCurrentSessionId.get(peer) === sessionId) {
+      this.peerCurrentSessionId.delete(peer);
+    }
+    if (this.pendingClearedSessionId.get(peer) === sessionId) {
+      this.pendingClearedSessionId.delete(peer);
+    }
+
+    // 3. 同步清理 SQLite 数据库中的 current_session_id 记录
+    const dbRecord = this.persistence.getSessionState(peer);
+    if (dbRecord && dbRecord.current_session_id === sessionId) {
+      this.persistence.saveSessionState({
+        ...dbRecord,
+        current_session_id: '',
+        updated_at: Date.now(),
+      });
+    }
+    this.clearedVersions.delete(peer);
   }
 
   // --- 状态加载 ---
@@ -155,8 +209,17 @@ export class SessionManager {
   public isSessionActiveOrPresent(sessionId: string): boolean {
     if (this.isSessionArchived(sessionId)) return false;
     if (this.agentRunner.isSessionZombie(sessionId)) return false;
-    if (this.isSessionPhysicallyPresent(sessionId)) return true;
-    if (this.agentRunner.hasActiveHandle(sessionId)) return true;
+    if (this.deletedSessionIds.has(sessionId)) return false;
+    if (this.isSessionPhysicallyPresent(sessionId)) {
+      this.agentRunner.markSessionPersistedIfPresent(sessionId);
+      return true;
+    }
+    if (this.agentRunner.isPendingFirstTurn(sessionId)) return true;
+    const agents = this.ctx.get?.('agents') || (this.ctx as any).agents;
+    const liveAgent = agents?.get?.(sessionId as any);
+    if (liveAgent) {
+      return true;
+    }
     return false;
   }
 
@@ -324,7 +387,19 @@ export class SessionManager {
       if (this.isSessionActiveOrPresent(cached)) {
         return cached;
       }
+      if (this.agentRunner.isSessionZombie(cached)) {
+        this.deletedSessionIds.add(cached);
+      }
       this.peerCurrentSessionId.delete(peer);
+      this.agentRunner.releaseActiveHandle(cached);
+      const dbRecord = this.persistence.getSessionState(peer);
+      if (dbRecord && dbRecord.current_session_id === cached) {
+        this.persistence.saveSessionState({
+          ...dbRecord,
+          current_session_id: '',
+          updated_at: Date.now(),
+        });
+      }
     }
 
     const baseId = peerToBaseId(peer);
@@ -356,7 +431,10 @@ export class SessionManager {
           const parsed = sid ? parseSessionId(sid) : null;
           if (parsed) {
             const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
-            if (expectedBase === baseId && this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+            if (
+              expectedBase === baseId &&
+              (this.isSessionPhysicallyPresent(sid) || this.agentRunner.isPendingFirstTurn(sid))
+            ) {
               known.set(sid, { round: parsed.round, version: parsed.version });
             }
           }
@@ -367,7 +445,10 @@ export class SessionManager {
     if (agentsSvc?.get) {
       try {
         const liveAgent = agentsSvc.get(baseId as any);
-        if (liveAgent && !this.isSessionArchived(baseId)) {
+        if (
+          liveAgent &&
+          (this.isSessionPhysicallyPresent(baseId) || this.agentRunner.isPendingFirstTurn(baseId))
+        ) {
           known.set(baseId, { round: 0, version: 1 });
         }
       } catch {}
@@ -381,6 +462,7 @@ export class SessionManager {
         if (this.isSessionPhysicallyPresent(dbRecord.current_session_id)) {
           known.set(dbRecord.current_session_id, { round: parsed.round, version: parsed.version });
         } else {
+          this.deletedSessionIds.add(dbRecord.current_session_id);
           this.persistence.saveSessionState({
             ...dbRecord,
             current_session_id: '',
@@ -389,9 +471,6 @@ export class SessionManager {
             updated_at: Date.now(),
           });
           this.peerCurrentSessionId.delete(peer);
-          if (known.size === 0) {
-            this.clearedVersions.delete(peer);
-          }
         }
       }
     }
@@ -412,11 +491,10 @@ export class SessionManager {
     let targetRound = 0;
     let targetVersion = 1;
 
-    const cleared = this.clearedVersions.get(peer);
-
     if (known.size === 0) {
-      targetRound = cleared?.round ?? 0;
-      targetVersion = cleared?.version ?? 1;
+      this.clearedVersions.delete(peer);
+      targetRound = 0;
+      targetVersion = 1;
       targetSessionId = buildSessionId(baseId, targetRound, targetVersion);
     } else if (unarchived.length === 0) {
       const nextRound = maxKnownRound + 1;
@@ -429,6 +507,24 @@ export class SessionManager {
       targetRound = highest.round;
       targetVersion = highest.version;
       targetSessionId = highest.sid;
+    }
+
+    // 防撞保护：若目标 ID 曾被外部删除、或已被归档、或磁盘上存在未纳管冲突文件，追加短哈希防撞
+    if (
+      this.deletedSessionIds.has(targetSessionId) ||
+      this.isSessionArchived(targetSessionId) ||
+      this.isSessionPhysicallyPresent(targetSessionId)
+    ) {
+      let hash = generateSessionHash();
+      targetSessionId = buildSessionId(baseId, targetRound, targetVersion, hash);
+      while (
+        this.deletedSessionIds.has(targetSessionId) ||
+        this.isSessionArchived(targetSessionId) ||
+        this.isSessionPhysicallyPresent(targetSessionId)
+      ) {
+        hash = generateSessionHash();
+        targetSessionId = buildSessionId(baseId, targetRound, targetVersion, hash);
+      }
     }
 
     this.peerCurrentSessionId.set(peer, targetSessionId);
@@ -498,10 +594,18 @@ export class SessionManager {
     // 2. 构造新 SessionId 并做防撞处理
     const rawCandidate = buildSessionId(baseId, round, nextVersion);
     let nextSessionId = rawCandidate;
-    if (this.isSessionArchived(rawCandidate) || this.isSessionPhysicallyPresent(rawCandidate)) {
+    if (
+      this.isSessionArchived(rawCandidate) ||
+      this.isSessionPhysicallyPresent(rawCandidate) ||
+      this.deletedSessionIds.has(rawCandidate)
+    ) {
       let hash = generateSessionHash();
       nextSessionId = buildSessionId(baseId, round, nextVersion, hash);
-      while (this.isSessionArchived(nextSessionId) || this.isSessionPhysicallyPresent(nextSessionId)) {
+      while (
+        this.isSessionArchived(nextSessionId) ||
+        this.isSessionPhysicallyPresent(nextSessionId) ||
+        this.deletedSessionIds.has(nextSessionId)
+      ) {
         hash = generateSessionHash();
         nextSessionId = buildSessionId(baseId, round, nextVersion, hash);
       }
@@ -594,7 +698,10 @@ export class SessionManager {
             if (parsed) {
               const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
               if (expectedBase === baseId) {
-                if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+                if (
+                  (this.isSessionPhysicallyPresent(sid) || this.agentRunner.isPendingFirstTurn(sid)) &&
+                  !this.isSessionArchived(sid)
+                ) {
                   known.set(sid, { round: parsed.round, version: parsed.version });
                 }
               }
@@ -610,7 +717,10 @@ export class SessionManager {
             if (parsed) {
               const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
               if (expectedBase === baseId) {
-                if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+                if (
+                  (this.isSessionPhysicallyPresent(sid) || this.agentRunner.isPendingFirstTurn(sid)) &&
+                  !this.isSessionArchived(sid)
+                ) {
                   known.set(sid, { round: parsed.round, version: parsed.version });
                 }
               }
@@ -625,7 +735,10 @@ export class SessionManager {
       if (parsed) {
         const expectedBase = parsed.isGroup ? `qq-group-${parsed.id}` : `qq-user-${parsed.id}`;
         if (expectedBase === baseId) {
-          if (this.isSessionPhysicallyPresent(sid) && !this.isSessionArchived(sid)) {
+          if (
+            (this.isSessionPhysicallyPresent(sid) || this.agentRunner.isPendingFirstTurn(sid)) &&
+            !this.isSessionArchived(sid)
+          ) {
             known.set(sid, { round: parsed.round, version: parsed.version });
           }
         }
@@ -675,6 +788,7 @@ export class SessionManager {
     this.peerCurrentSessionId.clear();
     this.clearedVersions.clear();
     this.pendingClearedSessionId.clear();
+    this.deletedSessionIds.clear();
     this.modelSelector.clear();
   }
 }
