@@ -72,10 +72,11 @@ describe('契约测试: Web UI 设置卡「表情包」Tab (Face Settings Tab Co
     expect(html).toContain('id="napcat-face-store-max"');
     expect(html).toContain('id="napcat-face-evict-policy"');
     expect(html).toContain('napcat-face-gallery');
-    // 包含拖拽/图标上传框与免强制打标输入框
-    expect(html).toContain('napcat-face-upload-box');
-    expect(html).toContain('📤');
-    // 包含铅笔编辑按钮与垃圾桶删除按钮
+    // 包含标准上传操作条与上传按钮（无拖拽、无 emoji）
+    expect(html).toContain('napcat-face-upload-bar');
+    expect(html).toContain('napcat-face-upload-btn');
+    expect(html).toContain('上传表情');
+    // 包含线性 SVG 铅笔编辑按钮与垃圾桶删除按钮
     expect(html).toContain('napcat-face-edit-btn');
     expect(html).toContain('napcat-face-delete-btn');
   });

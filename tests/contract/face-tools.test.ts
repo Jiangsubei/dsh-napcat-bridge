@@ -372,4 +372,63 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(registeredNamesTrue).toContain('send_face');
     expect(registeredNamesTrue).toContain('collect_face');
   });
+
+  it('契约 9: 达到容量上限且为 reject 策略时，collect_face 友好返回错误对象而非崩溃抛错', async () => {
+    // 插入 2 张表情，设上限为 2
+    db.insertFace({
+      id: 'f1',
+      file_path: '/f1.png',
+      md5: 'md5_1',
+      source: 'manual',
+      tags: ['1'],
+      enabled: true,
+      size: 10,
+      format: 'png',
+    }, { max: 2, evictPolicy: 'reject' });
+
+    db.insertFace({
+      id: 'f2',
+      file_path: '/f2.png',
+      md5: 'md5_2',
+      source: 'manual',
+      tags: ['2'],
+      enabled: true,
+      size: 10,
+      format: 'png',
+    }, { max: 2, evictPolicy: 'reject' });
+
+    const newImg = path.join(tmpDir, 'new_img.png');
+    fs.writeFileSync(newImg, 'new-img-data');
+
+    db.saveMessage({
+      msg_id: 99901,
+      peer: 'group_123',
+      user_id: '123',
+      time: Math.floor(Date.now() / 1000),
+      type: 'image',
+      content: '[图片]',
+      raw: '',
+      local_path: newImg,
+    });
+
+    // 调用 collectFace，配额上限为 2，策略为 reject
+    const res = await collectFace(
+      {
+        message_id: 99901,
+        tags: ['新表情'],
+        mood: '开心',
+      },
+      {
+        db,
+        peer: 'group_123',
+        faceDir,
+        faceStoreMax: 2,
+        faceEvictPolicy: 'reject',
+      }
+    );
+
+    // 绝不抛出未捕获崩溃，而是友好返回带有明确原因的失败对象
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/配额容量上限/);
+  });
 });
