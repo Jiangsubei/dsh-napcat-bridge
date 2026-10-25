@@ -33,13 +33,12 @@ function IconTrash(props: { size?: number }): React.JSX.Element {
   );
 }
 
-function IconImage(props: { size?: number }): React.JSX.Element {
-  const size = props.size ?? 24;
+function IconBan(props: { size?: number }): React.JSX.Element {
+  const size = props.size ?? 32;
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
+      <circle cx="12" cy="12" r="10" />
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
     </svg>
   );
 }
@@ -237,11 +236,122 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
   // 表情包上传与编辑状态 (用户免强制打标，标准按钮上传，卡片内联展开二次编辑)
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [faces, setFaces] = useState<Array<{ id: string; tags: string[]; mood?: string; format: string; preview_url: string; use_count?: number }>>([]);
+  const [facesLoading, setFacesLoading] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<{ file: File; previewUrl: string; base64Data: string; format: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [uploadTags, setUploadTags] = useState('');
   const [uploadMood, setUploadMood] = useState('');
   const [editingFaceId, setEditingFaceId] = useState<string | null>(null);
   const [editingTags, setEditingTags] = useState('');
   const [editingMood, setEditingMood] = useState('');
+
+  const loadFaces = useCallback(async () => {
+    setFacesLoading(true);
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/faces');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.ok && Array.isArray(data.faces)) {
+        setFaces(data.faces);
+      }
+    } catch {
+      // 离线或加载静默
+    } finally {
+      setFacesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'face') {
+      void loadFaces();
+    }
+  }, [activeTab, loadFaces]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      if (result) {
+        setPendingUpload({
+          file,
+          previewUrl: result,
+          base64Data: result,
+          format: ext,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const submitPendingUpload = async () => {
+    if (!pendingUpload) return;
+    setUploading(true);
+    updateError(null);
+    try {
+      const parsedTags = parseStringToArray(uploadTags);
+      const res = await fetch('/plugins/dsh-napcat-bridge/faces', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          data: pendingUpload.base64Data,
+          format: pendingUpload.format,
+          tags: parsedTags,
+          mood: uploadMood.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || '上传表情包失败');
+      }
+      setPendingUpload(null);
+      setUploadTags('');
+      setUploadMood('');
+      void loadFaces();
+    } catch (err: any) {
+      updateError(err?.message || '上传表情失败');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteFace = async (id: string) => {
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/faces/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        void loadFaces();
+      }
+    } catch {}
+  };
+
+  const handleSaveEditFace = async (id: string) => {
+    try {
+      const parsedTags = parseStringToArray(editingTags);
+      const res = await fetch('/plugins/dsh-napcat-bridge/faces/edit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          tags: parsedTags,
+          mood: editingMood.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        setEditingFaceId(null);
+        void loadFaces();
+      }
+    } catch {}
+  };
 
   const loadRemoteConfig = useCallback(async () => {
     setRemoteLoading(true);
@@ -905,15 +1015,13 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 onChange={(val) => handleFieldChange('face_store_dir', val)}
               />
 
-              {/* 上传操作栏 (标准按钮触发文件选择，输入框选填免强制打标，完全去除拖动上传) */}
+              {/* 上传操作栏 (标准按钮触发文件选择，输入框移至选择图片后的确认弹窗内) */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 style={{ display: 'none' }}
-                onChange={(_e) => {
-                  // 文件选中处理
-                }}
+                onChange={handleFileSelect}
               />
               <div className={`napcat-face-upload-bar ${faceStyle.uploadBar}`}>
                 <button
@@ -925,141 +1033,202 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                   <IconUpload size={14} />
                   <span>上传表情</span>
                 </button>
-                <input
-                  type="text"
-                  className={fieldStyle.input}
-                  placeholder="标签 (选填，如 猫猫, 叹气)"
-                  value={uploadTags}
-                  onChange={(e) => setUploadTags(e.target.value)}
-                  style={{ height: '32px', maxWidth: '200px', fontSize: '12px' }}
-                />
-                <input
-                  type="text"
-                  className={fieldStyle.input}
-                  placeholder="情绪 (选填，如 卖萌, 嘲讽)"
-                  value={uploadMood}
-                  onChange={(e) => setUploadMood(e.target.value)}
-                  style={{ height: '32px', maxWidth: '160px', fontSize: '12px' }}
-                />
+                <span className={fieldStyle.hint} style={{ margin: 0 }}>
+                  支持 PNG / JPG / GIF / WEBP 格式（选择图片后弹出确认与打标弹窗，免强制打标）
+                </span>
               </div>
-              <p className={fieldStyle.hint} style={{ marginTop: '2px' }}>
-                支持 PNG / JPG / GIF / WEBP 格式。用户上传免强制打标，Agent 检索到后可自行读图补标。
-              </p>
 
-              {/* 资产画廊区 (严格契合 DSH 主题设计，采用线性 SVG 图标与标准容器) */}
+              {/* 资产画廊区 (严格契合 DSH 主题设计，空状态居中展示静止符号，多图真实渲染且上下间距大于左右) */}
               <div className={`napcat-face-gallery ${faceStyle.gallery}`}>
                 <div className={faceStyle.galleryHead}>
-                  <h4 className={faceStyle.galleryTitle}>已收录表情包资产</h4>
+                  <h4 className={faceStyle.galleryTitle}>已收录表情包资产 ({faces.length})</h4>
                   <p className={faceStyle.gallerySub}>
                     免人工审批 · 即偷即用 · 点击铅笔图标可直接二次编辑标签 · 淘汰表情保留 7 天后悔期
                   </p>
                 </div>
 
-                <div className={faceStyle.grid}>
-                  <div className={faceStyle.card}>
-                    <div className={faceStyle.cardPreview}>
-                      <IconImage size={28} />
-                    </div>
-                    <div className={faceStyle.cardTitle}>
-                      表情画廊示例
-                    </div>
+                {faces.length === 0 ? (
+                  <div className={`napcat-face-empty ${faceStyle.empty}`}>
+                    <IconBan size={36} />
+                    <p className={faceStyle.emptyText}>
+                      {facesLoading ? '正在加载表情库...' : '暂未收录表情包，点击上方「上传表情」即可添加'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className={`napcat-face-grid ${faceStyle.grid}`}>
+                    {faces.map((f) => (
+                      <div key={f.id} className={faceStyle.card}>
+                        <div className={faceStyle.cardPreview}>
+                          <img src={f.preview_url} className={faceStyle.cardImg} alt={f.id} />
+                        </div>
+                        <div className={faceStyle.cardTitle} title={f.tags.join(', ') || f.id}>
+                          {f.tags.length > 0 ? f.tags.join(', ') : f.id}
+                        </div>
 
-                    {/* 操作按钮区：线性 SVG 铅笔与垃圾桶 */}
-                    <div className={faceStyle.cardActions}>
-                      <button
-                        type="button"
-                        className={`napcat-face-edit-btn ${faceStyle.actionBtn}`}
-                        title="编辑表情标签与情绪"
-                        onClick={() => {
-                          if (editingFaceId === 'demo_face') {
-                            setEditingFaceId(null);
-                          } else {
-                            setEditingFaceId('demo_face');
-                            setEditingTags('猫猫, 喝水');
-                            setEditingMood('搞笑');
-                          }
-                        }}
-                      >
-                        <IconEdit size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        className={`napcat-face-delete-btn ${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
-                        title="删除表情包 (保留 7 天后悔期)"
-                      >
-                        <IconTrash size={12} />
-                      </button>
-                    </div>
-
-                    {/* 画框范围内内联展开的小输入框二次编辑区域 */}
-                    {editingFaceId === 'demo_face' && (
-                      <div className={`napcat-face-inline-editor ${faceStyle.inlineEditor}`}>
-                        <input
-                          type="text"
-                          className={fieldStyle.input}
-                          value={editingTags}
-                          onChange={(e) => setEditingTags(e.target.value)}
-                          placeholder="新标签 (逗号分隔)"
-                          style={{
-                            height: '24px',
-                            fontSize: '11px',
-                            padding: '2px 6px',
-                            width: '100%',
-                            boxSizing: 'border-box',
-                          }}
-                        />
-                        <input
-                          type="text"
-                          className={fieldStyle.input}
-                          value={editingMood}
-                          onChange={(e) => setEditingMood(e.target.value)}
-                          placeholder="新情绪"
-                          style={{
-                            height: '24px',
-                            fontSize: '11px',
-                            padding: '2px 6px',
-                            width: '100%',
-                            boxSizing: 'border-box',
-                          }}
-                        />
-                        <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                        {/* 操作按钮区：线性 SVG 铅笔与垃圾桶 */}
+                        <div className={faceStyle.cardActions}>
                           <button
                             type="button"
-                            className={`napcat-face-save-edit-btn ${cardStyle.save}`}
-                            onClick={() => setEditingFaceId(null)}
-                            style={{
-                              flex: 1,
-                              height: '24px',
-                              padding: '0 4px',
-                              fontSize: '11px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
+                            className={`napcat-face-edit-btn ${faceStyle.actionBtn}`}
+                            title="编辑表情标签与情绪"
+                            onClick={() => {
+                              if (editingFaceId === f.id) {
+                                setEditingFaceId(null);
+                              } else {
+                                setEditingFaceId(f.id);
+                                setEditingTags(f.tags.join(', '));
+                                setEditingMood(f.mood || '');
+                              }
                             }}
                           >
-                            保存
+                            <IconEdit size={12} />
                           </button>
                           <button
                             type="button"
-                            className={cardStyle.discard}
-                            onClick={() => setEditingFaceId(null)}
-                            style={{
-                              height: '24px',
-                              padding: '0 6px',
-                              fontSize: '11px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
+                            className={`napcat-face-delete-btn ${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
+                            title="删除表情包 (保留 7 天后悔期)"
+                            onClick={() => handleDeleteFace(f.id)}
                           >
-                            取消
+                            <IconTrash size={12} />
                           </button>
                         </div>
+
+                        {/* 画框范围内内联展开的小输入框二次编辑区域 */}
+                        {editingFaceId === f.id && (
+                          <div className={`napcat-face-inline-editor ${faceStyle.inlineEditor}`}>
+                            <input
+                              type="text"
+                              className={fieldStyle.input}
+                              value={editingTags}
+                              onChange={(e) => setEditingTags(e.target.value)}
+                              placeholder="新标签 (逗号分隔)"
+                              style={{
+                                height: '24px',
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                                width: '100%',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                            <input
+                              type="text"
+                              className={fieldStyle.input}
+                              value={editingMood}
+                              onChange={(e) => setEditingMood(e.target.value)}
+                              placeholder="新情绪 (选填)"
+                              style={{
+                                height: '24px',
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                                width: '100%',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                            <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                              <button
+                                type="button"
+                                className={`napcat-face-save-edit-btn ${cardStyle.save}`}
+                                onClick={() => handleSaveEditFace(f.id)}
+                                style={{
+                                  flex: 1,
+                                  height: '24px',
+                                  padding: '0 4px',
+                                  fontSize: '11px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                保存
+                              </button>
+                              <button
+                                type="button"
+                                className={cardStyle.discard}
+                                onClick={() => setEditingFaceId(null)}
+                                style={{
+                                  height: '24px',
+                                  padding: '0 6px',
+                                  fontSize: '11px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 上传确认弹窗 Modal (上方大图预览，下方左到右排布输入框与提交按钮) */}
+              {pendingUpload && (
+                <div className={faceStyle.modalOverlay} onClick={() => setPendingUpload(null)}>
+                  <div className={faceStyle.modalPanel} onClick={(e) => e.stopPropagation()}>
+                    <div className={faceStyle.modalHead}>
+                      <h3 className={faceStyle.modalTitle}>上传新表情包</h3>
+                      <button
+                        type="button"
+                        className={faceStyle.modalClose}
+                        onClick={() => setPendingUpload(null)}
+                        title="关闭"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className={faceStyle.modalBody}>
+                      <div className={faceStyle.modalPreviewBox}>
+                        <img
+                          src={pendingUpload.previewUrl}
+                          className={faceStyle.modalPreviewImg}
+                          alt="表情大图预览"
+                        />
+                      </div>
+                    </div>
+
+                    <div className={faceStyle.modalFooterRow}>
+                      <input
+                        type="text"
+                        className={fieldStyle.input}
+                        placeholder="标签 (选填，逗号分隔，如: 猫猫, 叹气)"
+                        value={uploadTags}
+                        onChange={(e) => setUploadTags(e.target.value)}
+                        style={{ flex: 1, height: '32px', fontSize: '12px' }}
+                      />
+                      <input
+                        type="text"
+                        className={fieldStyle.input}
+                        placeholder="情绪 (选填)"
+                        value={uploadMood}
+                        onChange={(e) => setUploadMood(e.target.value)}
+                        style={{ width: '100px', height: '32px', fontSize: '12px' }}
+                      />
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        onClick={() => setPendingUpload(null)}
+                        style={{ height: '32px', padding: '0 10px', fontSize: '12px' }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={`napcat-face-modal-submit-btn ${cardStyle.save}`}
+                        onClick={submitPendingUpload}
+                        disabled={uploading}
+                        style={{ height: '32px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                      >
+                        {uploading ? '上传中...' : '提交表情'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </>
           )}
         </div>
