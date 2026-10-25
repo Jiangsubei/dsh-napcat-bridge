@@ -66,16 +66,29 @@ const NAPCAT_CARD_CSS = `
 .napcat_faceGalleryHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 .napcat_faceGalleryTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
 .napcat_faceGallerySub{font-size:12px;color:var(--dsw-alias-label-tertiary);margin:0}
-.napcat_faceGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.napcat_faceGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));column-gap:12px;row-gap:16px}
 .napcat_faceCard{position:relative;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;padding:8px;text-align:center;transition:border-color .16s,background .16s}
 .napcat_faceCard:hover{border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-bg-layer-2)}
-.napcat_faceCardPreview{height:64px;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}
-.napcat_faceCardTitle{font-size:12px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+.napcat_faceCardPreview{height:72px;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);overflow:hidden;border-radius:6px;background:var(--dsw-alias-bg-layer-2)}
+.napcat_faceCardImg{max-width:100%;max-height:100%;object-fit:contain}
+.napcat_faceCardTitle{font-size:12px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:6px}
 .napcat_faceCardActions{position:absolute;top:6px;right:6px;display:flex;gap:4px}
 .napcat_faceActionBtn{appearance:none;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);border-radius:4px;cursor:pointer;padding:3px;display:inline-flex;align-items:center;justify-content:center;transition:color .16s,border-color .16s}
 .napcat_faceActionBtn:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}
 .napcat_faceActionDelete:hover{color:var(--dsw-alias-label-error);border-color:var(--dsw-alias-label-error)}
 .napcat_faceInlineEditor{margin-top:8px;padding:6px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;display:flex;flex-direction:column;gap:6px}
+.napcat_faceEmpty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;color:var(--dsw-alias-label-tertiary);gap:8px;border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}
+.napcat_faceEmptyText{font-size:12px;color:var(--dsw-alias-label-tertiary);margin:0}
+.napcat_modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;backdrop-filter:blur(2px)}
+.napcat_modalPanel{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,.45);width:100%;max-width:460px;overflow:hidden;display:flex;flex-direction:column}
+.napcat_modalHead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.napcat_modalTitle{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
+.napcat_modalClose{appearance:none;background:0 0;border:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:16px;line-height:1;padding:4px;border-radius:4px}
+.napcat_modalClose:hover{color:var(--dsw-alias-label-primary)}
+.napcat_modalBody{padding:16px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.napcat_modalPreviewBox{width:100%;max-height:220px;height:220px;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;overflow:hidden;padding:8px;box-sizing:border-box}
+.napcat_modalPreviewImg{max-width:100%;max-height:100%;object-fit:contain}
+.napcat_modalFooterRow{display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);box-sizing:border-box}
 `;
 
 export function injectCardStyles(): void {
@@ -154,9 +167,21 @@ export const faceStyle = {
   grid: 'napcat_faceGrid',
   card: 'napcat_faceCard',
   cardPreview: 'napcat_faceCardPreview',
+  cardImg: 'napcat_faceCardImg',
   cardTitle: 'napcat_faceCardTitle',
   cardActions: 'napcat_faceCardActions',
   actionBtn: 'napcat_faceActionBtn',
   actionDelete: 'napcat_faceActionDelete',
   inlineEditor: 'napcat_faceInlineEditor',
+  empty: 'napcat_faceEmpty',
+  emptyText: 'napcat_faceEmptyText',
+  modalOverlay: 'napcat_modalOverlay',
+  modalPanel: 'napcat_modalPanel',
+  modalHead: 'napcat_modalHead',
+  modalTitle: 'napcat_modalTitle',
+  modalClose: 'napcat_modalClose',
+  modalBody: 'napcat_modalBody',
+  modalPreviewBox: 'napcat_modalPreviewBox',
+  modalPreviewImg: 'napcat_modalPreviewImg',
+  modalFooterRow: 'napcat_modalFooterRow',
 };

@@ -76,8 +76,8 @@ describe('契约测试: Web UI 设置卡「表情包」Tab (Face Settings Tab Co
     expect(html).toContain('napcat-face-upload-bar');
     expect(html).toContain('napcat-face-upload-btn');
     expect(html).toContain('上传表情');
-    // 包含线性 SVG 铅笔编辑按钮与垃圾桶删除按钮
-    expect(html).toContain('napcat-face-edit-btn');
-    expect(html).toContain('napcat-face-delete-btn');
+    // 空列表状态时居中展示静止符号与空状态文案
+    expect(html).toContain('napcat-face-empty');
+    expect(html).toContain('暂未收录表情包');
   });
 });

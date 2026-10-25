@@ -39,6 +39,7 @@ import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
 
 import { registerConfigRoute } from './server/routes.js';
+import { registerFacesRoutes } from './server/face-routes.js';
 import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
 
 export * from './memory/index.js';
@@ -131,6 +132,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const waitRegistry = new MessageWaitRegistry();
 
   let memoryService: any = null;
+  let unregisterFacesRoutes: (() => void) | undefined;
   let isDisposed = false;
 
   // C2: Notice 事件 (group_upload / poke) 无真实 message_id 时的稳定正数主键策略
@@ -254,6 +256,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const dbPath = resolveDshPath(dshHome, undefined, DEFAULT_DATABASE_PATH);
   const db = new MessageDatabase(dbPath);
   db.init();
+
+  // 挂载表情包管理 REST 路由 (列表、上传、大图预览、编辑、删除)
+  unregisterFacesRoutes = registerFacesRoutes({ ctx, db, getConfig: currentConfig, dshHome });
 
   const mediaManager = new MediaStorageManager({
     dshHome,
@@ -1195,6 +1200,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     isDisposed = true;
     try {
       unregisterConfigRoute();
+      if (typeof unregisterFacesRoutes === 'function') unregisterFacesRoutes();
     } catch {
       // ignore
     }
