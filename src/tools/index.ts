@@ -1537,7 +1537,7 @@ export function registerAgentTools(
                   ? peer.replace(/^(qq-group-|group_)/, '').split('-')[0]
                   : undefined;
               const cfg = getConfig();
-              const res = (await sendFace(args, {
+              return (await sendFace(args, {
                 db: options.db,
                 gateway: options.gateway,
                 sender: options.sender,
@@ -1545,10 +1545,6 @@ export function registerAgentTools(
                 groupId,
                 faceSubType: cfg.face_sub_type,
               })) as any;
-              if (res && res.success === false) {
-                throw new Error(res.error || 'send_face 失败');
-              }
-              return res;
             },
           })
         )
@@ -1603,7 +1599,7 @@ export function registerAgentTools(
               const rawPeer = session?.id || '';
               const peer = normalizePeer(rawPeer);
               const cfg = getConfig();
-              const res = (await collectFace(args, {
+              return (await collectFace(args, {
                 db: options.db,
                 peer,
                 inboundMsgIdGetter: options.inboundMsgIdGetter,
@@ -1611,10 +1607,6 @@ export function registerAgentTools(
                 faceStoreMax: cfg.face_store_max,
                 faceEvictPolicy: cfg.face_evict_policy,
               })) as any;
-              if (res && res.success === false) {
-                throw new Error(res.error || 'collect_face 失败');
-              }
-              return res;
             },
           })
         )

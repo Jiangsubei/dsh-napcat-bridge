@@ -53,6 +53,6 @@ export const DEFAULT_FACE_CURATE_CRON = '0 */2 * * *';
 export const DEFAULT_FACE_CURATE_INTERVAL_MINS = 60;
 export const DEFAULT_FACE_QUERY_LIMIT = 100;
 export const DEFAULT_FACE_SUB_TYPE = 1;
-export const DEFAULT_FACE_EVICT_POLICY = 'reject';
+export const DEFAULT_FACE_EVICT_POLICY = 'evict_lru';
 export const DEFAULT_FACE_GRACE_PERIOD_DAYS = 7;
 

@@ -61,6 +61,21 @@ const NAPCAT_CARD_CSS = `
 .napcat_sectionTitle{color:var(--dsw-alias-label-primary);font-size:20px;font-weight:600;line-height:1.4;margin:0}
 .napcat_sectionDescription{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5;margin:0}
 .napcat_sectionBody{display:flex;flex-direction:column;flex:1}
+.napcat_faceUploadBar{display:flex;align-items:center;gap:10px;padding:12px 0;flex-wrap:wrap}
+.napcat_faceGallery{margin-top:16px;display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:12px}
+.napcat_faceGalleryHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.napcat_faceGalleryTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
+.napcat_faceGallerySub{font-size:12px;color:var(--dsw-alias-label-tertiary);margin:0}
+.napcat_faceGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.napcat_faceCard{position:relative;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;padding:8px;text-align:center;transition:border-color .16s,background .16s}
+.napcat_faceCard:hover{border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-bg-layer-2)}
+.napcat_faceCardPreview{height:64px;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}
+.napcat_faceCardTitle{font-size:12px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+.napcat_faceCardActions{position:absolute;top:6px;right:6px;display:flex;gap:4px}
+.napcat_faceActionBtn{appearance:none;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);border-radius:4px;cursor:pointer;padding:3px;display:inline-flex;align-items:center;justify-content:center;transition:color .16s,border-color .16s}
+.napcat_faceActionBtn:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}
+.napcat_faceActionDelete:hover{color:var(--dsw-alias-label-error);border-color:var(--dsw-alias-label-error)}
+.napcat_faceInlineEditor{margin-top:8px;padding:6px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;display:flex;flex-direction:column;gap:6px}
 `;
 
 export function injectCardStyles(): void {
@@ -128,4 +143,20 @@ export const fieldStyle = {
   invalid: 'napcat_invalid',
   hint: 'napcat_hint',
   checkbox: 'napcat_checkbox',
+};
+
+export const faceStyle = {
+  uploadBar: 'napcat_faceUploadBar',
+  gallery: 'napcat_faceGallery',
+  galleryHead: 'napcat_faceGalleryHead',
+  galleryTitle: 'napcat_faceGalleryTitle',
+  gallerySub: 'napcat_faceGallerySub',
+  grid: 'napcat_faceGrid',
+  card: 'napcat_faceCard',
+  cardPreview: 'napcat_faceCardPreview',
+  cardTitle: 'napcat_faceCardTitle',
+  cardActions: 'napcat_faceCardActions',
+  actionBtn: 'napcat_faceActionBtn',
+  actionDelete: 'napcat_faceActionDelete',
+  inlineEditor: 'napcat_faceInlineEditor',
 };
