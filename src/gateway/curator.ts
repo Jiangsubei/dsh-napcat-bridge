@@ -349,6 +349,46 @@ export class FaceCurator {
       this.isRunning = false;
     }
   }
+
+  /**
+   * 巡检所有活跃会话（基于 SQLite 存储的会话状态表），对每个会话执行 Fork 审视
+   */
+  async runAllActivePeers(): Promise<CurateRunResult[]> {
+    const cfg = this.options.config ? this.options.config() : {};
+    if (!cfg.face_enabled || !cfg.face_auto_curate) {
+      return [];
+    }
+
+    const states = this.options.db.getAllSessionStates();
+    const results: CurateRunResult[] = [];
+    const sessions =
+      (this.ctx as any)?.sessions ||
+      (typeof (this.ctx as any)?.get === 'function' ? (this.ctx as any).get('sessions') : undefined);
+
+    for (const state of states) {
+      if (!state.peer || !state.current_session_id) continue;
+      let parentSession: any = undefined;
+      if (sessions && typeof sessions.get === 'function') {
+        try {
+          parentSession = sessions.get(state.current_session_id);
+        } catch {}
+      }
+      try {
+        const res = await this.runCurator(state.peer, {
+          sessionId: state.current_session_id,
+          parentSession,
+        });
+        results.push(res);
+      } catch (err: any) {
+        results.push({
+          executed: false,
+          peer: state.peer,
+          error: err?.message || '未知错误',
+        });
+      }
+    }
+    return results;
+  }
 }
 
 /**
@@ -369,7 +409,7 @@ export function startCuratorTask(
       if (!currentCfg.face_enabled || !currentCfg.face_auto_curate) {
         return;
       }
-      await curator.curateOnce();
+      await curator.runAllActivePeers();
     } catch {}
   }, intervalMs);
 

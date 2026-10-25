@@ -431,4 +431,41 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/配额容量上限/);
   });
+
+  it('契约 10: list_faces 返回结果必须严格满足 DSH Lossless JSON 约束 (无 undefined 字段，isJsonValue / snapshotJsonValue 严格通过)', async () => {
+    // 插入未打标、无 mood 的表情
+    db.insertFace({
+      id: 'face_untagged_1',
+      file_path: '/path/untagged.png',
+      md5: 'md5_untagged',
+      source: 'manual',
+      tags: [],
+      // mood 缺省为 undefined / null
+      enabled: true,
+      size: 512,
+      format: 'png',
+    });
+
+    const res = await listFaces({}, { db });
+
+    // 1. 断言数据正确查出
+    expect(res.faces).toHaveLength(1);
+    expect(res.faces[0].id).toBe('face_untagged_1');
+
+    // 2. 核心红线契约：无任何 undefined 键，绝不破坏 Lossless JSON 契约
+    expect(Object.hasOwn(res, 'next_cursor')).toBe(false);
+    expect(Object.hasOwn(res.faces[0], 'mood')).toBe(false);
+
+    // 3. 校验 DSH 内核 isJsonValue / snapshotJsonValue 绝不返回 undefined
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const dshToolsPkg = require.resolve('@deepseek-ai/dsh-tools/package.json');
+    const dshToolsRequire = createRequire(dshToolsPkg);
+    const { isJsonValue, snapshotJsonValue } = dshToolsRequire('@deepseek-ai/dsh-util-values');
+
+    expect(isJsonValue(res)).toBe(true);
+    const snapshot = snapshotJsonValue(res);
+    expect(snapshot).toBeDefined();
+    expect(snapshot).not.toBeUndefined();
+  });
 });

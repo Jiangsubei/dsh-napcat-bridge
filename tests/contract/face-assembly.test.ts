@@ -79,5 +79,27 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     expect(res).toBeDefined();
     expect(res.faces).toEqual([]);
     expect(res.total).toBe(0);
+
+    // 验证插入未打标表情后执行 list_faces 返回结果严格满足 Lossless JSON
+    const dbPath = path.join(tmpHome, 'napcat', 'messages.sqlite');
+    const { MessageDatabase } = await import('../../src/storage/database.js');
+    const db = new MessageDatabase(dbPath);
+    db.init();
+    db.insertFace({
+      id: 'face_test_lossless',
+      file_path: '/fake/path/lossless.png',
+      md5: 'md5_lossless_test',
+      source: 'manual',
+      tags: [],
+      size: 100,
+      format: 'png',
+    });
+    db.close();
+
+    const res2 = await listFacesTool.execute({}, { agent: { session: { id: 'qq-group-8000000002' } } });
+    expect(res2.faces).toHaveLength(1);
+    expect(res2.faces[0].id).toBe('face_test_lossless');
+    expect(Object.hasOwn(res2.faces[0], 'mood')).toBe(false);
+    expect(Object.hasOwn(res2, 'next_cursor')).toBe(false);
   });
 });

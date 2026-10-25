@@ -1198,7 +1198,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         placeholder="标签 (选填，逗号分隔，如: 猫猫, 叹气)"
                         value={uploadTags}
                         onChange={(e) => setUploadTags(e.target.value)}
-                        style={{ flex: 1, height: '32px', fontSize: '12px' }}
+                        style={{ flex: 1, minWidth: '120px', height: '32px', fontSize: '12px' }}
                       />
                       <input
                         type="text"
@@ -1206,13 +1206,13 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         placeholder="情绪 (选填)"
                         value={uploadMood}
                         onChange={(e) => setUploadMood(e.target.value)}
-                        style={{ width: '100px', height: '32px', fontSize: '12px' }}
+                        style={{ width: '80px', flexShrink: 0, height: '32px', fontSize: '12px' }}
                       />
                       <button
                         type="button"
                         className={cardStyle.discard}
                         onClick={() => setPendingUpload(null)}
-                        style={{ height: '32px', padding: '0 10px', fontSize: '12px' }}
+                        style={{ height: '32px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0 }}
                       >
                         取消
                       </button>
@@ -1221,7 +1221,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         className={`napcat-face-modal-submit-btn ${cardStyle.save}`}
                         onClick={submitPendingUpload}
                         disabled={uploading}
-                        style={{ height: '32px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                        style={{ height: '32px', padding: '0 14px', fontSize: '12px', whiteSpace: 'nowrap', flexShrink: 0 }}
                       >
                         {uploading ? '上传中...' : '提交表情'}
                       </button>
