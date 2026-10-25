@@ -722,9 +722,18 @@ export async function reactMessage(
 }
 
 /**
+ * 清洗对象以确保严格符合 DSH Lossless JSON 约束 (递归剥离所有 undefined 字段)
+ * 彻底避免 DSH snapshotJsonValue 抛出 "value is not lossless JSON" 错误
+ */
+export function toLosslessJson<T>(val: T): T {
+  if (val === undefined || val === null) return val;
+  return JSON.parse(JSON.stringify(val));
+}
+
+/**
  * 6.9 检索表情包工具 (list_faces)
  * 按情绪 (mood) 或内容标签 (tag) 检索本地可用表情包。
- * 强制分页，仅返回语义元数据 (id, tags, mood, format)，坚决不出物理路径或 URL。
+ * 强制分页，仅返回语义元数据 (id, tags, mood, format)，坚决不出 URL。
  */
 export async function listFaces(
   params: ListFacesParams,
@@ -745,20 +754,31 @@ export async function listFaces(
     enabledOnly: true,
   });
 
-  const faces: FaceSummaryItem[] = queryRes.faces.map((f) => ({
-    id: f.id,
-    tags: f.tags,
-    mood: f.mood,
-    format: f.format,
-    file_path: f.file_path,
-  }));
+  const faces: FaceSummaryItem[] = queryRes.faces.map((f) => {
+    const item: FaceSummaryItem = {
+      id: f.id,
+      tags: f.tags || [],
+      format: f.format,
+    };
+    if (f.mood !== undefined && f.mood !== null && String(f.mood).trim() !== '') {
+      item.mood = f.mood;
+    }
+    if (f.file_path) {
+      item.file_path = f.file_path;
+    }
+    return item;
+  });
 
-  return {
+  const res: ListFacesResult = {
     faces,
     total: queryRes.total,
     has_more: queryRes.has_more,
-    next_cursor: queryRes.has_more ? String(offset + limit) : undefined,
   };
+  if (queryRes.has_more) {
+    res.next_cursor = String(offset + limit);
+  }
+
+  return toLosslessJson(res);
 }
 
 /**
@@ -832,15 +852,18 @@ export async function sendFace(
       // 发送成功后累加使用频次与刷新时间
       ctx.db!.recordFaceUsage(face.id);
       const messageId = res?.data?.message_id;
-      return {
+      const sendRes: SendFaceResult = {
         success: true,
-        message_id: typeof messageId === 'number' ? messageId : undefined,
       };
+      if (typeof messageId === 'number') {
+        sendRes.message_id = messageId;
+      }
+      return toLosslessJson(sendRes);
     } catch (err: any) {
-      return {
+      return toLosslessJson({
         success: false,
         error: `发送表情异常: ${err?.message || '未知错误'}`,
-      };
+      });
     }
   };
 
@@ -882,11 +905,11 @@ export async function collectFace(
       tags: params.tags,
       mood: params.mood.trim(),
     });
-    return {
+    return toLosslessJson({
       success: true,
       face_id: faceId,
       message: `已成功为表情 "${faceId}" 补全标签与情绪（标签: [${(updated?.tags || []).join(', ')}]，情绪: ${updated?.mood || '未设置'}）`,
-    };
+    });
   }
 
   // 分支 2: 偷图/收藏新表情
@@ -961,21 +984,21 @@ export async function collectFace(
     );
 
     if (res.duplicated) {
-      return {
+      return toLosslessJson({
         success: true,
         duplicated: true,
         face_id: res.id,
         message: `该表情包已在你的表情库中存在（已有标签: [${res.tags.join(', ')}]，情绪: ${res.mood || '未设置'}）`,
-      };
+      });
     }
 
-    return {
+    return toLosslessJson({
       success: true,
       face_id: res.id,
       message: `已成功收藏表情包，标签: [${safeTags.join(', ')}]，情绪: ${safeMood}`,
-    };
+    });
   } catch (err: any) {
-    return { success: false, error: `表情入库失败: ${err?.message || '未知错误'}` };
+    return toLosslessJson({ success: false, error: `表情入库失败: ${err?.message || '未知错误'}` });
   }
 }
 
@@ -1309,10 +1332,11 @@ export function registerAgentTools(
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || '';
             const peer = normalizePeer(rawPeer);
-            return (await listGroupFiles(args, {
+            const res = await listGroupFiles(args, {
               db: options.db,
               peer,
-            })) as any;
+            });
+            return toLosslessJson(res) as any;
           },
         })
       )
@@ -1496,7 +1520,8 @@ export function registerAgentTools(
               },
             },
             async execute(args, _exec) {
-              return (await listFaces(args, { db: options.db })) as any;
+              const res = await listFaces(args, { db: options.db });
+              return toLosslessJson(res) as any;
             },
           })
         )
@@ -1537,14 +1562,15 @@ export function registerAgentTools(
                   ? peer.replace(/^(qq-group-|group_)/, '').split('-')[0]
                   : undefined;
               const cfg = getConfig();
-              return (await sendFace(args, {
+              const res = await sendFace(args, {
                 db: options.db,
                 gateway: options.gateway,
                 sender: options.sender,
                 peer,
                 groupId,
                 faceSubType: cfg.face_sub_type,
-              })) as any;
+              });
+              return toLosslessJson(res) as any;
             },
           })
         )
@@ -1599,14 +1625,15 @@ export function registerAgentTools(
               const rawPeer = session?.id || '';
               const peer = normalizePeer(rawPeer);
               const cfg = getConfig();
-              return (await collectFace(args, {
+              const res = await collectFace(args, {
                 db: options.db,
                 peer,
                 inboundMsgIdGetter: options.inboundMsgIdGetter,
                 faceDir: cfg.face_store_dir,
                 faceStoreMax: cfg.face_store_max,
                 faceEvictPolicy: cfg.face_evict_policy,
-              })) as any;
+              });
+              return toLosslessJson(res) as any;
             },
           })
         )

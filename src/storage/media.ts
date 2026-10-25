@@ -304,6 +304,24 @@ export async function cleanExpiredMedia(
   };
 
   await walkAndClean(downloadRoot);
+
+  // 物理清理已过 7 天后悔期的软删除表情包文件及数据库记录
+  if (db && typeof (db as any).purgeExpiredFaces === 'function') {
+    try {
+      const purgedPaths = (db as any).purgeExpiredFaces(7);
+      for (const p of purgedPaths) {
+        if (p && fs.existsSync(p)) {
+          try {
+            const stat = fs.statSync(p);
+            fs.unlinkSync(p);
+            deletedFiles++;
+            freedBytes += stat.size;
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
   return { deletedFiles, freedBytes };
 }
 

@@ -22,7 +22,7 @@ const NAPCAT_CARD_CSS = `
 .napcat_body{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}
 .napcat_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px;display:flex}
 .napcat_failed{min-width:0;color:var(--dsw-alias-label-error);flex:1;margin:0;font-size:12px;line-height:1.5}
-.napcat_discard,.napcat_save{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}
+.napcat_discard,.napcat_save{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5;white-space:nowrap;flex-shrink:0}
 .napcat_discard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:0 0}
 .napcat_discard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}
 .napcat_save{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}
@@ -80,7 +80,7 @@ const NAPCAT_CARD_CSS = `
 .napcat_faceEmpty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;color:var(--dsw-alias-label-tertiary);gap:8px;border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2)}
 .napcat_faceEmptyText{font-size:12px;color:var(--dsw-alias-label-tertiary);margin:0}
 .napcat_modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;backdrop-filter:blur(2px)}
-.napcat_modalPanel{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,.45);width:100%;max-width:460px;overflow:hidden;display:flex;flex-direction:column}
+.napcat_modalPanel{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,.45);width:100%;max-width:500px;overflow:hidden;display:flex;flex-direction:column}
 .napcat_modalHead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .napcat_modalTitle{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);margin:0}
 .napcat_modalClose{appearance:none;background:0 0;border:none;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:16px;line-height:1;padding:4px;border-radius:4px}
@@ -88,7 +88,7 @@ const NAPCAT_CARD_CSS = `
 .napcat_modalBody{padding:16px;display:flex;flex-direction:column;align-items:center;gap:12px}
 .napcat_modalPreviewBox{width:100%;max-height:220px;height:220px;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;overflow:hidden;padding:8px;box-sizing:border-box}
 .napcat_modalPreviewImg{max-width:100%;max-height:100%;object-fit:contain}
-.napcat_modalFooterRow{display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);box-sizing:border-box}
+.napcat_modalFooterRow{display:flex;align-items:center;gap:8px;width:100%;min-width:0;padding:12px 16px;border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);box-sizing:border-box}
 `;
 
 export function injectCardStyles(): void {
