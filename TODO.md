@@ -11,7 +11,7 @@
 | 优先级 | 任务主题 | 核心模块 | 当前状态 | 下一步行动 |
 |:---:|---|---|:---:|---|
 | **P0** | *(暂无紧急阻塞)* | - | - | 预留位，随时响应生产故障或重大阻断缺陷 |
-| **P1** | **表情包管理工具 · 本地表情库 · 设置卡表情包 Tab** | `src/tools/`<br>`src/client/`<br>`src/storage/` | **实测已闭环**<br>(可开工实现) | 编写表情库 SQLite 存储与 Agent 工具契约测试并推进落地 |
+| **P1** | **表情包管理工具 · 本地表情库 · 设置卡表情包 Tab** | `src/tools/`<br>`src/client/`<br>`src/storage/` | **已完成**<br>(生产装配闭环) | 交付用户真机体验与验收 |
 | **P1** | **QQ 会话专属预设系统**（提示词纯净化 & 工具白名单硬隔离） | `src/gateway/session/`<br>`src/prompt/` | **方案收敛**<br>(待装配验证) | 验证 `complete: true` 覆盖与 `tools.restrict` 隔离，改造 `agent-runner.ts` |
 | **P2** | **JEV 决策模型前置群聊感知与主动唤醒** | `src/gateway/wakeup.ts`<br>`src/gateway/jev.ts` | **方案定稿**<br>(沙盒实测验证通过) | 编写 TDD 契约测试，实现 JEV 客户端与门控装配 |
 | **P3** | **Agent 自修改演进机制**（群专属人设/行为准则自我演进） | `src/gateway/session/`<br>`src/tools/` | **架构调研草案**<br>(待方案细化) | 细化自修改工具协议与权限栅栏设计，编写契约测试 |
@@ -35,10 +35,11 @@
   - [x] 完成开工前实测 M1：`image` 消息段 `sub_type` QQ 侧渲染形态（实测锁定 `sub_type=1` 为表情包形态）
   - [x] 完成开工前实测 M2：尺寸与动图（GIF/WebP）压缩边界（GIF 动图保活正常循环播放）
   - [x] 完成开工前实测 M3：发送端已上传资源复用性（`file_id`）验证（本地物理路径秒级直发）
-  - [ ] 表情库 SQLite 索引与文件目录结构实现（含 MD5 去重、配额、软删除 7 天后悔期）
-  - [ ] 注册 `list_faces` / `send_face` / `collect_face` Agent 工具并编写契约测试
-  - [ ] 后台 Curator Agent 接入（类比 Background Review）
-  - [ ] 前端设置卡「表情包管理」Tab 开发（极简资产画廊 + 一键删除）
+  - [x] 表情库 SQLite 索引与文件目录结构实现（含 MD5 去重、配额淘汰、软删除 7 天后悔期、无标签筛选与编辑更新）
+  - [x] 注册 `list_faces` / `send_face` / `collect_face` Agent 工具（支持偷图收藏与补标编辑统一契约，Agent 严格必填 tags/mood）
+  - [x] 后台 Curator Agent 接入（严格对齐 Background Review 架构：Fork会话、白名单沙箱、Prompt兜底收录、用完即焚）
+  - [x] 前端设置卡「表情包」Tab 开发（支持拖拽+图标上传、免强制打标输入框、画框内二次编辑标签、极简垃圾桶一键删除）
+  - [x] 生产装配闭环契约测试与全量编译构建验证 (26/26 测试全绿，dist/ 产物完整落盘)
 
 ---
 
