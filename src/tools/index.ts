@@ -33,6 +33,7 @@ import type {
   CollectFaceParams,
   CollectFaceResult,
   BridgePluginConfig,
+  MessageRecord,
 } from '../types/index.js';
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
@@ -733,11 +734,12 @@ export async function listFaces(
   if (!ctx.db) {
     return { faces: [], total: 0, has_more: false };
   }
-  const limit = Math.min(Math.max(params?.limit ?? 10, 1), 30);
+  const limit = Math.min(Math.max(params?.limit ?? 100, 1), 100);
   const offset = params?.cursor ? parseInt(params.cursor, 10) || 0 : 0;
   const queryRes = ctx.db.queryFaces({
     mood: params?.mood,
     tag: params?.tag,
+    untagged: params?.untagged,
     limit,
     offset,
     enabledOnly: true,
@@ -748,6 +750,7 @@ export async function listFaces(
     tags: f.tags,
     mood: f.mood,
     format: f.format,
+    file_path: f.file_path,
   }));
 
   return {
@@ -848,9 +851,9 @@ export async function sendFace(
 }
 
 /**
- * 6.11 即时偷表情/收藏工具 (collect_face)
- * 从指定消息（或当前正在回复的入站消息）中提取图片并收录进表情库。
- * 强制要求 Agent 传入当前理解的画面内容标签 (tags) 和情绪/意图 (mood)。
+ * 6.11 即时偷表情/收藏/编辑工具 (collect_face)
+ * - 若提供 face_id: 执行表情编辑/补标模式（Agent 必须提供 tags 与 mood）
+ * - 若未提供 face_id: 从指定消息（或当前正在回复的入站消息）中提取图片并收录进表情库（Agent 必须提供 tags 与 mood）
  */
 export async function collectFace(
   params: CollectFaceParams,
@@ -868,6 +871,25 @@ export async function collectFace(
     return { success: false, error: '数据库不可用' };
   }
 
+  // 分支 1: 编辑/补标已有表情
+  if (params.face_id && typeof params.face_id === 'string' && params.face_id.trim()) {
+    const faceId = params.face_id.trim();
+    const existing = ctx.db.getFaceById(faceId);
+    if (!existing) {
+      return { success: false, error: `表情 ID "${faceId}" 不存在` };
+    }
+    const updated = ctx.db.updateFace(faceId, {
+      tags: params.tags,
+      mood: params.mood.trim(),
+    });
+    return {
+      success: true,
+      face_id: faceId,
+      message: `已成功为表情 "${faceId}" 补全标签与情绪（标签: [${(updated?.tags || []).join(', ')}]，情绪: ${updated?.mood || '未设置'}）`,
+    };
+  }
+
+  // 分支 2: 偷图/收藏新表情
   const sessionPeer = ctx.peer || '';
   let targetMsgId = params.message_id;
   if (!targetMsgId && ctx.inboundMsgIdGetter && sessionPeer) {
@@ -917,14 +939,17 @@ export async function collectFace(
     }
 
     const faceId = `face_${md5.slice(0, 8)}`;
+    const safeTags = params.tags;
+    const safeMood = params.mood.trim();
+
     const res = ctx.db.insertFace(
       {
         id: faceId,
         file_path: targetFile,
         md5,
         source: 'collect',
-        tags: params.tags,
-        mood: params.mood.trim(),
+        tags: safeTags,
+        mood: safeMood,
         enabled: true,
         size,
         format: ext,
@@ -947,7 +972,7 @@ export async function collectFace(
     return {
       success: true,
       face_id: res.id,
-      message: `已成功收藏表情包，标签: [${params.tags.join(', ')}]，情绪: ${params.mood.trim()}`,
+      message: `已成功收藏表情包，标签: [${safeTags.join(', ')}]，情绪: ${safeMood}`,
     };
   } catch (err: any) {
     return { success: false, error: `表情入库失败: ${err?.message || '未知错误'}` };
@@ -1427,7 +1452,7 @@ export function registerAgentTools(
           defineTool({
             name: 'list_faces',
             description:
-              '检索当前本地表情包库中的可用表情。支持按情绪 (mood) 或内容标签 (tag) 检索，返回分页的表情概要列表。严禁在回复中编造不存在的表情 ID。',
+              '检索当前本地表情包库中的可用表情。支持按情绪 (mood)、内容标签 (tag) 或筛选未打标表情 (untagged) 检索，返回表情列表与本地图片路径（可供查看）。严禁在回复中编造不存在的表情 ID。',
             parameters: {
               mood: {
                 type: 'string',
@@ -1437,9 +1462,13 @@ export function registerAgentTools(
                 type: 'string',
                 description: '按画面元素或文字标签筛选，如 "猫猫", "熊猫头", "问号"',
               },
+              untagged: {
+                type: 'boolean',
+                description: '是否只检索尚未打标的表情（默认 false）。设为 true 可配合读图查看并调用 collect_face 进行补标。',
+              },
               limit: {
                 type: 'number',
-                description: '返回数量上限 (默认 10，上限 30)',
+                description: '返回数量上限 (默认 100，上限 100)',
               },
               cursor: {
                 type: 'string',
@@ -1456,7 +1485,9 @@ export function registerAgentTools(
                 const lines = [`共找到 ${v.total} 个可用表情 (本次返回 ${v.faces.length} 个):`];
                 for (const f of v.faces) {
                   const moodStr = f.mood ? ` [情绪: ${f.mood}]` : '';
-                  lines.push(`• ID: ${f.id} (${f.format})${moodStr} 标签: [${(f.tags || []).join(', ')}]`);
+                  const tagStr = f.tags && f.tags.length > 0 ? ` 标签: [${f.tags.join(', ')}]` : ' [无标签]';
+                  const pathStr = f.file_path ? ` | 路径: ${f.file_path}` : '';
+                  lines.push(`• ID: ${f.id} (${f.format})${moodStr}${tagStr}${pathStr}`);
                 }
                 if (v.has_more && v.next_cursor) {
                   lines.push(`(还有更多表情，可传入 cursor: "${v.next_cursor}" 获取下一页)`);
@@ -1464,7 +1495,7 @@ export function registerAgentTools(
                 return [{ type: 'text', text: lines.join('\n') }];
               },
             },
-            async execute(args, exec) {
+            async execute(args, _exec) {
               return (await listFaces(args, { db: options.db })) as any;
             },
           })
@@ -1529,8 +1560,12 @@ export function registerAgentTools(
           defineTool({
             name: 'collect_face',
             description:
-              '【偷表情/收藏表情】将指定消息（或当前正在回复的入站消息）中的图片转存至本地表情库。必须传入你对该表情画面的内容标签 (tags) 和情绪/意图 (mood)。',
+              '【收藏/编辑表情】将聊天消息中的图片转存至本地表情库，或为已有表情包补全/编辑标签与情绪。传入 face_id 时为补标编辑模式；不传 face_id 时从指定消息（或当前入站消息）中偷图收藏。注意：调用本工具时必须明确给出你对画面的理解标签 (tags) 和情绪意图 (mood)。',
             parameters: {
+              face_id: {
+                type: 'string',
+                description: '已有表情 ID。若提供此参数，则为补标编辑模式；若省略则为收藏新表情模式',
+              },
               tags: {
                 type: 'array',
                 required: true,
@@ -1544,7 +1579,7 @@ export function registerAgentTools(
               },
               message_id: {
                 type: 'number',
-                description: '要收藏的目标消息 ID。若省略则自动绑定当前回合正在回复的入站消息',
+                description: '收藏新表情时的目标消息 ID。若省略则自动绑定当前回合正在回复的入站消息',
               },
             },
             output: {
@@ -1557,8 +1592,8 @@ export function registerAgentTools(
                     text: v?.success
                       ? v.duplicated
                         ? `[表情已存在] ${v.message}`
-                        : `[收藏成功] ${v.message} (face_id: ${v.face_id})`
-                      : `收藏表情失败: ${v?.error}`,
+                        : `[成功] ${v.message} (face_id: ${v.face_id})`
+                      : `操作表情失败: ${v?.error}`,
                   },
                 ];
               },

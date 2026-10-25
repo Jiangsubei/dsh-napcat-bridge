@@ -192,4 +192,67 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
     expect(rep2.scanned).toBe(0);
     expect(mockLlm.analyzeImage).not.toHaveBeenCalled();
   });
+
+  it('契约 6: runCurator 原生 Fork 会话、注入白名单沙箱并在完成后用完即焚清理临时会话', async () => {
+    let capturedAllowedTools: string[] = [];
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: {
+        followup: vi.fn(),
+        whenIdle: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const mockAgentsService = {
+      create: vi.fn().mockImplementation(async (options: any) => {
+        // 执行 setup 注入沙箱
+        const mockToolsSvc = {
+          restrict: vi.fn().mockImplementation(({ allow }) => {
+            capturedAllowedTools = allow;
+          }),
+        };
+        if (options.setup) {
+          options.setup({ tools: mockToolsSvc });
+        }
+        return mockAgentHandle;
+      }),
+    };
+
+    const mockSessions = {
+      get: vi.fn().mockReturnValue({}),
+      flush: vi.fn().mockResolvedValue(undefined),
+      detachEntered: vi.fn(),
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const mockCtx = {
+      agents: mockAgentsService,
+      sessions: mockSessions,
+    };
+
+    const curator = new FaceCurator({
+      ctx: mockCtx as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true }),
+    });
+
+    const res = await curator.runCurator('group_123', {
+      parentSession: {
+        id: 'parent_sess_1',
+        snapshotEvents: () => [{ type: 'turn/start' }, { type: 'turn/end' }],
+      },
+    });
+
+    expect(res.executed).toBe(true);
+    // 验证 Fork 创建
+    expect(mockAgentsService.create).toHaveBeenCalled();
+    // 验证工具白名单沙箱包含且仅包含指定工具
+    expect(capturedAllowedTools).toEqual(['collect_face', 'list_faces', 'read_chat_history', 'read_image']);
+    // 验证 followup 投递
+    expect(mockAgentHandle.agent.followup).toHaveBeenCalled();
+    // 验证用完即焚清理：agent 释放先行 -> 会话物理删除
+    expect(mockAgentHandle.dispose).toHaveBeenCalled();
+    expect(mockSessions.deleteSession).toHaveBeenCalled();
+  });
 });

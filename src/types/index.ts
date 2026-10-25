@@ -399,6 +399,7 @@ export interface FaceRecord {
 export interface FaceQueryOptions {
   tag?: string;
   mood?: string;
+  untagged?: boolean;
   enabledOnly?: boolean;
   includeDeleted?: boolean;
   limit?: number;
@@ -413,11 +414,13 @@ export interface FaceSummaryItem {
   tags: string[];
   mood?: string;
   format: string;
+  file_path?: string;
 }
 
 export interface ListFacesParams {
   tag?: string;
   mood?: string;
+  untagged?: boolean;
   limit?: number;
   cursor?: string;
 }
@@ -440,6 +443,7 @@ export interface SendFaceResult {
 }
 
 export interface CollectFaceParams {
+  face_id?: string;
   message_id?: number;
   tags?: string[];
   mood?: string;
@@ -506,6 +510,8 @@ export interface BridgePluginConfig {
   face_auto_curate?: boolean;
   /** 后台定期整理 Cron 表达式 (默认每 2 小时) */
   face_curate_cron?: string;
+  /** 后台定期整理执行间隔 (分钟，默认 60 分钟，以启动时间起算) */
+  face_curate_interval_mins?: number;
   /** 发送表情包消息段使用的 sub_type (默认 1) */
   face_sub_type?: number;
   /** 表情库满额淘汰策略 ('reject' 拒绝新增 / 'evict_lru' 淘汰最久未用，默认 'reject') */

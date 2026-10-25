@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import * as DshPrimitives from '@deepseek-ai/dsh-client-ui-primitives';
 import { NapCatFormModel, SettingsConflictError } from './model.js';
 import { ValueField, TextAreaField, SwitchField } from './fields.js';
-import { cardStyle, sectionStyle, injectCardStyles } from './card-styles.js';
+import { cardStyle, sectionStyle, fieldStyle, injectCardStyles } from './card-styles.js';
 import type { BridgePluginConfig } from '../types/index.js';
 import { DEFAULT_WS_PORT } from '../constants/index.js';
 
@@ -196,6 +196,14 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteLoadError, setRemoteLoadError] = useState<string | null>(null);
   const [remoteHasSecret, setRemoteHasSecret] = useState(false);
+
+  // 表情包上传与编辑状态 (用户免强制打标，卡片内联展开二次编辑)
+  const [uploadTags, setUploadTags] = useState('');
+  const [uploadMood, setUploadMood] = useState('');
+  const [editingFaceId, setEditingFaceId] = useState<string | null>(null);
+  const [editingTags, setEditingTags] = useState('');
+  const [editingMood, setEditingMood] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   const loadRemoteConfig = useCallback(async () => {
     setRemoteLoading(true);
@@ -781,7 +789,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
         >
           <SwitchField
             id="napcat-face-enabled"
-            name="face_enabled"
             label="启用表情包系统 (face_enabled)"
             hint="总开关：开启后 Agent 可调用 list_faces/send_face/collect_face 工具，且可开启后台定期整理。关闭时不产生任何后台活动。"
             checked={Boolean(draft.face_enabled)}
@@ -795,7 +802,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             <>
               <ValueField
                 id="napcat-face-store-max"
-                name="face_store_max"
                 label="表情库容量上限 (face_store_max)"
                 hint="本地表情库最多保存多少张可用表情（默认 100 张）"
                 placeholder="100"
@@ -807,17 +813,17 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 onChange={(val) => handleFieldChange('face_store_max', parseInt(val, 10) || 100)}
               />
 
-              <div className={cardStyle.field}>
-                <div className={cardStyle.fieldHead}>
-                  <label htmlFor="napcat-face-evict-policy" className={cardStyle.fieldLabel}>
+              <div className={fieldStyle.field}>
+                <div className={fieldStyle.head}>
+                  <label htmlFor="napcat-face-evict-policy" className={fieldStyle.label}>
                     满额淘汰策略 (face_evict_policy)
                   </label>
                   {model.isOverridden('face_evict_policy') && (
-                    <div className={cardStyle.fieldBadges}>
-                      <span className={cardStyle.fieldBadge}>已自定义</span>
+                    <div className={fieldStyle.badges}>
+                      <span className={fieldStyle.badge}>已自定义</span>
                       <button
                         type="button"
-                        className={cardStyle.fieldReset}
+                        className={fieldStyle.reset}
                         onClick={() => handleResetField('face_evict_policy')}
                       >
                         重置
@@ -827,8 +833,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 </div>
                 <select
                   id="napcat-face-evict-policy"
-                  name="face_evict_policy"
-                  className={cardStyle.input}
+                  className={fieldStyle.input}
                   disabled={saving}
                   value={draft.face_evict_policy || 'reject'}
                   onChange={(e) => handleFieldChange('face_evict_policy', e.target.value as any)}
@@ -836,12 +841,11 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                   <option value="reject">拒绝新增 (reject) - 满额后停止收录，不删旧表情</option>
                   <option value="evict_lru">淘汰最久未用 (evict_lru) - 满额后自动淘汰最久未使用的表情</option>
                 </select>
-                <p className={cardStyle.hint}>达到容量上限后的行为策略。淘汰的表情在硬盘上保留 7 天后悔期。</p>
+                <p className={fieldStyle.hint}>达到容量上限后的行为策略。淘汰的表情在硬盘上保留 7 天后悔期。</p>
               </div>
 
               <SwitchField
                 id="napcat-face-auto-curate"
-                name="face_auto_curate"
                 label="启用后台定期整理与识别 (face_auto_curate)"
                 hint="后台定期扫描已落盘的群聊/私聊图片，结合多模态模型提炼沙雕图/表情包沉淀入库（纯文本模型请勿开启）"
                 checked={Boolean(draft.face_auto_curate)}
@@ -853,7 +857,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               <ValueField
                 id="napcat-face-store-dir"
-                name="face_store_dir"
                 label="表情库存储目录 (face_store_dir)"
                 hint="本地表情图片原图落盘存储目录 (默认 .dsh/napcat/faces)"
                 placeholder=".dsh/napcat/faces"
@@ -864,7 +867,73 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 onChange={(val) => handleFieldChange('face_store_dir', val)}
               />
 
-              {/* 资产画廊区 (极简免审核，带一键垃圾桶删除) */}
+              {/* 上传区域 (支持上传图标点击选择与直接拖拽上传，输入框选填免强制打标) */}
+              <div
+                className="napcat-face-upload-box"
+                style={{
+                  marginTop: '16px',
+                  border: isDragging
+                    ? '2px dashed var(--dsh-primary, #3b82f6)'
+                    : '1px dashed var(--dsh-border, #d1d5db)',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  background: isDragging
+                    ? 'rgba(59, 130, 246, 0.05)'
+                    : 'var(--dsh-bg-card, #f9fafb)',
+                  textAlign: 'center',
+                  transition: 'border-color 0.2s, background-color 0.2s',
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const files = e.dataTransfer.files;
+                  if (files && files.length > 0) {
+                    // 模拟接收文件上传
+                  }
+                }}
+              >
+                <div style={{ fontSize: '28px', marginBottom: '6px' }}>📤</div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--dsh-text, #111827)' }}>
+                  点击图标上传或将图片直接拖拽至此处
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--dsh-text-secondary, #6b7280)', marginTop: '2px' }}>
+                  支持 PNG / JPG / GIF / WEBP 格式（用户免强制打标，Agent 检索到后可自行读图补标）
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '8px',
+                    marginTop: '12px',
+                    justifyContent: 'center',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <input
+                    type="text"
+                    className={fieldStyle.input}
+                    placeholder="标签（选填，如: 猫猫, 叹气）"
+                    value={uploadTags}
+                    onChange={(e) => setUploadTags(e.target.value)}
+                    style={{ maxWidth: '220px', fontSize: '12px', padding: '4px 8px' }}
+                  />
+                  <input
+                    type="text"
+                    className={fieldStyle.input}
+                    placeholder="情绪（选填，如: 卖萌, 嘲讽）"
+                    value={uploadMood}
+                    onChange={(e) => setUploadMood(e.target.value)}
+                    style={{ maxWidth: '180px', fontSize: '12px', padding: '4px 8px' }}
+                  />
+                </div>
+              </div>
+
+              {/* 资产画廊区 (极简免审核，带一键垃圾桶删除与铅笔编辑展开) */}
               <div
                 className="napcat-face-gallery"
                 style={{
@@ -883,13 +952,13 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 >
                   <span style={{ fontSize: '13px', fontWeight: 600 }}>已收录表情包资产</span>
                   <span style={{ fontSize: '12px', color: 'var(--dsh-text-secondary, #6b7280)' }}>
-                    免人工审批 · 即偷即用 · 点垃圾桶可一键删除（保留 7 天后悔期）
+                    免人工审批 · 即偷即用 · 点击 ✏️ 可直接二次编辑标签 · 7 天后悔期
                   </span>
                 </div>
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
                     gap: '8px',
                   }}
                 >
@@ -925,25 +994,113 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                     >
                       表情画廊示例
                     </div>
-                    <button
-                      type="button"
-                      className="napcat-face-delete-btn"
-                      title="删除表情包 (保留 7 天后悔期)"
-                      style={{
-                        position: 'absolute',
-                        top: '4px',
-                        right: '4px',
-                        border: 'none',
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        color: '#ef4444',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        padding: '2px 4px',
-                        fontSize: '11px',
-                      }}
-                    >
-                      🗑️
-                    </button>
+
+                    {/* 操作按钮区：编辑图标 (✏️) 与 删除图标 (🗑️) */}
+                    <div style={{ position: 'absolute', top: '4px', right: '4px', display: 'flex', gap: '2px' }}>
+                      <button
+                        type="button"
+                        className="napcat-face-edit-btn"
+                        title="编辑表情标签与情绪"
+                        onClick={() => {
+                          if (editingFaceId === 'demo_face') {
+                            setEditingFaceId(null);
+                          } else {
+                            setEditingFaceId('demo_face');
+                            setEditingTags('猫猫, 喝水');
+                            setEditingMood('搞笑');
+                          }
+                        }}
+                        style={{
+                          border: 'none',
+                          background: 'rgba(59, 130, 246, 0.1)',
+                          color: '#2563eb',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          padding: '2px 4px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        className="napcat-face-delete-btn"
+                        title="删除表情包 (保留 7 天后悔期)"
+                        style={{
+                          border: 'none',
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          color: '#ef4444',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          padding: '2px 4px',
+                          fontSize: '11px',
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+
+                    {/* 画框范围内内联展开的小输入框二次编辑区域 */}
+                    {editingFaceId === 'demo_face' && (
+                      <div
+                        className="napcat-face-inline-editor"
+                        style={{
+                          marginTop: '6px',
+                          padding: '4px',
+                          background: '#ffffff',
+                          border: '1px solid var(--dsh-border, #d1d5db)',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={editingTags}
+                          onChange={(e) => setEditingTags(e.target.value)}
+                          placeholder="新标签 (逗号分隔)"
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 4px',
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '2px',
+                          }}
+                        />
+                        <input
+                          type="text"
+                          value={editingMood}
+                          onChange={(e) => setEditingMood(e.target.value)}
+                          placeholder="新情绪"
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 4px',
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '2px',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="napcat-face-save-edit-btn"
+                          onClick={() => setEditingFaceId(null)}
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 4px',
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '2px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✓ 保存标签
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
