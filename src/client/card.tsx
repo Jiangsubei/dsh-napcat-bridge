@@ -21,7 +21,7 @@ const SafeIconChevronDown: React.ComponentType<{ className?: string }> = resolve
 
 export { DEFAULT_BASE_CONFIG };
 
-export type SettingsTabId = 'connection' | 'reply' | 'persona' | 'proactive' | 'memory';
+export type SettingsTabId = 'connection' | 'reply' | 'persona' | 'proactive' | 'memory' | 'face';
 
 export interface TabItem {
   id: SettingsTabId;
@@ -34,6 +34,7 @@ export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'persona', label: '人格与准则' },
   { id: 'proactive', label: '主动回复' },
   { id: 'memory', label: '记忆与回顾' },
+  { id: 'face', label: '表情包' },
 ] as const;
 
 export interface CardController {
@@ -98,6 +99,13 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   review_turns_interval: 10,
   review_tool_calls_interval: 10,
   review_model: '',
+  face_enabled: false,
+  face_store_max: 100,
+  face_store_dir: '.dsh/napcat/faces',
+  face_auto_curate: false,
+  face_curate_cron: '0 */2 * * *',
+  face_sub_type: 1,
+  face_evict_policy: 'reject',
 };
 
 function formatArrayToString(arr?: string[]): string {
@@ -757,6 +765,190 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('review_model')}
             onChange={(val) => handleFieldChange('review_model', val)}
           />
+        </div>
+
+        <div
+          id="napcat-tabpanel-face"
+          data-testid="napcat-tabpanel-face"
+          role="tabpanel"
+          aria-labelledby="napcat-tab-face"
+          hidden={activeTab !== 'face'}
+          className={[
+            cardStyle.tabPanel,
+            activeTab !== 'face' ? cardStyle.tabPanelHidden : '',
+          ].filter(Boolean).join(' ')}
+          style={activeTab !== 'face' ? { display: 'none' } : undefined}
+        >
+          <SwitchField
+            id="napcat-face-enabled"
+            name="face_enabled"
+            label="启用表情包系统 (face_enabled)"
+            hint="总开关：开启后 Agent 可调用 list_faces/send_face/collect_face 工具，且可开启后台定期整理。关闭时不产生任何后台活动。"
+            checked={Boolean(draft.face_enabled)}
+            disabled={saving}
+            overridden={model.isOverridden('face_enabled')}
+            onReset={() => handleResetField('face_enabled')}
+            onChange={(checked) => handleFieldChange('face_enabled', checked)}
+          />
+
+          {draft.face_enabled && (
+            <>
+              <ValueField
+                id="napcat-face-store-max"
+                name="face_store_max"
+                label="表情库容量上限 (face_store_max)"
+                hint="本地表情库最多保存多少张可用表情（默认 100 张）"
+                placeholder="100"
+                numeric
+                value={String(draft.face_store_max ?? 100)}
+                disabled={saving}
+                overridden={model.isOverridden('face_store_max')}
+                onReset={() => handleResetField('face_store_max')}
+                onChange={(val) => handleFieldChange('face_store_max', parseInt(val, 10) || 100)}
+              />
+
+              <div className={cardStyle.field}>
+                <div className={cardStyle.fieldHead}>
+                  <label htmlFor="napcat-face-evict-policy" className={cardStyle.fieldLabel}>
+                    满额淘汰策略 (face_evict_policy)
+                  </label>
+                  {model.isOverridden('face_evict_policy') && (
+                    <div className={cardStyle.fieldBadges}>
+                      <span className={cardStyle.fieldBadge}>已自定义</span>
+                      <button
+                        type="button"
+                        className={cardStyle.fieldReset}
+                        onClick={() => handleResetField('face_evict_policy')}
+                      >
+                        重置
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <select
+                  id="napcat-face-evict-policy"
+                  name="face_evict_policy"
+                  className={cardStyle.input}
+                  disabled={saving}
+                  value={draft.face_evict_policy || 'reject'}
+                  onChange={(e) => handleFieldChange('face_evict_policy', e.target.value as any)}
+                >
+                  <option value="reject">拒绝新增 (reject) - 满额后停止收录，不删旧表情</option>
+                  <option value="evict_lru">淘汰最久未用 (evict_lru) - 满额后自动淘汰最久未使用的表情</option>
+                </select>
+                <p className={cardStyle.hint}>达到容量上限后的行为策略。淘汰的表情在硬盘上保留 7 天后悔期。</p>
+              </div>
+
+              <SwitchField
+                id="napcat-face-auto-curate"
+                name="face_auto_curate"
+                label="启用后台定期整理与识别 (face_auto_curate)"
+                hint="后台定期扫描已落盘的群聊/私聊图片，结合多模态模型提炼沙雕图/表情包沉淀入库（纯文本模型请勿开启）"
+                checked={Boolean(draft.face_auto_curate)}
+                disabled={saving}
+                overridden={model.isOverridden('face_auto_curate')}
+                onReset={() => handleResetField('face_auto_curate')}
+                onChange={(checked) => handleFieldChange('face_auto_curate', checked)}
+              />
+
+              <ValueField
+                id="napcat-face-store-dir"
+                name="face_store_dir"
+                label="表情库存储目录 (face_store_dir)"
+                hint="本地表情图片原图落盘存储目录 (默认 .dsh/napcat/faces)"
+                placeholder=".dsh/napcat/faces"
+                value={draft.face_store_dir || '.dsh/napcat/faces'}
+                disabled={saving}
+                overridden={model.isOverridden('face_store_dir')}
+                onReset={() => handleResetField('face_store_dir')}
+                onChange={(val) => handleFieldChange('face_store_dir', val)}
+              />
+
+              {/* 资产画廊区 (极简免审核，带一键垃圾桶删除) */}
+              <div
+                className="napcat-face-gallery"
+                style={{
+                  marginTop: '16px',
+                  borderTop: '1px solid var(--dsh-border, #e5e7eb)',
+                  paddingTop: '12px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '8px',
+                  }}
+                >
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>已收录表情包资产</span>
+                  <span style={{ fontSize: '12px', color: 'var(--dsh-text-secondary, #6b7280)' }}>
+                    免人工审批 · 即偷即用 · 点垃圾桶可一键删除（保留 7 天后悔期）
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+                    gap: '8px',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'relative',
+                      border: '1px solid var(--dsh-border, #e5e7eb)',
+                      borderRadius: '6px',
+                      padding: '6px',
+                      textAlign: 'center',
+                      background: 'var(--dsh-bg-card, #f9fafb)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '60px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '24px',
+                      }}
+                    >
+                      🖼️
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        marginTop: '4px',
+                      }}
+                    >
+                      表情画廊示例
+                    </div>
+                    <button
+                      type="button"
+                      className="napcat-face-delete-btn"
+                      title="删除表情包 (保留 7 天后悔期)"
+                      style={{
+                        position: 'absolute',
+                        top: '4px',
+                        right: '4px',
+                        border: 'none',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        color: '#ef4444',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        fontSize: '11px',
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className={cardStyle.footer}>
