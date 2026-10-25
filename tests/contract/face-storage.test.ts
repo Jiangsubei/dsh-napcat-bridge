@@ -281,4 +281,49 @@ describe('契约测试: 本地表情库 SQLite 存储与资产管理 (Face Stora
     expect(usedFace?.use_count).toBe(1);
     expect(usedFace?.last_used_at).toBeDefined();
   });
+
+  it('契约 7: 支持无标签表情检索 (untagged) 与编辑补标 (updateFace)', () => {
+    // 插入一个无标签表情
+    db.insertFace({
+      id: 'face_untagged_1',
+      file_path: '/untagged_1.png',
+      md5: 'md5_untagged_1',
+      source: 'user_upload',
+      tags: [],
+      enabled: true,
+      size: 50,
+      format: 'png',
+    });
+
+    // 插入一个有标签表情
+    db.insertFace({
+      id: 'face_tagged_1',
+      file_path: '/tagged_1.png',
+      md5: 'md5_tagged_1',
+      source: 'user_upload',
+      tags: ['已有标签'],
+      mood: '开心',
+      enabled: true,
+      size: 50,
+      format: 'png',
+    });
+
+    // 查询未打标表情
+    const untaggedList = db.queryFaces({ untagged: true });
+    expect(untaggedList.faces.length).toBe(1);
+    expect(untaggedList.faces[0].id).toBe('face_untagged_1');
+
+    // 编辑补标 updateFace
+    const updated = db.updateFace('face_untagged_1', {
+      tags: ['新补标签', '震惊'],
+      mood: '疑惑',
+    });
+    expect(updated).not.toBeNull();
+    expect(updated?.tags).toEqual(['新补标签', '震惊']);
+    expect(updated?.mood).toBe('疑惑');
+
+    // 再次查询未打标表情，应不再包含该表情
+    const untaggedAfter = db.queryFaces({ untagged: true });
+    expect(untaggedAfter.faces.find((f) => f.id === 'face_untagged_1')).toBeUndefined();
+  });
 });

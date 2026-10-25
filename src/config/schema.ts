@@ -28,6 +28,7 @@ import {
   DEFAULT_FACE_STORE_DIR,
   DEFAULT_FACE_AUTO_CURATE,
   DEFAULT_FACE_CURATE_CRON,
+  DEFAULT_FACE_CURATE_INTERVAL_MINS,
   DEFAULT_FACE_SUB_TYPE,
   DEFAULT_FACE_EVICT_POLICY,
 } from '../constants/index.js';
@@ -64,6 +65,7 @@ export const BridgeConfigSchema = z.object({
   face_store_dir: z.string().default(DEFAULT_FACE_STORE_DIR).volatile().description('本地表情库文件存储目录 (默认 .dsh/napcat/faces)'),
   face_auto_curate: z.boolean().default(DEFAULT_FACE_AUTO_CURATE).volatile().description('启用后台定期整理与识别表情包 (默认关闭)'),
   face_curate_cron: z.string().default(DEFAULT_FACE_CURATE_CRON).volatile().description('后台定期整理 Cron 周期 (默认每 2 小时)'),
+  face_curate_interval_mins: z.number().default(DEFAULT_FACE_CURATE_INTERVAL_MINS).volatile().description('后台巡检周期（分钟，基于插件启动时间起算，默认 60）'),
   face_sub_type: z.number().default(DEFAULT_FACE_SUB_TYPE).volatile().description('发送表情使用的 sub_type 值 (默认 1)'),
   face_evict_policy: z.union([z.const('reject'), z.const('evict_lru')]).default(DEFAULT_FACE_EVICT_POLICY).volatile().description('满额策略 (reject: 拒绝新增, evict_lru: 淘汰最久未用)'),
 });

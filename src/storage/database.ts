@@ -822,7 +822,9 @@ export class MessageDatabase {
       params.push(options.mood.trim());
     }
 
-    if (options.tag) {
+    if (options.untagged) {
+      whereClauses.push(`(tags IS NULL OR tags = '' OR tags = '[]')`);
+    } else if (options.tag) {
       whereClauses.push('tags LIKE ?');
       params.push(`%"${options.tag.trim()}"%`);
     }
@@ -832,7 +834,7 @@ export class MessageDatabase {
     const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM faces ${whereSql}`).get(...params) as any;
     const total = Number(countRow?.cnt ?? 0);
 
-    const limit = options.limit && options.limit > 0 ? options.limit : 20;
+    const limit = options.limit && options.limit > 0 ? Math.min(options.limit, 100) : 100;
     const offset = options.offset && options.offset >= 0 ? options.offset : 0;
 
     let orderByField = 'added_at';
@@ -853,6 +855,23 @@ export class MessageDatabase {
     const has_more = offset + faces.length < total;
 
     return { faces, total, has_more };
+  }
+
+  updateFace(id: string, updates: { tags?: string[]; mood?: string }): FaceRecord | null {
+    const db = this.ensureDb();
+    const existing = this.getFaceById(id, { includeDeleted: true });
+    if (!existing) return null;
+
+    const newTags = updates.tags !== undefined ? updates.tags : existing.tags;
+    const newMood = updates.mood !== undefined ? updates.mood : existing.mood;
+
+    db.prepare(`
+      UPDATE faces
+      SET tags = ?, mood = ?
+      WHERE id = ?
+    `).run(JSON.stringify(newTags), newMood || null, id);
+
+    return this.getFaceById(id, { includeDeleted: true });
   }
 
   deleteFace(id: string): boolean {

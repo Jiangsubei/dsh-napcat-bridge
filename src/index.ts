@@ -16,6 +16,7 @@ import {
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
   DEFAULT_DATABASE_PATH,
+  DEFAULT_FACE_STORE_DIR,
 } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
@@ -28,6 +29,7 @@ import { shouldWakeup, parseNormalizedContent, resolveAtNicknames } from './gate
 import { CachedGroupMemberResolver } from './gateway/members.js';
 import { ProactiveManager } from './gateway/proactive.js';
 import { registerAgentTools } from './tools/index.js';
+import { FaceCurator, startCuratorTask } from './gateway/curator.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
@@ -274,6 +276,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     sender: serialSender,
     dshHome,
     waitRegistry,
+    config: currentConfig,
     inboundMsgIdGetter: (peer: string) => {
       if (!outboundBridge) return undefined;
       const inboundCtx =
@@ -410,6 +413,17 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   }
 
   const stopCleanupTask = startMediaCleanupTask(ctx, mediaManager);
+
+  // 4.1 初始化后台表情包整理 Agent (Face Curator)
+  const faceStoreDir = resolveDshPath(dshHome, currentConfig().face_store_dir, DEFAULT_FACE_STORE_DIR);
+  const faceCurator = new FaceCurator({
+    ctx,
+    db,
+    faceStoreDir,
+    imageScanDirs: [path.join(mediaManager.downloadRoot, 'image')],
+    config: currentConfig,
+  });
+  const stopCuratorTask = startCuratorTask(ctx, faceCurator, currentConfig);
 
   // 5. 挂载出方向事件流桥接器 (过滤 reasoning/tool-call，Markdown Strip 后分段下发)
   outboundBridge = new OutboundStreamBridge(ctx, {
@@ -1189,6 +1203,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     process.removeListener('SIGTERM', onProcessExit);
     process.removeListener('beforeExit', onProcessExit);
     stopCleanupTask();
+    if (typeof stopCuratorTask === 'function') {
+      stopCuratorTask();
+    }
     unregisterTools();
     waitRegistry.clear();
     memoryService.dispose();

@@ -87,9 +87,8 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(res.faces[0].id).toBe('face_active_1');
     expect(res.faces[0].tags).toEqual(['猫猫', '可爱']);
     expect(res.faces[0].mood).toBe('卖萌');
-    // 坚决不得泄漏本地绝对路径和 URL
-    expect((res.faces[0] as any).file_path).toBeUndefined();
-    expect((res.faces[0] as any).url).toBeUndefined();
+    // 提供本地图片路径，供多模态 Agent 读图与补标
+    expect(res.faces[0].file_path).toBe('/secret/path/cat.png');
   });
 
   it('契约 2: send_face 构造 sub_type=1 并接入串行队列与更新使用频次', async () => {
@@ -300,6 +299,44 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     );
     expect(resNoImg.success).toBe(false);
     expect(resNoImg.error).toMatch(/未找到图片/);
+  });
+
+  it('契约 8: collect_face 支持传入 face_id 为已有未打标表情补全 tags 与 mood', async () => {
+    // 预先存入一个无标签表情
+    db.insertFace({
+      id: 'face_to_edit',
+      file_path: '/path/to/img.png',
+      md5: 'md5_to_edit',
+      source: 'user_upload',
+      tags: [],
+      enabled: true,
+      size: 100,
+      format: 'png',
+    });
+
+    // Agent 补标：缺少 tags 必须报错拒绝
+    const failNoTags = await collectFace(
+      { face_id: 'face_to_edit', mood: '疑惑' } as any,
+      { db }
+    );
+    expect(failNoTags.success).toBe(false);
+    expect(failNoTags.error).toMatch(/tags/);
+
+    // Agent 补标：合法参数更新
+    const successEdit = await collectFace(
+      {
+        face_id: 'face_to_edit',
+        tags: ['新打标猫猫', '喝水'],
+        mood: '呆萌',
+      },
+      { db }
+    );
+    expect(successEdit.success).toBe(true);
+    expect(successEdit.face_id).toBe('face_to_edit');
+
+    const edited = db.getFaceById('face_to_edit');
+    expect(edited?.tags).toEqual(['新打标猫猫', '喝水']);
+    expect(edited?.mood).toBe('呆萌');
   });
 
   it('契约 7: 门控装配契约 (face_enabled 为 false 时不注册表情工具)', () => {
