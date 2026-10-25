@@ -23,6 +23,13 @@ import {
   DEFAULT_REVIEW_ENABLED,
   DEFAULT_REVIEW_TURNS_INTERVAL,
   DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+  DEFAULT_FACE_ENABLED,
+  DEFAULT_FACE_STORE_MAX,
+  DEFAULT_FACE_STORE_DIR,
+  DEFAULT_FACE_AUTO_CURATE,
+  DEFAULT_FACE_CURATE_CRON,
+  DEFAULT_FACE_SUB_TYPE,
+  DEFAULT_FACE_EVICT_POLICY,
 } from '../constants/index.js';
 import type { BridgePluginConfig } from '../types/index.js';
 
@@ -52,6 +59,13 @@ export const BridgeConfigSchema = z.object({
   review_turns_interval: z.number().default(DEFAULT_REVIEW_TURNS_INTERVAL).volatile().description('后台回顾触发的对话轮次间隔 (默认 10 轮)'),
   review_tool_calls_interval: z.number().default(DEFAULT_REVIEW_TOOL_CALLS_INTERVAL).volatile().description('后台回顾触发的工具调用次数间隔 (默认 10 次)'),
   review_model: z.string().default('').volatile().description('后台回顾使用的独立子模型名称 (可选，留空继承主模型)'),
+  face_enabled: z.boolean().default(DEFAULT_FACE_ENABLED).volatile().description('启用表情包系统 (总开关，默认关闭，关闭时工具不注册、后台不运行)'),
+  face_store_max: z.number().default(DEFAULT_FACE_STORE_MAX).volatile().description('本地表情库存储容量上限 (默认 100 张)'),
+  face_store_dir: z.string().default(DEFAULT_FACE_STORE_DIR).volatile().description('本地表情库文件存储目录 (默认 .dsh/napcat/faces)'),
+  face_auto_curate: z.boolean().default(DEFAULT_FACE_AUTO_CURATE).volatile().description('启用后台定期整理与识别表情包 (默认关闭)'),
+  face_curate_cron: z.string().default(DEFAULT_FACE_CURATE_CRON).volatile().description('后台定期整理 Cron 周期 (默认每 2 小时)'),
+  face_sub_type: z.number().default(DEFAULT_FACE_SUB_TYPE).volatile().description('发送表情使用的 sub_type 值 (默认 1)'),
+  face_evict_policy: z.union([z.const('reject'), z.const('evict_lru')]).default(DEFAULT_FACE_EVICT_POLICY).volatile().description('满额策略 (reject: 拒绝新增, evict_lru: 淘汰最久未用)'),
 });
 
 export type { BridgePluginConfig };

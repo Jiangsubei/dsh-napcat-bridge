@@ -5,6 +5,8 @@
  */
 
 import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type {
@@ -23,6 +25,14 @@ import type {
   ForwardNode,
   ReactMessageParams,
   ReactMessageResult,
+  ListFacesParams,
+  ListFacesResult,
+  FaceSummaryItem,
+  SendFaceParams,
+  SendFaceResult,
+  CollectFaceParams,
+  CollectFaceResult,
+  BridgePluginConfig,
 } from '../types/index.js';
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
@@ -49,6 +59,14 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
   /** 当前回合入站消息 ID 获取器（react_message 省略 message_id 时默认绑定） */
   inboundMsgIdGetter?: (peer: string) => number | undefined;
+  /** 表情包落盘存储目录 */
+  faceDir?: string;
+  /** 发送表情使用的 sub_type */
+  faceSubType?: number;
+  /** 表情包存储配额上限 */
+  faceStoreMax?: number;
+  /** 表情包淘汰策略 */
+  faceEvictPolicy?: 'reject' | 'evict_lru';
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -703,6 +721,240 @@ export async function reactMessage(
 }
 
 /**
+ * 6.9 检索表情包工具 (list_faces)
+ * 按情绪 (mood) 或内容标签 (tag) 检索本地可用表情包。
+ * 强制分页，仅返回语义元数据 (id, tags, mood, format)，坚决不出物理路径或 URL。
+ */
+export async function listFaces(
+  params: ListFacesParams,
+  context?: ToolExecutionContext
+): Promise<ListFacesResult> {
+  const ctx = { ...globalToolContext, ...context };
+  if (!ctx.db) {
+    return { faces: [], total: 0, has_more: false };
+  }
+  const limit = Math.min(Math.max(params?.limit ?? 10, 1), 30);
+  const offset = params?.cursor ? parseInt(params.cursor, 10) || 0 : 0;
+  const queryRes = ctx.db.queryFaces({
+    mood: params?.mood,
+    tag: params?.tag,
+    limit,
+    offset,
+    enabledOnly: true,
+  });
+
+  const faces: FaceSummaryItem[] = queryRes.faces.map((f) => ({
+    id: f.id,
+    tags: f.tags,
+    mood: f.mood,
+    format: f.format,
+  }));
+
+  return {
+    faces,
+    total: queryRes.total,
+    has_more: queryRes.has_more,
+    next_cursor: queryRes.has_more ? String(offset + limit) : undefined,
+  };
+}
+
+/**
+ * 6.10 发送表情包工具 (send_face)
+ * 凭 face_id 构造带有 sub_type=1 的 image 消息段，并通过共享串行队列出站。
+ */
+export async function sendFace(
+  params: SendFaceParams,
+  context?: ToolExecutionContext
+): Promise<SendFaceResult> {
+  const ctx = { ...globalToolContext, ...context };
+  if (!params || !params.face_id || typeof params.face_id !== 'string' || !params.face_id.trim()) {
+    return { success: false, error: '缺少 face_id 参数' };
+  }
+  if (!ctx.db) {
+    return { success: false, error: '数据库不可用' };
+  }
+
+  const faceId = params.face_id.trim();
+  const face = ctx.db.getFaceById(faceId);
+  if (!face) {
+    return { success: false, error: `表情 ID "${faceId}" 不存在或已被删除` };
+  }
+  if (!face.enabled) {
+    return { success: false, error: `表情 ID "${faceId}" 已禁用，不可发送` };
+  }
+  if (!ctx.gateway) {
+    return { success: false, error: '网关未连接，无法发送表情' };
+  }
+
+  const sessionPeer = ctx.peer || '';
+  const inGroup =
+    (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') ||
+    sessionPeer.startsWith('group_') ||
+    sessionPeer.startsWith('qq-group-');
+
+  const normalizedPath = face.file_path.replace(/\\/g, '/');
+  const fileUri = normalizedPath.startsWith('file:///')
+    ? normalizedPath
+    : `file:///${normalizedPath.replace(/^\/+/, '')}`;
+  const subType = ctx.faceSubType ?? 1;
+
+  const segments = [
+    {
+      type: 'image',
+      data: {
+        file: fileUri,
+        sub_type: subType,
+      },
+    },
+  ];
+
+  const doSend = async (): Promise<SendFaceResult> => {
+    try {
+      let res: any;
+      if (inGroup) {
+        const groupId = String(ctx.groupId || sessionPeer.replace(/^(qq-group-|group_)/, '').split('-')[0]);
+        res = await ctx.gateway!.sendGroupMsg(groupId, segments as any);
+      } else {
+        const userId = sessionPeer.replace(/^(qq-user-|user_)/, '').split('-')[0];
+        res = await ctx.gateway!.sendPrivateMsg(userId, segments as any);
+      }
+
+      if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {
+        return {
+          success: false,
+          error: res.wording || res.message || `NapCat 发送表情失败 (retcode: ${res.retcode})`,
+        };
+      }
+
+      // 发送成功后累加使用频次与刷新时间
+      ctx.db!.recordFaceUsage(face.id);
+      const messageId = res?.data?.message_id;
+      return {
+        success: true,
+        message_id: typeof messageId === 'number' ? messageId : undefined,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `发送表情异常: ${err?.message || '未知错误'}`,
+      };
+    }
+  };
+
+  if (ctx.sender) {
+    return ctx.sender.enqueue(sessionPeer || 'common', doSend);
+  }
+  return doSend();
+}
+
+/**
+ * 6.11 即时偷表情/收藏工具 (collect_face)
+ * 从指定消息（或当前正在回复的入站消息）中提取图片并收录进表情库。
+ * 强制要求 Agent 传入当前理解的画面内容标签 (tags) 和情绪/意图 (mood)。
+ */
+export async function collectFace(
+  params: CollectFaceParams,
+  context?: ToolExecutionContext & { faceDir?: string }
+): Promise<CollectFaceResult> {
+  const ctx = { ...globalToolContext, ...context };
+
+  if (!params || !params.tags || !Array.isArray(params.tags) || params.tags.length === 0) {
+    return { success: false, error: '缺少必填参数 tags (内容画面标签，如 ["猫猫", "叹气"])' };
+  }
+  if (!params.mood || typeof params.mood !== 'string' || !params.mood.trim()) {
+    return { success: false, error: '缺少必填参数 mood (情绪语境意图，如 "嘲讽" / "卖萌" / "感谢")' };
+  }
+  if (!ctx.db) {
+    return { success: false, error: '数据库不可用' };
+  }
+
+  const sessionPeer = ctx.peer || '';
+  let targetMsgId = params.message_id;
+  if (!targetMsgId && ctx.inboundMsgIdGetter && sessionPeer) {
+    targetMsgId = ctx.inboundMsgIdGetter(sessionPeer);
+  }
+
+  let targetMsg: MessageRecord | null = null;
+  if (targetMsgId) {
+    targetMsg = ctx.db.getMessage(targetMsgId);
+  } else if (sessionPeer) {
+    const recent = ctx.db.readHistory(sessionPeer, { has_file: true, limit: 1 });
+    if (recent.messages.length > 0) {
+      targetMsg = ctx.db.getMessage(recent.messages[0].msg_id);
+    }
+  }
+
+  if (!targetMsg) {
+    return { success: false, error: '未找到指定的消息记录' };
+  }
+
+  const hasImg =
+    targetMsg.type === 'image' ||
+    targetMsg.type === 'sticker' ||
+    (typeof targetMsg.raw === 'string' && (targetMsg.raw.includes('"image"') || targetMsg.raw.includes('CQ:image')));
+
+  if (!hasImg) {
+    return { success: false, error: '目标消息中未找到图片或表情附件' };
+  }
+
+  let localPath = targetMsg.local_path;
+  if (!localPath || !fs.existsSync(localPath)) {
+    return { success: false, error: '目标消息的图片本地缓存文件不存在，无法转存' };
+  }
+
+  try {
+    const fileBuf = fs.readFileSync(localPath);
+    const md5 = crypto.createHash('md5').update(fileBuf).digest('hex');
+    const ext = path.extname(localPath).replace(/^\./, '').toLowerCase() || 'png';
+    const size = fileBuf.length;
+
+    const storeDir = context?.faceDir || ctx.faceDir || path.resolve('.dsh/napcat/faces');
+    fs.mkdirSync(storeDir, { recursive: true });
+    const targetFile = path.join(storeDir, `${md5}.${ext}`);
+
+    if (!fs.existsSync(targetFile)) {
+      fs.copyFileSync(localPath, targetFile);
+    }
+
+    const faceId = `face_${md5.slice(0, 8)}`;
+    const res = ctx.db.insertFace(
+      {
+        id: faceId,
+        file_path: targetFile,
+        md5,
+        source: 'collect',
+        tags: params.tags,
+        mood: params.mood.trim(),
+        enabled: true,
+        size,
+        format: ext,
+      },
+      {
+        max: ctx.faceStoreMax,
+        evictPolicy: ctx.faceEvictPolicy,
+      }
+    );
+
+    if (res.duplicated) {
+      return {
+        success: true,
+        duplicated: true,
+        face_id: res.id,
+        message: `该表情包已在你的表情库中存在（已有标签: [${res.tags.join(', ')}]，情绪: ${res.mood || '未设置'}）`,
+      };
+    }
+
+    return {
+      success: true,
+      face_id: res.id,
+      message: `已成功收藏表情包，标签: [${params.tags.join(', ')}]，情绪: ${params.mood.trim()}`,
+    };
+  } catch (err: any) {
+    return { success: false, error: `表情入库失败: ${err?.message || '未知错误'}` };
+  }
+}
+
+/**
  * 将文本按最大长度分段（默认 1500 字符），优先在换行处断句，其次在空格处断句。
  */
 export function splitMessageText(text: string, maxLength = 1500): string[] {
@@ -744,8 +996,21 @@ export function registerAgentTools(
     dshHome?: string;
     waitRegistry?: MessageWaitRegistry;
     inboundMsgIdGetter?: (peer: string) => number | undefined;
+    config?: (() => BridgePluginConfig) | BridgePluginConfig;
   }
 ): () => void {
+  const getConfig = (): BridgePluginConfig => {
+    if (typeof (options as any).config === 'function') {
+      return (options as any).config() || {};
+    }
+    if ((options as any).config && typeof (options as any).config === 'object') {
+      return (options as any).config;
+    }
+    return {};
+  };
+
+  const currentCfg = getConfig();
+
   setGlobalToolContext({
     db: options.db,
     gateway: options.gateway,
@@ -753,6 +1018,10 @@ export function registerAgentTools(
     sender: options.sender,
     waitRegistry: options.waitRegistry,
     inboundMsgIdGetter: options.inboundMsgIdGetter,
+    faceDir: currentCfg.face_store_dir,
+    faceSubType: currentCfg.face_sub_type,
+    faceStoreMax: currentCfg.face_store_max,
+    faceEvictPolicy: currentCfg.face_evict_policy,
   });
 
   const unregisters: Array<() => void> = [];
@@ -1149,16 +1418,185 @@ export function registerAgentTools(
         })
       )
     );
+
+    // 9. 表情包能力 (由 face_enabled 总开关前置门控)
+    if (getConfig().face_enabled) {
+      // 9.1 list_faces
+      unregisters.push(
+        tools.register(
+          defineTool({
+            name: 'list_faces',
+            description:
+              '检索当前本地表情包库中的可用表情。支持按情绪 (mood) 或内容标签 (tag) 检索，返回分页的表情概要列表。严禁在回复中编造不存在的表情 ID。',
+            parameters: {
+              mood: {
+                type: 'string',
+                description: '按情绪或语境筛选，如 "嘲讽", "卖萌", "赞同", "无奈", "开心"',
+              },
+              tag: {
+                type: 'string',
+                description: '按画面元素或文字标签筛选，如 "猫猫", "熊猫头", "问号"',
+              },
+              limit: {
+                type: 'number',
+                description: '返回数量上限 (默认 10，上限 30)',
+              },
+              cursor: {
+                type: 'string',
+                description: '分页游标偏移量 (取自上一次返回的 next_cursor)',
+              },
+            },
+            output: {
+              schema: { type: 'json' },
+              render: (_args, value) => {
+                const v = value as any;
+                if (!v || !Array.isArray(v.faces) || v.faces.length === 0) {
+                  return [{ type: 'text', text: '未找到符合条件的表情包。' }];
+                }
+                const lines = [`共找到 ${v.total} 个可用表情 (本次返回 ${v.faces.length} 个):`];
+                for (const f of v.faces) {
+                  const moodStr = f.mood ? ` [情绪: ${f.mood}]` : '';
+                  lines.push(`• ID: ${f.id} (${f.format})${moodStr} 标签: [${(f.tags || []).join(', ')}]`);
+                }
+                if (v.has_more && v.next_cursor) {
+                  lines.push(`(还有更多表情，可传入 cursor: "${v.next_cursor}" 获取下一页)`);
+                }
+                return [{ type: 'text', text: lines.join('\n') }];
+              },
+            },
+            async execute(args, exec) {
+              return (await listFaces(args, { db: options.db })) as any;
+            },
+          })
+        )
+      );
+
+      // 9.2 send_face
+      unregisters.push(
+        tools.register(
+          defineTool({
+            name: 'send_face',
+            description:
+              '根据表情 ID 发送一张表情包到当前群聊或私聊中（独立表情气泡）。请在语境合适且有明确意图时调用，禁止连续刷屏发表情。',
+            parameters: {
+              face_id: {
+                type: 'string',
+                required: true,
+                description: '要发送的目标表情 ID (必填，通过 list_faces 获取)',
+              },
+            },
+            output: {
+              schema: { type: 'json' },
+              render: (_args, value) => {
+                const v = value as any;
+                return [
+                  {
+                    type: 'text',
+                    text: v?.success ? `已成功发送表情包 (message_id: ${v.message_id})` : `发送表情包失败: ${v?.error}`,
+                  },
+                ];
+              },
+            },
+            async execute(args, exec) {
+              const session = (exec.agent as any)?.session;
+              const rawPeer = session?.id || '';
+              const peer = normalizePeer(rawPeer);
+              const groupId =
+                peer.startsWith('qq-group-') || peer.startsWith('group_')
+                  ? peer.replace(/^(qq-group-|group_)/, '').split('-')[0]
+                  : undefined;
+              const cfg = getConfig();
+              const res = (await sendFace(args, {
+                db: options.db,
+                gateway: options.gateway,
+                sender: options.sender,
+                peer,
+                groupId,
+                faceSubType: cfg.face_sub_type,
+              })) as any;
+              if (res && res.success === false) {
+                throw new Error(res.error || 'send_face 失败');
+              }
+              return res;
+            },
+          })
+        )
+      );
+
+      // 9.3 collect_face
+      unregisters.push(
+        tools.register(
+          defineTool({
+            name: 'collect_face',
+            description:
+              '【偷表情/收藏表情】将指定消息（或当前正在回复的入站消息）中的图片转存至本地表情库。必须传入你对该表情画面的内容标签 (tags) 和情绪/意图 (mood)。',
+            parameters: {
+              tags: {
+                type: 'array',
+                required: true,
+                items: { type: 'string' },
+                description: '画面内容与文字标签（如 ["猫猫", "叹气", "生活不易"]，必填）',
+              },
+              mood: {
+                type: 'string',
+                required: true,
+                description: '情绪与语境意图（如 "嘲讽", "卖萌", "感谢", "无奈", "破防"，必填）',
+              },
+              message_id: {
+                type: 'number',
+                description: '要收藏的目标消息 ID。若省略则自动绑定当前回合正在回复的入站消息',
+              },
+            },
+            output: {
+              schema: { type: 'json' },
+              render: (_args, value) => {
+                const v = value as any;
+                return [
+                  {
+                    type: 'text',
+                    text: v?.success
+                      ? v.duplicated
+                        ? `[表情已存在] ${v.message}`
+                        : `[收藏成功] ${v.message} (face_id: ${v.face_id})`
+                      : `收藏表情失败: ${v?.error}`,
+                  },
+                ];
+              },
+            },
+            async execute(args, exec) {
+              const session = (exec.agent as any)?.session;
+              const rawPeer = session?.id || '';
+              const peer = normalizePeer(rawPeer);
+              const cfg = getConfig();
+              const res = (await collectFace(args, {
+                db: options.db,
+                peer,
+                inboundMsgIdGetter: options.inboundMsgIdGetter,
+                faceDir: cfg.face_store_dir,
+                faceStoreMax: cfg.face_store_max,
+                faceEvictPolicy: cfg.face_evict_policy,
+              })) as any;
+              if (res && res.success === false) {
+                throw new Error(res.error || 'collect_face 失败');
+              }
+              return res;
+            },
+          })
+        )
+      );
+    }
   };
 
-  const initialTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
+  const initialTools =
+    (ctx as any).tools || (typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined);
   if (initialTools) {
     doRegister(initialTools);
   }
 
   const checkReadyTools = () => {
     if (unregisters.length === 0) {
-      const readyTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
+      const readyTools =
+        (ctx as any).tools || (typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined);
       if (readyTools) doRegister(readyTools);
     }
   };
