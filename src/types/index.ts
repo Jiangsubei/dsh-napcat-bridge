@@ -378,6 +378,81 @@ export interface ReactMessageResult {
   error?: string;
 }
 
+// ==================== 4.10 表情库与表情工具类型 ====================
+
+export interface FaceRecord {
+  id: string;
+  file_path: string;
+  md5: string;
+  added_at: number;
+  source: 'curate' | 'manual' | 'collect';
+  tags: string[];
+  mood?: string;
+  enabled: boolean;
+  size: number;
+  format: string; // 'png' | 'jpg' | 'gif' | 'webp'
+  last_used_at?: number;
+  use_count: number;
+  deleted_at?: number | null; // 软删除时间戳（7 天后悔期保留），null/undefined 表示活跃
+}
+
+export interface FaceQueryOptions {
+  tag?: string;
+  mood?: string;
+  enabledOnly?: boolean;
+  includeDeleted?: boolean;
+  limit?: number;
+  offset?: number;
+  cursor?: string;
+  orderBy?: 'added_at' | 'last_used_at' | 'use_count';
+  order?: 'asc' | 'desc';
+}
+
+export interface FaceSummaryItem {
+  id: string;
+  tags: string[];
+  mood?: string;
+  format: string;
+}
+
+export interface ListFacesParams {
+  tag?: string;
+  mood?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ListFacesResult {
+  faces: FaceSummaryItem[];
+  total: number;
+  has_more: boolean;
+  next_cursor?: string;
+}
+
+export interface SendFaceParams {
+  face_id: string;
+}
+
+export interface SendFaceResult {
+  success: boolean;
+  message_id?: number;
+  error?: string;
+}
+
+export interface CollectFaceParams {
+  message_id?: number;
+  tags?: string[];
+  mood?: string;
+}
+
+export interface CollectFaceResult {
+  success: boolean;
+  duplicated?: boolean;
+  face_id?: string;
+  message?: string;
+  error?: string;
+}
+
 // ==================== 5. 插件配置接口 ====================
 
 export interface BridgePluginConfig {
@@ -421,6 +496,20 @@ export interface BridgePluginConfig {
   review_tool_calls_interval?: number;
   /** 后台回顾使用的独立子模型名称 (可选，留空继承主模型) */
   review_model?: string;
+  /** 是否启用表情包系统 (总开关，默认 false，关闭时工具不注册、后台不运行) */
+  face_enabled?: boolean;
+  /** 本地表情库存储容量上限 (默认 100 张) */
+  face_store_max?: number;
+  /** 本地表情库文件存储目录 (默认 .dsh/napcat/faces) */
+  face_store_dir?: string;
+  /** 是否启用后台定期整理/识别表情包 (默认 false) */
+  face_auto_curate?: boolean;
+  /** 后台定期整理 Cron 表达式 (默认每 2 小时) */
+  face_curate_cron?: string;
+  /** 发送表情包消息段使用的 sub_type (默认 1) */
+  face_sub_type?: number;
+  /** 表情库满额淘汰策略 ('reject' 拒绝新增 / 'evict_lru' 淘汰最久未用，默认 'reject') */
+  face_evict_policy?: 'reject' | 'evict_lru';
 }
 
 // ==================== 6. 出站串行队列与入站上下文契约 ====================

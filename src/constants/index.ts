@@ -45,3 +45,12 @@ export const DEFAULT_REVIEW_ENABLED = true;
 export const DEFAULT_REVIEW_TURNS_INTERVAL = 10;
 export const DEFAULT_REVIEW_TOOL_CALLS_INTERVAL = 10;
 
+export const DEFAULT_FACE_ENABLED = false;
+export const DEFAULT_FACE_STORE_MAX = 100;
+export const DEFAULT_FACE_STORE_DIR = '.dsh/napcat/faces';
+export const DEFAULT_FACE_AUTO_CURATE = false;
+export const DEFAULT_FACE_CURATE_CRON = '0 */2 * * *';
+export const DEFAULT_FACE_SUB_TYPE = 1;
+export const DEFAULT_FACE_EVICT_POLICY = 'reject';
+export const DEFAULT_FACE_GRACE_PERIOD_DAYS = 7;
+
