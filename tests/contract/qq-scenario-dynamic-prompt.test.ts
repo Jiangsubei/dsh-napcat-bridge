@@ -52,8 +52,6 @@ describe('契约测试: QQ 会话提示词干净度与下线验证 (QQ Scenario 
 
     const fullPromptText = assemblyGroup.contexts.map((c: any) => c.text || '').join('\n');
     expect(fullPromptText).not.toContain('# 如何发送消息');
-    expect(fullPromptText).not.toContain('必须调用 send_qq_message 工具');
-    expect(fullPromptText).not.toContain('send_qq_message');
     expect(fullPromptText).not.toContain('除工具调用外不要输出任何回复文本');
 
     // 同样验证 group_ 前缀
@@ -74,7 +72,7 @@ describe('契约测试: QQ 会话提示词干净度与下线验证 (QQ Scenario 
 
     const fullPromptText = assemblyUser.contexts.map((c: any) => c.text || '').join('\n');
     expect(fullPromptText).not.toContain('# 如何发送消息');
-    expect(fullPromptText).not.toContain('send_qq_message');
+    expect(fullPromptText).not.toContain('除工具调用外不要输出任何回复文本');
 
     // 同样验证 user_ 前缀
     const assemblyPeerUser = await booted.ctx.systemPrompt.assemble({

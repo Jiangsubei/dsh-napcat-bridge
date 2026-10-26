@@ -11,7 +11,6 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { NapCatGatewayServer } from '../gateway/server.js';
 import type { SessionManager } from '../gateway/session.js';
 import type { BridgePluginConfig, InboundReplyContext } from '../types/index.js';
-import { stripMarkdown } from './render.js';
 import { PerPeerSerialSender } from './queue.js';
 
 /**
@@ -75,19 +74,8 @@ export type InboundReplyContextInput =
 
 export class OutboundStreamBridge {
   private readonly sender: PerPeerSerialSender;
-  // 保底/兼容单值上下文映射 (peer -> InboundReplyContextInput)
+  // 保底/活跃入站上下文映射 (peer -> InboundReplyContextInput)
   private inboundContexts = new Map<string, InboundReplyContextInput>();
-  // 待激活消息上下文 (messageId -> { peer, context, createdAt })
-  private pendingMessageContexts = new Map<
-    string,
-    { peer: string; context: InboundReplyContextInput; createdAt: number }
-  >();
-  // Turn 级精准绑定映射 (peer -> Map<turn, InboundReplyContextInput>)
-  private turnContexts = new Map<string, Map<number, InboundReplyContextInput>>();
-  // 当前 peer 正在执行的活跃 Turn (peer -> turn)
-  private activeTurns = new Map<string, number>();
-  // 记录每个 Turn 是否已经下发过首段前缀 ( `${peer}:${turn}` )
-  private turnFirstSent = new Set<string>();
   private unlisten: (() => void) | null = null;
 
   constructor(
@@ -101,15 +89,21 @@ export class OutboundStreamBridge {
   }
 
   /**
-   * 获取某 peer 当前正在执行的活跃轮次号（未在运行则为 undefined）
+   * 获取底层串行发送器
    */
-  getActiveTurn(peer: string): number | undefined {
-    return this.activeTurns.get(peer);
+  getSender(): PerPeerSerialSender {
+    return this.sender;
   }
 
   /**
-   * 记录某 peer 最近一次唤醒的入站消息上下文（唤醒源 msg_id 与提问者 QQ），
-   * 供出方向按开关组装引用/@ 前缀。由入方向消息处理路径在判定唤醒后调用。
+   * 获取某 peer 当前正在执行的活跃轮次号（未在运行则为 undefined）
+   */
+  getActiveTurn(_peer: string): number | undefined {
+    return undefined;
+  }
+
+  /**
+   * 记录某 peer 最近一次唤醒的入站消息上下文
    */
   trackInboundContext(peer: string, context: InboundReplyContextInput): void {
     if (!peer || !context) return;
@@ -117,52 +111,26 @@ export class OutboundStreamBridge {
   }
 
   /**
-   * 登记一条待触发轮次的 UserMessage 上下文（messageId -> context）。
-   * 当 Session 驱动器派发该消息并开启对应 Turn 时，自动锁定绑定至该 Turn。
+   * 登记一条待触发轮次的 UserMessage 上下文
    */
-  trackPendingMessage(messageId: string, peer: string, context: InboundReplyContextInput): void {
-    if (!messageId || !peer || !context) return;
-    this.cleanExpiredPendingMessages();
-    this.pendingMessageContexts.set(messageId, { peer, context, createdAt: Date.now() });
+  trackPendingMessage(_messageId: string, peer: string, context: InboundReplyContextInput): void {
+    if (!peer || !context) return;
+    this.inboundContexts.set(peer, context);
   }
 
   /**
-   * 清理超时的待激活消息上下文 (默认 5 分钟 TTL，防内存泄漏)
-   */
-  private cleanExpiredPendingMessages(ttlMs = 300_000): void {
-    const now = Date.now();
-    for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
-      if (now - entry.createdAt > ttlMs) {
-        this.pendingMessageContexts.delete(msgId);
-      }
-    }
-  }
-
-  /**
-   * 动态刷新指定 peer 当前正在活跃轮次的回复上下文。
-   * 供工具挂起等待（如 wait_for_user_messages）在当前 Turn 内收集到新消息时刷新回复锚点。
+   * 动态刷新指定 peer 当前正在活跃轮次的回复上下文
    */
   updateActiveTurnContext(peer: string, context: InboundReplyContextInput): void {
     if (!peer || !context) return;
-    // 防御保护：若 context 标记为合成/notice，严禁更新活跃 Turn 的真实锚点
     if ((context as any).is_synthetic || (context as any).synthetic) {
       return;
     }
     this.inboundContexts.set(peer, context);
-    const currentTurn = this.activeTurns.get(peer);
-    if (currentTurn !== undefined) {
-      let peerMap = this.turnContexts.get(peer);
-      if (!peerMap) {
-        peerMap = new Map();
-        this.turnContexts.set(peer, peerMap);
-      }
-      peerMap.set(currentTurn, context);
-    }
   }
 
   /**
-   * 获取指定 peer 当前活跃回合的回复上下文锚点。
-   * 优先从当前活跃 Turn 获取；若当前无活跃 Turn，回退至 peer 级保底上下文。
+   * 获取指定 peer 当前活跃回合的回复上下文锚点
    */
   getActiveTurnContext(peer: string): InboundReplyContextInput | undefined {
     if (!peer) return undefined;
@@ -171,21 +139,7 @@ export class OutboundStreamBridge {
       ? (this.options.sessionManager as any).sessionIdToPeer(peer)
       : peer;
 
-    const candidates = [peer, normalized];
-    for (const p of candidates) {
-      const activeTurn = this.activeTurns.get(p);
-      if (activeTurn !== undefined) {
-        const turnCtx = this.turnContexts.get(p)?.get(activeTurn);
-        if (turnCtx) return turnCtx;
-      }
-    }
-
-    for (const p of candidates) {
-      const fallback = this.inboundContexts.get(p);
-      if (fallback) return fallback;
-    }
-
-    return undefined;
+    return this.inboundContexts.get(peer) ?? this.inboundContexts.get(normalized);
   }
 
   /**
@@ -194,7 +148,6 @@ export class OutboundStreamBridge {
   getInboundContext(peer: string): InboundReplyContextInput | undefined {
     return this.getActiveTurnContext(peer);
   }
-
 
   /**
    * 启动出站事件流监听
@@ -225,6 +178,9 @@ export class OutboundStreamBridge {
 
   /**
    * 处理单条 session/event
+   * 贯彻“用户侧静默原则”与“send_qq_message 唯一通道原则”：
+   * 废除 assistant/message 纯文本自动直发，绝不搞任何 turn/end 自动补发终答兜底。
+   * 若模型在本轮未调用 send_qq_message，无论包含何种思考、正文或工具调用，网关均保持绝对静默。
    */
   async handleSessionEvent(session: Session, event: SessionEvent): Promise<void> {
     if (!session || !event) return;
@@ -234,123 +190,9 @@ export class OutboundStreamBridge {
       return;
     }
 
-    const peer = this.options.sessionManager.sessionIdToPeer(session.id);
-
-    // 1. 轮次开启: 记录当前活跃 Turn
-    if (event.type === 'turn/start') {
-      const turn = (event.data as any)?.turn;
-      if (typeof turn === 'number') {
-        this.activeTurns.set(peer, turn);
-        this.cleanExpiredPendingMessages();
-        // 若此前已有该 peer 的 pending 消息到达，将其绑定到当前刚开启的 turn；
-        // 必须清空该 peer 全部前序 pending 消息，杜绝 break 遗留导致的跨轮串轮 (A23/B3)
-        let peerMap = this.turnContexts.get(peer);
-        if (!peerMap) {
-          peerMap = new Map();
-          this.turnContexts.set(peer, peerMap);
-        }
-        for (const [msgId, entry] of this.pendingMessageContexts.entries()) {
-          if (entry.peer === peer) {
-            this.pendingMessageContexts.delete(msgId);
-            if (!peerMap.has(turn)) {
-              peerMap.set(turn, entry.context);
-            }
-          }
-        }
-      }
-      return;
-    }
-
-    // 2. 消息进入轮次: 尝试将 pending 的入站上下文精准锚定到当前活跃 Turn
-    if (event.type === 'user/message') {
-      const msgId = (event.data as any)?.id;
-      if (msgId && this.pendingMessageContexts.has(msgId)) {
-        const currentTurn = this.activeTurns.get(peer);
-        if (currentTurn !== undefined) {
-          const { context } = this.pendingMessageContexts.get(msgId)!;
-          this.pendingMessageContexts.delete(msgId);
-          let peerMap = this.turnContexts.get(peer);
-          if (!peerMap) {
-            peerMap = new Map();
-            this.turnContexts.set(peer, peerMap);
-          }
-          if (!peerMap.has(currentTurn)) {
-            peerMap.set(currentTurn, context);
-          }
-        }
-      }
-      return;
-    }
-
-    // 3. 轮次结束: 清理当前 Turn 的绑定映射与首段标记
-    if (event.type === 'turn/end') {
-      const turn = (event.data as any)?.turn;
-      if (typeof turn === 'number') {
-        this.turnFirstSent.delete(`${peer}:${turn}`);
-        if (this.activeTurns.get(peer) === turn) {
-          this.activeTurns.delete(peer);
-        }
-        this.turnContexts.get(peer)?.delete(turn);
-
-        const normalized = typeof (this.options.sessionManager as any)?.sessionIdToPeer === 'function'
-          ? (this.options.sessionManager as any).sessionIdToPeer(session.id)
-          : undefined;
-        if (normalized && normalized !== peer) {
-          this.turnFirstSent.delete(`${normalized}:${turn}`);
-          if (this.activeTurns.get(normalized) === turn) {
-            this.activeTurns.delete(normalized);
-          }
-          this.turnContexts.get(normalized)?.delete(turn);
-        }
-      }
-      return;
-    }
-
-    // 4. 仅针对 assistant/message 事件提取正文回复
-    if (event.type === 'assistant/message') {
-      const msgData = event.data as any;
-      const turn = typeof msgData?.turn === 'number' ? msgData.turn : this.activeTurns.get(peer);
-      const contentBlocks: ContentBlock[] = msgData?.message?.content || [];
-
-      // AB 测试分支：每一轮拿到正文（含伴随工具调用的中间正文），以及最终回复都会直接发送到 QQ
-      const textBlocks = filterAndExtractOutboundBlocks(contentBlocks);
-      if (textBlocks.length === 0) {
-        return;
-      }
-
-      const turnKey = turn !== undefined ? `${peer}:${turn}` : undefined;
-
-      // 提取针对该 Turn 的上下文 (Turn 级精准绑定优先)
-      let inbound: InboundReplyContextInput | undefined;
-      if (turn !== undefined) {
-        inbound = this.turnContexts.get(peer)?.get(turn);
-      }
-      // 仅在未带 turn 的非轮次/兼容单值路径下回退到 peer 保底
-      if (!inbound && turn === undefined) {
-        inbound = this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
-      }
-
-      for (let i = 0; i < textBlocks.length; i++) {
-        const block = textBlocks[i];
-        const plainText = stripMarkdown(block.text);
-        if (!plainText || !plainText.trim()) continue;
-
-        // 仅首个正文段携带 @/引用 前缀 (Spec §7.1: 在首段 @ 提问者)
-        // 若指定了 turn，确保同一 turn 跨 step 或跨 block 仅首次发送携带前缀
-        const shouldPrefix = turnKey
-          ? !this.turnFirstSent.has(turnKey)
-          : (i === 0);
-
-        if (turnKey && shouldPrefix) {
-          this.turnFirstSent.add(turnKey);
-        }
-
-        await this.sendSerialized(peer, plainText, {
-          withPrefix: shouldPrefix,
-          inbound,
-        });
-      }
-    }
+    // 用户侧静默原则：不监听 assistant/message 直发出站，也不在 turn/end 兜底发信。
+    // 整个系统向 QQ 下发文本的唯一途径就是显式调用 send_qq_message 工具。
+    return;
   }
 
   /**
@@ -447,10 +289,6 @@ export class OutboundStreamBridge {
     }
     this.sender.clear();
     this.inboundContexts.clear();
-    this.pendingMessageContexts.clear();
-    this.turnContexts.clear();
-    this.activeTurns.clear();
-    this.turnFirstSent.clear();
   }
 }
 

@@ -175,7 +175,7 @@ describe('契约测试: 出方向 @提问者 / 引用原消息 开关接线 (Spe
     expect(sent[0].msg).toBe('无上下文的回复');
   });
 
-  it('A1-契约 5: 同 turn 多段正文仅首段携带 @/引用 前缀 (Spec §7.1 "在首段")', async () => {
+  it('A1-契约 5: 废除 assistant/message 自动直发，贯彻用户侧静默原则（0条出站消息）', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const bridge = makeBridge(
       () => ({ quote_original: true, at_questioner: true }),
@@ -202,13 +202,8 @@ describe('契约测试: 出方向 @提问者 / 引用原消息 开关接线 (Spe
 
     await bridge.handleSessionEvent(session as any, event as any);
 
-    expect(sent).toHaveLength(2);
-    const first = sent[0].msg as Array<Record<string, any>>;
-    expect(Array.isArray(first)).toBe(true);
-    expect(first[0]).toEqual({ type: 'reply', data: { id: 9001 } });
-    expect(first.some((s) => s.type === 'at')).toBe(true);
-    // 第二段不携带前缀
-    expect(sent[1].msg).toBe('第二段正文');
+    // 静默原则：assistant/message 事件坚决不自动下发
+    expect(sent).toHaveLength(0);
   });
 });
 
@@ -232,7 +227,7 @@ describe('契约测试: Turn 级精准绑定与异步排队消息隔离 (Turn Co
     });
   }
 
-  it('Turn-契约 1: 轮次 A 未结束时排队消息 B 入站，轮次 A 必须引用消息 A，轮次 B 必须引用消息 B', async () => {
+  it('Turn-契约 1: 废除 assistant/message 自动直发后，跨轮次 assistant/message 坚决保持静默', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const bridge = makeBridge(sent);
 
@@ -304,25 +299,11 @@ describe('契约测试: Turn 级精准绑定与异步排队消息隔离 (Turn Co
       data: { turn: 2, reason: { kind: 'completed' } },
     } as any);
 
-    // 核心断言:
-    // sent[0] 为轮次 1 回复: 必须引用 1001 (@ user_A)，绝不能引用 1002
-    expect(sent).toHaveLength(2);
-
-    const replyA = sent[0].msg as Array<Record<string, any>>;
-    expect(Array.isArray(replyA)).toBe(true);
-    expect(replyA[0]).toEqual({ type: 'reply', data: { id: 1001 } });
-    expect(replyA[1]).toEqual({ type: 'at', data: { qq: 'user_A' } });
-    expect(replyA[2]).toEqual({ type: 'text', data: { text: '轮次 1 的最终回答' } });
-
-    // sent[1] 为轮次 2 回复: 必须引用 1002 (@ user_B)
-    const replyB = sent[1].msg as Array<Record<string, any>>;
-    expect(Array.isArray(replyB)).toBe(true);
-    expect(replyB[0]).toEqual({ type: 'reply', data: { id: 1002 } });
-    expect(replyB[1]).toEqual({ type: 'at', data: { qq: 'user_B' } });
-    expect(replyB[2]).toEqual({ type: 'text', data: { text: '轮次 2 的最终回答' } });
+    // 静默原则核心断言: assistant/message 事件绝不向 QQ 泄漏任何文本
+    expect(sent).toHaveLength(0);
   });
 
-  it('Turn-契约 2: 同轮次多次 assistant/message (如工具调用后最终回复)，保持正确绑定且仅首段引用', async () => {
+  it('Turn-契约 2: 同轮次多次 assistant/message (如工具调用后最终回复)，坚决保持静默', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const bridge = makeBridge(sent);
     const session = { id: 'qq-group-123' };
@@ -362,15 +343,11 @@ describe('契约测试: Turn 级精准绑定与异步排队消息隔离 (Turn Co
       },
     } as any);
 
-    expect(sent).toHaveLength(2);
-    // 第一条消息携带引用
-    const seg1 = sent[0].msg as Array<Record<string, any>>;
-    expect(seg1[0]).toEqual({ type: 'reply', data: { id: 5001 } });
-    // 第二条消息由于该 turn 已经下发过前缀，不重复引用
-    expect(sent[1].msg).toBe('今天晴天，气温 25 度。');
+    // 静默原则：中途说明与最终回复均不通过 assistant/message 直接发送
+    expect(sent).toHaveLength(0);
   });
 
-  it('Turn-契约 3: 无 Turn 上下文或降级情况回退至单值保底或纯文本，绝不抛未捕获异常', async () => {
+  it('Turn-契约 3: 无 Turn 上下文或降级情况，assistant/message 保持静默且 sendSerialized 正常发送不抛未捕获异常', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const bridge = makeBridge(sent);
     const session = { id: 'qq-group-123' };
@@ -394,9 +371,13 @@ describe('契约测试: Turn 级精准绑定与异步排队消息隔离 (Turn Co
       },
     } as any);
 
+    // assistant/message 静默
+    expect(sent).toHaveLength(0);
+
+    // 主动调用底层通道发送不抛异常
+    await expect(bridge.sendSerialized('group_123', '保底回复', { withPrefix: false })).resolves.not.toThrow();
     expect(sent).toHaveLength(1);
-    // 降级为纯文本，无引用
-    expect(sent[0].msg).toBe('web 回复');
+    expect(sent[0].msg).toBe('保底回复');
   });
 });
 

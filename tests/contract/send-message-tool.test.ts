@@ -1,10 +1,10 @@
 /**
- * 契约测试: send_qq_message 工具下线与直发架构防护契约 (Decommission & Isolation Contract)
+ * 契约测试: send_qq_message 工具回归与参数校验契约 (Tool Registration & Validation Contract)
  *
  * 覆盖规范清单:
- * 契约 1: 真实装配下，QQ 群聊、私聊、WebUI、沙箱等所有会话中严禁注册 send_qq_message 工具；
+ * 契约 1: 真实装配下，QQ 群聊与私聊会话均包含 send_qq_message 工具；非 QQ 会话安全排除；
  * 契约 2: splitMessageText 消息分段工具函数纯算法契约；
- * 契约 3: tools 执行未注册的 send_qq_message 返回 isError: true，避免误调。
+ * 契约 3: send_qq_message 参数校验与错误反馈（空文本、非 QQ 会话防御）。
  */
 
 import * as os from 'node:os';
@@ -12,9 +12,9 @@ import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
-import { splitMessageText } from '../../src/tools/index.js';
+import { splitMessageText, sendQqMessage } from '../../src/tools/index.js';
 
-describe('契约 1: send_qq_message 工具全面下线与隔离防护', () => {
+describe('契约 1: send_qq_message 工具回归与会话隔离契约', () => {
   let tmpHome: string;
   let booted: BootedDsh;
   const TEST_PORT = 29899;
@@ -40,48 +40,74 @@ describe('契约 1: send_qq_message 工具全面下线与隔离防护', () => {
     }
   });
 
-  it('1.1 真实装配下：QQ 群聊会话 assemble 结果中严禁包含 send_qq_message 工具', async () => {
+  it('1.1 真实装配下：QQ 群聊会话 assemble 结果中包含 send_qq_message 工具', async () => {
     const ctx = booted.ctx;
+    const presetsSvc: any = (ctx as any).agentPresets || ctx.get?.('agentPresets');
+    const qqWs = path.join(tmpHome, 'qq-ws-group');
+    await fsp.mkdir(qqWs, { recursive: true });
+
     const qqGroupHandle = await ctx.agents.create({
       sessionId: 'qq-group-8888',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: path.join(tmpHome, 'qq-ws-group') },
+      meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        if (presetsSvc?.mount) {
+          await presetsSvc.mount(agentCtx, 'qq-session');
+        } else {
+          (ctx as any).napcatBridgeTools?.registerTools?.(agentCtx);
+        }
+      },
     });
     const qqGroupAgent = qqGroupHandle.agent || qqGroupHandle;
     const asmGroup = await ctx.systemPrompt.assemble({ scope: qqGroupAgent, agent: qqGroupAgent } as any);
     const groupToolNames = (asmGroup.tools as any[]).map((t) => t.name);
-    expect(groupToolNames).not.toContain('send_qq_message');
+    expect(groupToolNames).toContain('send_qq_message');
   });
 
-  it('1.2 真实装配下：QQ 私聊会话 assemble 结果中严禁包含 send_qq_message 工具', async () => {
+  it('1.2 真实装配下：QQ 私聊会话 assemble 结果中包含 send_qq_message 工具', async () => {
     const ctx = booted.ctx;
+    const presetsSvc: any = (ctx as any).agentPresets || ctx.get?.('agentPresets');
+    const qqWs = path.join(tmpHome, 'qq-ws-user');
+    await fsp.mkdir(qqWs, { recursive: true });
+
     const qqUserHandle = await ctx.agents.create({
       sessionId: 'qq-user-9999',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: path.join(tmpHome, 'qq-ws-user') },
+      meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        if (presetsSvc?.mount) {
+          await presetsSvc.mount(agentCtx, 'qq-session');
+        } else {
+          (ctx as any).napcatBridgeTools?.registerTools?.(agentCtx);
+        }
+      },
     });
     const qqUserAgent = qqUserHandle.agent || qqUserHandle;
     const asmUser = await ctx.systemPrompt.assemble({ scope: qqUserAgent, agent: qqUserAgent } as any);
     const userToolNames = (asmUser.tools as any[]).map((t) => t.name);
-    expect(userToolNames).not.toContain('send_qq_message');
+    expect(userToolNames).toContain('send_qq_message');
   });
 
   it('1.3 真实装配下：WebUI 与 Review 沙箱会话均排除 send_qq_message 工具', async () => {
     const ctx = booted.ctx;
+    const webWs = path.join(tmpHome, 'web-ws');
+    await fsp.mkdir(webWs, { recursive: true });
     const webHandle = await ctx.agents.create({
       sessionId: 'web-session-8888',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: path.join(tmpHome, 'web-ws') },
+      meta: { cwd: webWs },
     });
     const webAgent = webHandle.agent || webHandle;
     const asmWeb = await ctx.systemPrompt.assemble({ scope: webAgent, agent: webAgent } as any);
     const webToolNames = (asmWeb.tools as any[]).map((t) => t.name);
     expect(webToolNames).not.toContain('send_qq_message');
 
+    const reviewWs = path.join(tmpHome, 'review-ws');
+    await fsp.mkdir(reviewWs, { recursive: true });
     const reviewHandle = await ctx.agents.create({
       sessionId: 'review-group_8888',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: path.join(tmpHome, 'review-ws') },
+      meta: { cwd: reviewWs },
     });
     const reviewAgent = reviewHandle.agent || reviewHandle;
     const asmReview = await ctx.systemPrompt.assemble({ scope: reviewAgent, agent: reviewAgent } as any);
@@ -89,23 +115,16 @@ describe('契约 1: send_qq_message 工具全面下线与隔离防护', () => {
     expect(reviewToolNames).not.toContain('send_qq_message');
   });
 
-  it('1.4 真实装配下：调用未注册的 send_qq_message 工具被系统安全拒执', async () => {
-    const ctx = booted.ctx;
-    const tools: any = ctx.get('tools');
-    const qqGroupHandle = await ctx.agents.create({
-      sessionId: 'qq-group-8888',
-      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: path.join(tmpHome, 'qq-ws-group') },
-    });
-    const qqGroupAgent = qqGroupHandle.agent || qqGroupHandle;
+  it('1.4 send_qq_message 执行校验：空文本与非 QQ 会话安全拒绝', async () => {
+    // 空文本
+    const resEmpty = await sendQqMessage({ text: '   ' }, { peer: 'group_123' });
+    expect(resEmpty.success).toBe(false);
+    expect(resEmpty.error).toContain('不能为空');
 
-    const res = await tools.execute({
-      name: 'send_qq_message',
-      arguments: { text: 'test' },
-      agent: qqGroupAgent,
-      signal: new AbortController().signal,
-    });
-    expect(res.isError).toBe(true);
+    // 非 QQ 会话
+    const resNonQQ = await sendQqMessage({ text: 'hello' }, { peer: 'web-session' });
+    expect(resNonQQ.success).toBe(false);
+    expect(resNonQQ.error).toContain('QQ 聊天会话');
   });
 });
 

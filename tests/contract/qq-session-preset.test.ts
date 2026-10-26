@@ -123,6 +123,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     expect(toolNames.has('skill')).toBe(true);
 
     // 5. NapCat 专属工具
+    expect(toolNames.has('send_qq_message')).toBe(true);
     expect(toolNames.has('read_chat_history')).toBe(true);
     expect(toolNames.has('fetch_chat_resource')).toBe(true);
     expect(toolNames.has('expand_forward_message')).toBe(true);

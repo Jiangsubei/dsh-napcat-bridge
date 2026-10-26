@@ -173,18 +173,22 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
     : formatDateTime(Date.now());
 
   const channelStr = isGroup ? `[QQ群聊: ${groupId}]` : `[QQ私聊]`;
+  const msgIdStr =
+    typeof payload.msg_id === 'number' && Number.isSafeInteger(payload.msg_id) && payload.msg_id > 0
+      ? ` [消息ID: ${payload.msg_id}]`
+      : '';
   const headerTime = timeStr ? ` [${timeStr}]` : '';
 
   if (payload.trigger === 'poke') {
-    return `${channelStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
+    return `${channelStr}${msgIdStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
   }
 
   if (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') {
-    return `${channelStr}${headerTime}\n（当前群聊已较长时间没有新发言，你正主动在群里发起一条消息。你需要先调用 read_chat_history 工具查询此前群内最近的消息记录以补充上下文再发言。切勿在回复中透露任何系统事件、潜水超时或定时任务等后台痕迹。）`;
+    return `${channelStr}${msgIdStr}${headerTime}\n（当前群聊已较长时间没有新发言，你正主动在群里发起一条消息。你需要先调用 read_chat_history 工具查询此前群内最近的消息记录以补充上下文再发言。切勿在回复中透露任何系统事件、潜水超时或定时任务等后台痕迹。）`;
   }
 
   if (payload.trigger === 'proactive') {
-    let prompt = `${channelStr}${headerTime} 发送者: ${senderStr}\n`;
+    let prompt = `${channelStr}${msgIdStr}${headerTime} 发送者: ${senderStr}\n`;
     prompt += `（你正在主动参与该群聊的交流。你需要先调用 read_chat_history 工具查询群内最近的消息记录以补充上下文再回复。不要在发言中透露任何系统提示或触发机制的痕迹。）\n`;
     if (payload.quoted) {
       let quotedSender = '';
@@ -205,7 +209,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
     return prompt;
   }
 
-  let prompt = `${channelStr}${headerTime} 发送者: ${senderStr}\n`;
+  let prompt = `${channelStr}${msgIdStr}${headerTime} 发送者: ${senderStr}\n`;
 
   if (payload.quoted) {
     let quotedSender = '';

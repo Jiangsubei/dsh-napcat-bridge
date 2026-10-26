@@ -284,7 +284,7 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
 
   it('场景 4: 引用本地历史卡片消息 — cached.raw 动态重解析升级，完整提取直链与封面图', async () => {
     // 1. 模拟历史旧数据在 SQLite 中（保存时只有老格式无链接 content，但有 raw）
-    const dbPath = path.join(tmpHome, 'workspace', 'napcat', 'messages.sqlite');
+    const dbPath = path.join(tmpHome, 'napcat', 'messages.sqlite');
     const db = new MessageDatabase(dbPath);
     db.init();
     db.saveMessage({
@@ -487,24 +487,13 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
     // 等待出站串行发送
     await new Promise((r) => setTimeout(r, 150));
 
-    // 5. 验证真实 WS 下发的出站消息
-    expect(sentGroupMessages).toHaveLength(2);
-
-    // 轮次 1 的出站消息必须引用 88801，绝不能引用 88802
-    const outboundMsg1 = sentGroupMessages[0].params.message;
-    const replySeg1 = Array.isArray(outboundMsg1)
-      ? outboundMsg1.find((s: any) => s.type === 'reply')
-      : null;
-    expect(replySeg1).toBeDefined();
-    expect(Number(replySeg1.data.id)).toBe(88801);
-
-    // 轮次 2 的出站消息必须引用 88802
-    const outboundMsg2 = sentGroupMessages[1].params.message;
-    const replySeg2 = Array.isArray(outboundMsg2)
-      ? outboundMsg2.find((s: any) => s.type === 'reply')
-      : null;
-    expect(replySeg2).toBeDefined();
-    expect(Number(replySeg2.data.id)).toBe(88802);
+    // 5. 核心契约：贯彻用户侧静默原则，废除 assistant/message 自动直发（0条出站）
+    expect(sentGroupMessages).toHaveLength(0);
+    const prompt1 = capturedFollowups[0].content;
+    const prompt2 = capturedFollowups[1].content;
+    expect(prompt1).toContain('[消息ID: 88801]');
+    expect(prompt2).toContain('[消息ID: 88802]');
+    
   });
 });
 
