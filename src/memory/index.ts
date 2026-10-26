@@ -216,9 +216,10 @@ export function setupMemoryService(
     if (!session || !session.id || !event) return;
     const sessionId = String(session.id);
 
-    // 过滤回顾子代理自身会话
+    // 过滤回顾与整理子代理自身会话
     if (
       sessionId.startsWith('review-') ||
+      sessionId.startsWith('curator-') ||
       session.meta?.isBackgroundReview ||
       session.options?.meta?.isBackgroundReview
     ) {

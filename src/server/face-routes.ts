@@ -227,25 +227,40 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
       }
 
       const face = db.getFaceById(id, { includeDeleted: true });
-      if (!face || !face.file_path || !fs.existsSync(face.file_path)) {
-        sendJson(res, 404, { ok: false, error: '表情图片文件不存在' });
+      if (!face || !face.file_path) {
+        sendJson(res, 404, { ok: false, error: '表情图片不存在' });
         return;
       }
 
-      const ext = path.extname(face.file_path).toLowerCase();
+      const canonicalDir = getStoreDir();
+      let filePath = path.isAbsolute(face.file_path)
+        ? face.file_path
+        : resolveDshPath(dshHome, face.file_path, DEFAULT_FACE_STORE_DIR);
+
+      if (!fs.existsSync(filePath)) {
+        const cand = path.resolve(canonicalDir, `${face.md5}.${face.format}`);
+        if (fs.existsSync(cand)) {
+          filePath = cand;
+        } else {
+          sendJson(res, 404, { ok: false, error: '表情图片文件不存在' });
+          return;
+        }
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
       let contentType = 'image/png';
       if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
       else if (ext === '.gif') contentType = 'image/gif';
       else if (ext === '.webp') contentType = 'image/webp';
       else if (ext === '.svg') contentType = 'image/svg+xml';
 
-      const stat = fs.statSync(face.file_path);
+      const stat = fs.statSync(filePath);
       res.writeHead(200, {
         'content-type': contentType,
         'content-length': stat.size,
         'cache-control': 'public, max-age=86400',
       });
-      fs.createReadStream(face.file_path).pipe(res);
+      fs.createReadStream(filePath).pipe(res);
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: err?.message || '读取图片失败' });
     }

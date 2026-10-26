@@ -45,6 +45,8 @@ import type { MessageWaitRegistry, WaitCollectedMessage } from '../gateway/serve
 import type { SerialSender } from '../types/index.js';
 import { classifySendFileSource, detectSendFileType } from './file-source.js';
 import { downloadPrivateFile } from './private-file.js';
+import { resolveDshPath } from '../utils/path.js';
+import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -54,6 +56,7 @@ export interface ToolExecutionContext {
   sender?: SerialSender | null;
   peer?: string;
   groupId?: string | number;
+  dshHome?: string;
   /** EN-005: 入站消息等待收集器（wait_for_user_messages 工具） */
   waitRegistry?: MessageWaitRegistry | null;
   /** EN-005: 当前工具调用的取消信号（Agent 回合中断时中止等待） */
@@ -764,7 +767,9 @@ export async function listFaces(
       item.mood = f.mood;
     }
     if (f.file_path) {
-      item.file_path = f.file_path;
+      item.file_path = path.isAbsolute(f.file_path)
+        ? f.file_path
+        : resolveDshPath(ctx.dshHome, f.file_path, DEFAULT_FACE_STORE_DIR);
     }
     return item;
   });
@@ -809,13 +814,51 @@ export async function sendFace(
     return { success: false, error: '网关未连接，无法发送表情' };
   }
 
+  const rawPath = face.file_path;
+  let localPath = path.isAbsolute(rawPath)
+    ? rawPath
+    : resolveDshPath(ctx.dshHome, rawPath, DEFAULT_FACE_STORE_DIR);
+
+  // 物理文件存在性校验与自动自愈回退
+  if (!fs.existsSync(localPath)) {
+    const canonicalDir = resolveDshPath(ctx.dshHome, ctx.faceDir, DEFAULT_FACE_STORE_DIR);
+    const canonicalPath = path.resolve(canonicalDir, `${face.md5}.${face.format}`);
+    if (fs.existsSync(canonicalPath)) {
+      localPath = canonicalPath;
+      ctx.db.updateFaceFilePath(face.id, canonicalPath);
+    } else {
+      // 检查是否落入工作区或 profiles 目录
+      const dshHome = ctx.dshHome || process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '', '.dsh');
+      const candidates = [
+        path.resolve(process.cwd(), rawPath),
+        path.join(dshHome, 'profiles', 'desktop', '.dsh', 'napcat', 'faces', `${face.md5}.${face.format}`),
+        path.join(dshHome, 'profiles', 'desktop', rawPath),
+      ];
+      for (const cand of candidates) {
+        if (cand && fs.existsSync(cand)) {
+          try {
+            fs.mkdirSync(canonicalDir, { recursive: true });
+            fs.copyFileSync(cand, canonicalPath);
+            localPath = canonicalPath;
+            ctx.db.updateFaceFilePath(face.id, canonicalPath);
+            break;
+          } catch {}
+        }
+      }
+    }
+  }
+
+  if (!fs.existsSync(localPath)) {
+    return { success: false, error: `表情包本地文件不存在: ${localPath}` };
+  }
+
   const sessionPeer = ctx.peer || '';
   const inGroup =
     (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') ||
     sessionPeer.startsWith('group_') ||
     sessionPeer.startsWith('qq-group-');
 
-  const normalizedPath = face.file_path.replace(/\\/g, '/');
+  const normalizedPath = localPath.replace(/\\/g, '/');
   const fileUri = normalizedPath.startsWith('file:///')
     ? normalizedPath
     : `file:///${normalizedPath.replace(/^\/+/, '')}`;
@@ -953,9 +996,10 @@ export async function collectFace(
     const ext = path.extname(localPath).replace(/^\./, '').toLowerCase() || 'png';
     const size = fileBuf.length;
 
-    const storeDir = context?.faceDir || ctx.faceDir || path.resolve('.dsh/napcat/faces');
+    const rawStoreDir = context?.faceDir || ctx.faceDir || '.dsh/napcat/faces';
+    const storeDir = resolveDshPath(context?.dshHome || ctx.dshHome, rawStoreDir, DEFAULT_FACE_STORE_DIR);
     fs.mkdirSync(storeDir, { recursive: true });
-    const targetFile = path.join(storeDir, `${md5}.${ext}`);
+    const targetFile = path.resolve(storeDir, `${md5}.${ext}`);
 
     if (!fs.existsSync(targetFile)) {
       fs.copyFileSync(localPath, targetFile);
@@ -1064,9 +1108,10 @@ export function registerAgentTools(
     gateway: options.gateway,
     mediaManager: options.mediaManager,
     sender: options.sender,
+    dshHome: options.dshHome,
     waitRegistry: options.waitRegistry,
     inboundMsgIdGetter: options.inboundMsgIdGetter,
-    faceDir: currentCfg.face_store_dir,
+    faceDir: resolveDshPath(options.dshHome, currentCfg.face_store_dir, DEFAULT_FACE_STORE_DIR),
     faceSubType: currentCfg.face_sub_type,
     faceStoreMax: currentCfg.face_store_max,
     faceEvictPolicy: currentCfg.face_evict_policy,
@@ -1520,7 +1565,7 @@ export function registerAgentTools(
               },
             },
             async execute(args, _exec) {
-              const res = await listFaces(args, { db: options.db });
+              const res = await listFaces(args, { db: options.db, dshHome: options.dshHome });
               return toLosslessJson(res) as any;
             },
           })
@@ -1568,6 +1613,8 @@ export function registerAgentTools(
                 sender: options.sender,
                 peer,
                 groupId,
+                dshHome: options.dshHome,
+                faceDir: resolveDshPath(options.dshHome, cfg.face_store_dir, DEFAULT_FACE_STORE_DIR),
                 faceSubType: cfg.face_sub_type,
               });
               return toLosslessJson(res) as any;
@@ -1629,7 +1676,8 @@ export function registerAgentTools(
                 db: options.db,
                 peer,
                 inboundMsgIdGetter: options.inboundMsgIdGetter,
-                faceDir: cfg.face_store_dir,
+                dshHome: options.dshHome,
+                faceDir: resolveDshPath(options.dshHome, cfg.face_store_dir, DEFAULT_FACE_STORE_DIR),
                 faceStoreMax: cfg.face_store_max,
                 faceEvictPolicy: cfg.face_evict_policy,
               });
