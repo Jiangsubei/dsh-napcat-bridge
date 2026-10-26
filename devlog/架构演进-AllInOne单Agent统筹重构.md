@@ -94,7 +94,11 @@
 
 ## 4. 待办执行清单 (Next Steps - TODO P5)
 
-- [ ] 重新接入 `send_qq_message` 工具，验证出站文本发送与回合终结彻底解耦机制
+- [x] 重新接入 `send_qq_message` 工具（显式参数 text, reply_to?, at_user?），彻底解耦出站与回合终结（调用工具不终结 turn）
+- [x] 入站唤醒 Prompt 消息头部显式透传真实 `[消息ID: <id>]`
+- [x] 彻底废除 `assistant/message` 自动直发机制，严格贯彻用户侧绝对静默原则（0兜底、未调用工具不出站）
+- [x] 清洗历史抑制词，替换为自然顺手维护引导（保留严格防流水账限制）
+- [x] 全量回归重构合约测试套件（涵盖 send-message-tool, send-message-quote, aside-suppression, outbound-stream, quote-assembly, turn-anchor-fix, stale-inbound-quote 等，全部通过）
 - [ ] 改造主 Agent 会话执行链路，打通“即时出站回复 -> 顺手在后台维护表情包与记忆 -> 平稳收敛终结”的单 Agent 统一治理链路
 - [ ] 编写单 Agent 顺手完成表情与记忆维护的契约测试
 - [ ] 优雅下线独立的 Background Review 与 Curator 插件，完成技术债清退

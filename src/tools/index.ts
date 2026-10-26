@@ -34,12 +34,15 @@ import type {
   CollectFaceResult,
   ManageFacesParams,
   ManageFacesResult,
+  SendQqMessageParams,
+  SendQqMessageResult,
   BridgePluginConfig,
   MessageRecord,
 } from '../types/index.js';
-export type { ManageFacesParams, ManageFacesResult };
+export type { ManageFacesParams, ManageFacesResult, SendQqMessageParams, SendQqMessageResult };
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
+import { stripMarkdown } from '../outbound/render.js';
 import { manageFaces } from './manage-faces.js';
 export { manageFaces };
 import type { MessageDatabase } from '../storage/database.js';
@@ -1059,6 +1062,116 @@ export function splitMessageText(text: string, maxLength = 1500): string[] {
   return chunks;
 }
 
+/**
+ * 6.9 发送 QQ 消息工具 (send_qq_message)
+ * 向当前 QQ 会话发送文本消息，是系统与用户交流的唯一出站通道。
+ * 支持显式引用消息 (reply_to) 与艾特用户 (at_user)，超长自动分段，透明重试。
+ * 执行成功后绝不调用 concludeTurn()，回合保持开放供后续顺手维护。
+ */
+export async function sendQqMessage(
+  params: SendQqMessageParams,
+  context?: ToolExecutionContext
+): Promise<SendQqMessageResult> {
+  const ctx = { ...globalToolContext, ...context };
+
+  // 1. 参数非空校验（空文本/纯空白/stripMarkdown 后为空）
+  if (!params || typeof params.text !== 'string') {
+    return { success: false, error: '发送内容不能为空。' };
+  }
+  const plainText = stripMarkdown(params.text).trim();
+  if (!plainText) {
+    return { success: false, error: '发送内容不能为空。' };
+  }
+
+  // 2. QQ 聊天会话上下文校验
+  const rawPeer = ctx.peer || '';
+  const peer = normalizePeer(rawPeer);
+  const isGroup = peer.startsWith('group_') || peer.startsWith('qq-group-');
+  const isUser = peer.startsWith('user_') || peer.startsWith('qq-user-');
+
+  if (!isGroup && !isUser) {
+    return { success: false, error: 'send_qq_message 需在 QQ 聊天会话中执行' };
+  }
+
+  if (!ctx.gateway) {
+    return { success: false, error: 'NapCat Gateway 未连接' };
+  }
+
+  // 3. 超长文本自动分段（默认 1500 字符）
+  const chunks = splitMessageText(plainText, 1500);
+  let lastMessageId: number | undefined;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    let payload: string | Array<Record<string, any>> = chunk;
+
+    // 显式引用与艾特（仅首段携带，不重复注入后续分段）
+    if (i === 0) {
+      const segments: Array<Record<string, any>> = [];
+      const replyId =
+        typeof params.reply_to === 'number' && Number.isSafeInteger(params.reply_to) && params.reply_to > 0
+          ? params.reply_to
+          : undefined;
+      const atQQ =
+        isGroup && typeof params.at_user === 'string' && params.at_user.trim().length > 0
+          ? params.at_user.trim()
+          : undefined;
+
+      if (replyId !== undefined) {
+        segments.push({ type: 'reply', data: { id: replyId } });
+      }
+      if (atQQ !== undefined) {
+        segments.push({ type: 'at', data: { qq: atQQ } });
+      }
+
+      if (segments.length > 0) {
+        segments.push({ type: 'text', data: { text: chunk } });
+        payload = segments;
+      }
+    }
+
+    const sendTask = () => ctx.gateway!.sendMsg(peer, payload);
+    let chunkSuccess = false;
+    let lastError = '';
+
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const res = ctx.sender
+          ? await ctx.sender.enqueue(peer, sendTask)
+          : await sendTask();
+
+        if (res && (res.status === 'ok' || res.retcode === 0)) {
+          chunkSuccess = true;
+          if (res.data?.message_id) {
+            lastMessageId = res.data.message_id;
+          }
+          break;
+        } else {
+          lastError = res?.message || res?.wording || '网关返回错误';
+        }
+      } catch (err: any) {
+        lastError = err?.message || String(err);
+      }
+      if (attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    if (!chunkSuccess) {
+      return {
+        success: false,
+        error: `消息分段 ${i + 1}/${chunks.length} 发送失败: ${lastError}`,
+      };
+    }
+  }
+
+  return {
+    success: true,
+    message_id: lastMessageId,
+    sent_preview: plainText.length > 60 ? `${plainText.slice(0, 60)}...` : plainText,
+  };
+}
+
 export interface AgentToolsOptions {
   db: MessageDatabase;
   gateway?: NapCatGatewayServer;
@@ -1506,7 +1619,63 @@ export function registerAgentTools(
       )
     );
 
-    // 9. 表情包能力 (由 face_enabled 总开关前置门控)
+    // 9. send_qq_message
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'send_qq_message',
+          description:
+            '向当前 QQ 会话发送一条文本消息，是系统向用户回复或主动发言的唯一合法出站通道。当需要回复用户、发起发言、同步长任务进展或输出最终结果时调用。如需引用消息，请显式传入其数字 reply_to；如需艾特特定用户，请显式传入 at_user。未调用本工具时系统在用户侧保持绝对静默。发送图片或文件请使用 send_file，发送表情包请使用 send_face。',
+          parameters: {
+            text: {
+              type: 'string',
+              required: true,
+              description: '要发送给用户的纯文本内容。',
+            },
+            reply_to: {
+              type: 'number',
+              description: '需要引用的目标消息数字 ID（来自当前入站消息头部 [消息ID: <id>] 或 read_chat_history）。',
+            },
+            at_user: {
+              type: 'string',
+              description: '需要艾特的目标用户 QQ 号（仅群聊有效）。',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => {
+              const v = value as any;
+              if (v?.success) {
+                return [
+                  {
+                    type: 'text',
+                    text: `消息已发出${v.message_id ? ` (ID: ${v.message_id})` : ''}`,
+                  },
+                ];
+              }
+              return [
+                {
+                  type: 'text',
+                  text: `消息发送失败: ${v?.error}`,
+                },
+              ];
+            },
+          },
+          async execute(args, exec) {
+            const session = (exec.agent as any)?.session;
+            const rawPeer = session?.id || (exec.agent as any)?.sessionId || (exec.agent as any)?.id || '';
+            const peer = normalizePeer(rawPeer);
+            return (await sendQqMessage(args, {
+              gateway: options.gateway,
+              sender: options.sender,
+              peer,
+            })) as any;
+          },
+        })
+      )
+    );
+
+    // 10. 表情包能力 (由 face_enabled 总开关前置门控)
     if (getConfig().face_enabled) {
       // 9.1 list_faces
       unregisters.push(

@@ -154,6 +154,7 @@ export interface OneBotActionResponse<T = any> {
 export type WakeupTriggerType = 'at' | 'mention' | 'quote' | 'poke' | 'proactive';
 
 export interface WakeupPayload {
+  msg_id?: number;
   trigger: WakeupTriggerType | 'direct';
   /** 主动回复触发子类型: random (普通消息概率插话) | idle (潜水超时冒泡) */
   sub_trigger?: 'random' | 'idle';
@@ -321,6 +322,19 @@ export interface SendFileResult {
   success: boolean;
   message_id?: number;
   error?: string;
+}
+
+export interface SendQqMessageParams {
+  text: string;
+  reply_to?: number;
+  at_user?: string;
+}
+
+export interface SendQqMessageResult {
+  success: boolean;
+  message_id?: number;
+  error?: string;
+  sent_preview?: string;
 }
 
 

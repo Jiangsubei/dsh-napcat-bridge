@@ -491,6 +491,7 @@ export class SessionManager {
     let targetRound = 0;
     let targetVersion = 1;
 
+    const isNewCandidate = known.size === 0 || unarchived.length === 0;
     if (known.size === 0) {
       this.clearedVersions.delete(peer);
       targetRound = 0;
@@ -513,7 +514,7 @@ export class SessionManager {
     if (
       this.deletedSessionIds.has(targetSessionId) ||
       this.isSessionArchived(targetSessionId) ||
-      this.isSessionPhysicallyPresent(targetSessionId)
+      (isNewCandidate && this.isSessionPhysicallyPresent(targetSessionId))
     ) {
       let hash = generateSessionHash();
       targetSessionId = buildSessionId(baseId, targetRound, targetVersion, hash);

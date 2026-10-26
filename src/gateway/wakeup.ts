@@ -716,6 +716,12 @@ export async function shouldWakeup(
   }
 
   const { content: rawContent, images, replyId, atQQs } = parseNormalizedContent(msgEvent);
+  const inboundMsgId =
+    typeof msgEvent.message_id === 'number' && Number.isSafeInteger(msgEvent.message_id) && msgEvent.message_id > 0
+      ? msgEvent.message_id
+      : Number(msgEvent.message_id) > 0
+        ? Number(msgEvent.message_id)
+        : undefined;
 
   // 若消息完全无字符（长度为 0）且无图片/引用/at 等有效内容，直接过滤，不唤醒（如文件下载回执/空系统灰条）
   if (rawContent.length === 0 && images.length === 0 && replyId === undefined && atQQs.length === 0) {
@@ -797,6 +803,7 @@ export async function shouldWakeup(
   // 3.1 私聊消息: 默认直接唤醒
   if (!isGroup) {
     const payload: WakeupPayload = {
+      msg_id: inboundMsgId,
       trigger: 'at', // default trigger type for private or handled by agent
       peer,
       from_user: fromUser,
@@ -817,6 +824,7 @@ export async function shouldWakeup(
   // (1) @ 机器人
   if (botQQ && atQQs.includes(botQQ)) {
     const payload: WakeupPayload = {
+      msg_id: inboundMsgId,
       trigger: 'at',
       peer,
       from_user: fromUser,
@@ -836,6 +844,7 @@ export async function shouldWakeup(
   // (2) 引用回复机器人
   if (isQuotingSelf && quoted) {
     const payload: WakeupPayload = {
+      msg_id: inboundMsgId,
       trigger: 'quote',
       peer,
       from_user: fromUser,
@@ -869,6 +878,7 @@ export async function shouldWakeup(
   for (const target of mentionTargets) {
     if (rawOrContent.includes(target)) {
       const payload: WakeupPayload = {
+        msg_id: inboundMsgId,
         trigger: 'mention',
         peer,
         from_user: fromUser,
@@ -917,6 +927,7 @@ export async function shouldWakeup(
     const probability = options.proactive.proactive_random_probability ?? 0.05;
     if (probability > 0 && Math.random() < probability) {
       const payload: WakeupPayload = {
+        msg_id: inboundMsgId,
         trigger: 'proactive',
         sub_trigger: 'random',
         peer,

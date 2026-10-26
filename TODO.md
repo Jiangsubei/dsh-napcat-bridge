@@ -14,7 +14,7 @@
 | **P2** | **JEV 决策模型前置群聊感知与主动唤醒** | `src/gateway/wakeup.ts`<br>`src/gateway/jev.ts` | **方案定稿**<br>(沙盒实测验证通过) | 编写 TDD 契约测试，实现 JEV 客户端与门控装配 |
 | **P3** | **Agent 自修改演进机制**（群专属人设/行为准则自我演进） | `src/gateway/session/`<br>`src/tools/` | **架构调研草案**<br>(待方案细化) | 细化自修改工具协议与权限栅栏设计，编写契约测试 |
 | **P4** | **好友与群管理工具及专用管理 Session** | `src/gateway/`<br>`src/tools/` | **需求收敛**<br>(待实测与实现) | 验证管理 API 可达性，实现管理工具及独立 Session 隔离 |
-| **P5** | **All-in-One 单 Agent 统筹重构**（`send_qq_message` 回归 · 出站与终结解耦 · 淘汰独立后台 Agent） | `src/gateway/`<br>`src/tools/`<br>`src/outbound/` | **架构远景规划**<br>(待排期实施) | 引入 `send_qq_message` 解耦出站与回合，实现发完消息顺手整理表情包与记忆，下线独立后台 Agent |
+| **P5** | **All-in-One 单 Agent 统筹重构**（`send_qq_message` 回归 · 出站与终结解耦 · 淘汰独立后台 Agent） | `src/gateway/`<br>`src/tools/`<br>`src/outbound/` | **核心出站改造已完成**<br>(send_qq_message 回归/静默闭环) | 推进独立后台 Agent (Curator/Review) 淘汰与顺手维护契约集成 |
 
 ---
 
@@ -82,6 +82,10 @@
   - 重新引入 `send_qq_message` 工具，实现出站文本发送与回合终结彻底解耦；
   - 打通“即时出站回复 -> 顺手在后台维护表情包（`collect_face` / `manage_faces`）与记忆（`create_memory` / `edit_memory`） -> 平稳收敛终结”的单 Agent 统一治理链路。
 - **执行清单 (Next Steps)**:
-  - [ ] 重新接入 `send_qq_message`，验证非终结出站机制
-  - [ ] 改造会话执行流，编写单 Agent 顺手完成表情与记忆维护的契约测试
-  - [ ] 下线独立后台 Agent 及配套调度代码，完成技术债清退
+  - [x] 重新接入 `send_qq_message` 工具（显式参数 text, reply_to?, at_user?），彻底解耦出站与回合终结（调用工具不终结 turn）
+  - [x] 入站唤醒 Prompt 消息头部显式透传真实 `[消息ID: <id>]`
+  - [x] 彻底废除 `assistant/message` 自动直发机制，严格贯彻用户侧绝对静默原则（0兜底、未调用工具不出站）
+  - [x] 清洗历史抑制词，替换为自然顺手维护引导（保留严格防流水账限制）
+  - [x] 重构平移历史合约测试（涵盖 ab-test-direct-stream, send-message-tool, send-message-quote, aside-suppression, outbound-stream, quote-assembly, turn-anchor-fix, stale-inbound-quote 等全部套件，全绿）
+  - [ ] 改造单 Agent 顺手维护完整闭环并编写端到端联合用例
+  - [ ] 彻底下线独立后台 Agent（Curator/Review）及配套定时器/调度逻辑，完成技术债清退

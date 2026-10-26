@@ -12,14 +12,14 @@ import { MessageDatabase } from '../../src/storage/database.js';
 /**
  * 契约测试: 主动触发回复引用陈旧消息修复 (Stale Inbound Quote Fix Contract)
  *
- * 核心契约：
- * 1. 戳一戳 (poke) 触发的回复为纯文本，绝不包含 CQ:reply 与 CQ:at；
- * 2. 潜水超时 (idle) 触发的主动冒泡回复为纯文本，绝不包含 CQ:reply 与 CQ:at；
- * 3. 连续多次戳一戳 (poke) 回复均不引用不艾特，彻底修复"永远引用上一条真实消息 A"的缺陷；
- * 4. poke/idle 之后下一条真实入站消息恢复引用原消息与@提问者 (不误伤真实消息)；
- * 5. 真实消息按 quote_original / at_questioner 配置正常生效 (不误伤配置)；
- * 6. buildMessagePayload 兜底加固：跨轮次未绑定上下文时回退为纯文本，绝不复用陈旧 inbound；
- * 7. 真实生产装配闭环：bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用闭环。
+ * 核心契约（对齐 All-in-One 单 Agent 统筹重构与 send_qq_message 显式入参规范）：
+ * 1. 戳一戳 (poke) 触发的唤醒 Prompt 严禁拼接 [消息ID: <id>]，且 assistant/message 坚决保持静默；
+ * 2. 潜水超时 (idle) 触发的主动冒泡唤醒 Prompt 严禁拼接 [消息ID: <id>]，且 assistant/message 坚决保持静默；
+ * 3. 连续多次戳一戳 (poke) 唤醒均不包含消息 ID，assistant/message 保持绝对静默，杜绝引用陈旧消息；
+ * 4. poke/idle 之后下一条真实入站消息精准透传当前真实 [消息ID: <id>]，绝不串扰陈旧 ID；
+ * 5. 真实消息按 quote_original / at_questioner 配置正常生效 (sendSerialized 保底逻辑)；
+ * 6. assistant/message 坚决执行用户侧静默原则，未通过 send_qq_message 发送时绝不下发任何文本；
+ * 7. 真实生产装配闭环：bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用隔离与静默闭环。
  */
 
 describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inbound Quote Fix Contract)', () => {
@@ -71,7 +71,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     return { bridge, sessionManager, sent };
   }
 
-  it('契约 1: 戳一戳 (poke) 触发的回复为纯文本，绝不包含 CQ:reply 与 CQ:at', async () => {
+  it('契约 1: 戳一戳 (poke) 触发的回复为纯文本，且 assistant/message 坚决保持静默', async () => {
     const { bridge, sessionManager, sent } = makeBridgeFixture();
     const peer = 'group_123';
     const session = { id: 'qq-group-123' };
@@ -83,15 +83,28 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       is_group: true,
     });
 
+    let pokeUserMsg: any;
     // 2. 触发戳一戳唤醒 (无 message_id)
-    await sessionManager.dispatchWakeup({
-      trigger: 'poke',
-      peer,
-      from_user: 'user_poker',
-      from_name: 'Poker',
-      content: '[戳一戳]',
-      timestamp: Date.now(),
-    });
+    await sessionManager.dispatchWakeup(
+      {
+        trigger: 'poke',
+        peer,
+        from_user: 'user_poker',
+        from_name: 'Poker',
+        content: '[戳一戳]',
+        timestamp: Date.now(),
+      },
+      {
+        onMessageCreated: (msg) => {
+          pokeUserMsg = msg;
+        },
+      }
+    );
+
+    // 唤醒文本严禁透传虚假消息 ID
+    const pokePrompt = pokeUserMsg?.content?.[0]?.text || '';
+    expect(pokePrompt).not.toContain('[消息ID:');
+    expect(pokePrompt).toContain('戳了戳你');
 
     // 3. 产生回复
     await bridge.handleSessionEvent(session as any, {
@@ -111,12 +124,16 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       data: { turn: 2 },
     } as any);
 
+    // 静默原则：assistant/message 事件绝不自动下发
+    expect(sent).toHaveLength(0);
+
+    // 模型未传 reply_to 时，主动通过出站网关下发为纯文本
+    await bridge.sendSerialized(peer, '戳我干嘛？', { withPrefix: false });
     expect(sent).toHaveLength(1);
-    // 断言：回复必须是纯文本，绝不包含 reply 或 at 段
     expect(sent[0].msg).toBe('戳我干嘛？');
   });
 
-  it('契约 2: 潜水超时 (idle) 触发的主动冒泡回复为纯文本，绝不包含 CQ:reply 与 CQ:at', async () => {
+  it('契约 2: 潜水超时 (idle) 触发的主动冒泡回复为纯文本，且 assistant/message 坚决保持静默', async () => {
     const { bridge, sessionManager, sent } = makeBridgeFixture();
     const peer = 'group_123';
     const session = { id: 'qq-group-123' };
@@ -128,16 +145,28 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       is_group: true,
     });
 
+    let idleUserMsg: any;
     // 2. 触发潜水超时冒泡 (from_user 为空，无 message_id)
-    await sessionManager.dispatchWakeup({
-      trigger: 'proactive',
-      sub_trigger: 'idle',
-      peer,
-      from_user: '',
-      from_name: '',
-      content: '',
-      timestamp: Date.now(),
-    });
+    await sessionManager.dispatchWakeup(
+      {
+        trigger: 'proactive',
+        sub_trigger: 'idle',
+        peer,
+        from_user: '',
+        from_name: '',
+        content: '',
+        timestamp: Date.now(),
+      },
+      {
+        onMessageCreated: (msg) => {
+          idleUserMsg = msg;
+        },
+      }
+    );
+
+    const idlePrompt = idleUserMsg?.content?.[0]?.text || '';
+    expect(idlePrompt).not.toContain('[消息ID:');
+    expect(idlePrompt).toContain('当前群聊已较长时间没有新发言');
 
     // 3. 产生回复
     await bridge.handleSessionEvent(session as any, {
@@ -157,8 +186,10 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       data: { turn: 2 },
     } as any);
 
+    expect(sent).toHaveLength(0);
+
+    await bridge.sendSerialized(peer, '大家怎么都不说话了呀~', { withPrefix: false });
     expect(sent).toHaveLength(1);
-    // 必须为纯文本，不引用 A，不艾特 A
     expect(sent[0].msg).toBe('大家怎么都不说话了呀~');
   });
 
@@ -167,62 +198,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     const peer = 'group_123';
     const session = { id: 'qq-group-123' };
 
-    // 1. 真实消息 A 入站并回复
-    bridge.trackInboundContext(peer, {
-      msg_id: 1001,
-      from_user: 'user_A',
-      is_group: true,
-    });
-    let userMsgA: any;
-    await sessionManager.dispatchWakeup(
-      {
-        trigger: 'at',
-        peer,
-        from_user: 'user_A',
-        from_name: 'Alice',
-        content: '你好',
-        timestamp: Date.now(),
-      },
-      {
-        onMessageCreated: (msg) => {
-          userMsgA = msg;
-          bridge.trackPendingMessage(msg.id, peer, {
-            msg_id: 1001,
-            from_user: 'user_A',
-            is_group: true,
-          });
-        },
-      }
-    );
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/start',
-      data: { turn: 1 },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'user/message',
-      data: { id: userMsgA.id, content: [{ type: 'text', text: '你好' }] },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'assistant/message',
-      data: {
-        turn: 1,
-        step: 1,
-        message: { content: [{ type: 'text', text: '你好呀 Alice' }] },
-      },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/end',
-      data: { turn: 1 },
-    } as any);
-
-    // 消息 A 的回复有引用与 @
-    expect(sent).toHaveLength(1);
-    const replyA = sent[0].msg as Array<Record<string, any>>;
-    expect(Array.isArray(replyA)).toBe(true);
-    expect(replyA[0]).toEqual({ type: 'reply', data: { id: 1001 } });
-    expect(replyA[1]).toEqual({ type: 'at', data: { qq: 'user_A' } });
-
-    // 2. 连续第 1 次 poke
+    // 1. 连续第 1 次 poke
     let pokeMsg1: any;
     await sessionManager.dispatchWakeup(
       {
@@ -241,7 +217,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     );
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/start',
-      data: { turn: 2 },
+      data: { turn: 1 },
     } as any);
     if (pokeMsg1) {
       await bridge.handleSessionEvent(session as any, {
@@ -252,17 +228,17 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
-        turn: 2,
+        turn: 1,
         step: 1,
         message: { content: [{ type: 'text', text: '别戳啦 1' }] },
       },
     } as any);
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/end',
-      data: { turn: 2 },
+      data: { turn: 1 },
     } as any);
 
-    // 3. 连续第 2 次 poke
+    // 2. 连续第 2 次 poke
     let pokeMsg2: any;
     await sessionManager.dispatchWakeup(
       {
@@ -281,7 +257,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     );
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/start',
-      data: { turn: 3 },
+      data: { turn: 2 },
     } as any);
     if (pokeMsg2) {
       await bridge.handleSessionEvent(session as any, {
@@ -292,20 +268,22 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
       data: {
-        turn: 3,
+        turn: 2,
         step: 1,
         message: { content: [{ type: 'text', text: '别戳啦 2' }] },
       },
     } as any);
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/end',
-      data: { turn: 3 },
+      data: { turn: 2 },
     } as any);
 
-    expect(sent).toHaveLength(3);
-    // 连续两次 poke 均是纯文本，绝不引用消息 A (1001) 也不 @ user_A
-    expect(sent[1].msg).toBe('别戳啦 1');
-    expect(sent[2].msg).toBe('别戳啦 2');
+    // 静默原则：两次 poke 的 assistant/message 均保持静默
+    expect(sent).toHaveLength(0);
+
+    // 验证 Prompt 均未透传消息 ID
+    expect(pokeMsg1?.content?.[0]?.text).not.toContain('[消息ID:');
+    expect(pokeMsg2?.content?.[0]?.text).not.toContain('[消息ID:');
   });
 
   it('契约 4: poke/idle 之后下一条真实入站消息恢复引用原消息与@提问者 (不误伤真实消息)', async () => {
@@ -313,35 +291,26 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     const peer = 'group_123';
     const session = { id: 'qq-group-123' };
 
-    // 1. 先触发一次 poke 唤醒
-    await sessionManager.dispatchWakeup({
-      trigger: 'poke',
-      peer,
-      from_user: 'user_poker',
-      from_name: 'Poker',
-      content: '[戳一戳]',
-      timestamp: Date.now(),
-    });
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/start',
-      data: { turn: 1 },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'assistant/message',
-      data: {
-        turn: 1,
-        step: 1,
-        message: { content: [{ type: 'text', text: '戳一戳回复' }] },
+    // 1. 发生一次 poke 唤醒
+    let pokeUserMsg: any;
+    await sessionManager.dispatchWakeup(
+      {
+        trigger: 'poke',
+        peer,
+        from_user: 'user_poker',
+        from_name: 'Poker',
+        content: '[戳一戳]',
+        timestamp: Date.now(),
       },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/end',
-      data: { turn: 1 },
-    } as any);
+      {
+        onMessageCreated: (msg) => {
+          pokeUserMsg = msg;
+        },
+      }
+    );
+    expect(pokeUserMsg?.content?.[0]?.text).not.toContain('[消息ID:');
 
-    expect(sent[0].msg).toBe('戳一戳回复');
-
-    // 2. 下一条真实消息 B 到来
+    // 2. 下一条真实消息 B 到来 (携带 msg_id: 2002)
     const replyContextB = {
       msg_id: 2002,
       from_user: 'user_B',
@@ -352,6 +321,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     let userMsgB: any;
     await sessionManager.dispatchWakeup(
       {
+        msg_id: 2002,
         trigger: 'at',
         peer,
         from_user: 'user_B',
@@ -367,13 +337,15 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       }
     );
 
+    // 核心契约：真实消息 B 的唤醒 Prompt 必须显式携带 [消息ID: 2002]
+    const promptB = userMsgB?.content?.[0]?.text || '';
+    expect(promptB).toContain('[消息ID: 2002]');
+    expect(promptB).toContain('帮我查一下天气');
+
+    // assistant/message 静默
     await bridge.handleSessionEvent(session as any, {
       type: 'turn/start',
       data: { turn: 2 },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'user/message',
-      data: { id: userMsgB.id, content: [{ type: 'text', text: '帮我查一下天气' }] },
     } as any);
     await bridge.handleSessionEvent(session as any, {
       type: 'assistant/message',
@@ -388,13 +360,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       data: { turn: 2 },
     } as any);
 
-    // 真实消息 B 正常恢复引用与 @
-    expect(sent).toHaveLength(2);
-    const replyB = sent[1].msg as Array<Record<string, any>>;
-    expect(Array.isArray(replyB)).toBe(true);
-    expect(replyB[0]).toEqual({ type: 'reply', data: { id: 2002 } });
-    expect(replyB[1]).toEqual({ type: 'at', data: { qq: 'user_B' } });
-    expect(replyB[2]).toEqual({ type: 'text', data: { text: '今天晴天。' } });
+    expect(sent).toHaveLength(0);
   });
 
   it('契约 5: 真实消息按 quote_original / at_questioner 配置正常生效 (不误伤配置)', async () => {
@@ -453,12 +419,16 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       data: { turn: 10 },
     } as any);
 
+    // 静默原则：没有 send_qq_message 时绝不自动下发
+    expect(sent).toHaveLength(0);
+
+    // 当显式调用 sendSerialized 且指定无前缀时，纯文本下发
+    await bridge.sendSerialized(peer, '无绑定轮次的输出', { withPrefix: false });
     expect(sent).toHaveLength(1);
-    // 加固契约：当该 turn 没有绑定 inbound 时，绝不能 fallback 到旧的 9999 / stale_user，必须降级纯文本！
     expect(sent[0].msg).toBe('无绑定轮次的输出');
   });
 
-  it('契约 7: 真实生产装配闭环 - bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用闭环', async () => {
+  it('契约 7: 真实生产装配闭环 - bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用闭环与静默', async () => {
     const WS_PORT = 18366;
     const GROUP_ID = 3000000001;
     const BOT_QQ = '1000000001';
@@ -535,6 +505,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
 
       await new Promise((r) => setTimeout(r, 150));
       expect(capturedUserMsgs).toHaveLength(1);
+      expect(capturedUserMsgs[0].content[0].text).toContain('[消息ID: 10001]');
 
       // 驱动轮次 1 回复消息 A
       (fullBooted.ctx as any).emit('session/event', sessionA, {
@@ -564,11 +535,8 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       });
 
       await new Promise((r) => setTimeout(r, 150));
-      expect(sentActionFrames.length).toBeGreaterThanOrEqual(1);
-      const frameA = sentActionFrames[0].params.message;
-      expect(Array.isArray(frameA)).toBe(true);
-      expect(frameA[0]).toEqual({ type: 'reply', data: { id: 10001 } });
-      expect(frameA[1]).toEqual({ type: 'at', data: { qq: '2000000001' } });
+      // 贯彻静默原则：assistant/message 不直发出站
+      expect(sentActionFrames).toHaveLength(0);
 
       // 2. 发送戳一戳 Notice 事件 (无 message_id)
       client.send(
@@ -586,6 +554,9 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
 
       await new Promise((r) => setTimeout(r, 150));
       expect(capturedUserMsgs).toHaveLength(2);
+      // 戳一戳绝不附带消息 ID
+      expect(capturedUserMsgs[1].content[0].text).not.toContain('[消息ID:');
+      expect(capturedUserMsgs[1].content[0].text).toContain('戳了戳你');
 
       // 驱动轮次 2 回复戳一戳
       (fullBooted.ctx as any).emit('session/event', sessionA, {
@@ -615,10 +586,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       });
 
       await new Promise((r) => setTimeout(r, 150));
-      expect(sentActionFrames.length).toBeGreaterThanOrEqual(2);
-      const framePoke = sentActionFrames[1].params.message;
-      // 戳一戳回复必须是纯文本，绝不包含 reply 10001，也不包含 at
-      expect(framePoke).toBe('戳一戳纯文本回复');
+      expect(sentActionFrames).toHaveLength(0);
 
       // 3. 发送下一条真实消息 B (message_id: 10002)
       client.send(
@@ -642,6 +610,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
 
       await new Promise((r) => setTimeout(r, 150));
       expect(capturedUserMsgs).toHaveLength(3);
+      expect(capturedUserMsgs[2].content[0].text).toContain('[消息ID: 10002]');
 
       // 驱动轮次 3 回复消息 B
       (fullBooted.ctx as any).emit('session/event', sessionA, {
@@ -671,12 +640,8 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       });
 
       await new Promise((r) => setTimeout(r, 150));
-      expect(sentActionFrames.length).toBeGreaterThanOrEqual(3);
-      const frameB = sentActionFrames[2].params.message;
-      // 消息 B 正确引用 10002 与 @ 2000000003
-      expect(Array.isArray(frameB)).toBe(true);
-      expect(frameB[0]).toEqual({ type: 'reply', data: { id: 10002 } });
-      expect(frameB[1]).toEqual({ type: 'at', data: { qq: '2000000003' } });
+      // 静默原则：整个过程未调用 send_qq_message，出站始终为 0
+      expect(sentActionFrames).toHaveLength(0);
     } finally {
       client.terminate();
       await fullBooted.dispose().catch(() => {});
