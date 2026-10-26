@@ -27,7 +27,6 @@ import { SessionManager } from '../../src/gateway/session.js';
 import { bootDshNapcatBridge, resolveDshHome, type BootedDsh } from '../../src/boot.js';
 import { MessageDatabase } from '../../src/storage/database.js';
 import { MediaStorageManager } from '../../src/storage/media.js';
-import { BackgroundReviewManager } from '../../src/memory/review.js';
 
 describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring Contract)', () => {
   let originalCwd: string;
@@ -273,46 +272,17 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
     });
   });
 
-  describe('契约 5: BackgroundReviewManager 物理会话清理与 dshHome 绝对锚定', () => {
-    it('BackgroundReviewManager 构造函数规范化 dshHome 为绝对路径', () => {
-      const mockCtx: any = { logger: () => ({ warn: () => {} }) };
-      const memStorage = new MemoryStorage(undefined, customDshHome);
-      const reviewMgr = new BackgroundReviewManager(mockCtx, { dshHome: customDshHome }, memStorage);
-
-      expect((reviewMgr as any).dshHome).toBe(path.resolve(customDshHome));
-      expect(path.isAbsolute((reviewMgr as any).dshHome)).toBe(true);
-    });
-
-    it('setupMemoryService 初始化时 BackgroundReviewManager 自动继承规范化的 effectiveDshHome', () => {
+  describe('契约 5: setupMemoryService 物理存储与 dshHome 绝对锚定', () => {
+    it('setupMemoryService 初始化时 MemoryStorage 自动继承规范化的 effectiveDshHome', () => {
       const mockCtx: any = {
         get: () => undefined,
         logger: () => ({ warn: () => {} }),
       };
       const svc = setupMemoryService(mockCtx, { dshHome: customDshHome });
 
-      expect((svc.reviewManager as any).dshHome).toBe(path.resolve(customDshHome));
-      expect(path.isAbsolute((svc.reviewManager as any).dshHome)).toBe(true);
+      expect((svc.storage as any).dshHome).toBe(path.resolve(customDshHome));
+      expect(path.isAbsolute((svc.storage as any).dshHome)).toBe(true);
       svc.dispose();
-    });
-
-    it('物理会话清理时在 dshHome/sessions 下查找并递归删除，绝不回退到 ~/.dsh/sessions', async () => {
-      const mockCtx: any = {
-        get: () => undefined,
-        logger: () => ({ warn: () => {}, info: () => {}, debug: () => {} }),
-      };
-      const memStorage = new MemoryStorage(undefined, customDshHome);
-      const reviewMgr = new BackgroundReviewManager(mockCtx, { dshHome: customDshHome }, memStorage);
-
-      const targetSessionId = 'review-test-cleanup-sid';
-      const sessionDir = path.resolve(customDshHome, 'sessions', 'subagent-group', targetSessionId);
-      await fsp.mkdir(sessionDir, { recursive: true });
-      await fsp.writeFile(path.join(sessionDir, 'test.log'), 'dummy data', 'utf-8');
-      expect(fs.existsSync(sessionDir)).toBe(true);
-
-      await (reviewMgr as any).cleanupReviewSession(targetSessionId);
-
-      expect(fs.existsSync(sessionDir)).toBe(false);
-      expect(fs.existsSync(path.resolve(arbitraryCwd, '.dsh'))).toBe(false);
     });
   });
 

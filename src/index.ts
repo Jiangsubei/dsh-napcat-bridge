@@ -12,9 +12,6 @@ import {
   DEFAULT_MEMORY_DIR,
   DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
   DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
-  DEFAULT_REVIEW_ENABLED,
-  DEFAULT_REVIEW_TURNS_INTERVAL,
-  DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
   DEFAULT_DATABASE_PATH,
   DEFAULT_FACE_STORE_DIR,
 } from './constants/index.js';
@@ -31,7 +28,6 @@ import { ProactiveManager } from './gateway/proactive.js';
 import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
 import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
 import { createMemoryToolDefinitions } from './memory/tools.js';
-import { FaceCurator, startCuratorTask } from './gateway/curator.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
@@ -327,16 +323,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     getPrivateBudgetChars: () =>
       currentConfig().private_memory_budget_chars ??
       DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
-    reviewEnabled: currentConfig().review_enabled,
-    reviewTurnsInterval: currentConfig().review_turns_interval,
-    reviewToolCallsInterval: currentConfig().review_tool_calls_interval,
-    reviewModel: currentConfig().review_model,
-    getReviewEnabled: () => currentConfig().review_enabled ?? DEFAULT_REVIEW_ENABLED,
-    getReviewTurnsInterval: () =>
-      currentConfig().review_turns_interval ?? DEFAULT_REVIEW_TURNS_INTERVAL,
-    getReviewToolCallsInterval: () =>
-      currentConfig().review_tool_calls_interval ?? DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
-    getReviewModel: () => currentConfig().review_model,
     getCurrentSpeaker: (peer: string) => currentSpeakers.get(peer),
     db,
     sessionManager,
@@ -448,19 +434,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
   // 4.1 初始化后台媒体清理任务
   const stopCleanupTask = startMediaCleanupTask(ctx, mediaManager);
-
-  // 4.1 初始化后台表情包整理 Agent (Face Curator)
-  const faceStoreDir = resolveDshPath(dshHome, currentConfig().face_store_dir, DEFAULT_FACE_STORE_DIR);
-  const faceCurator = new FaceCurator({
-    ctx,
-    db,
-    dshHome,
-    faceStoreDir,
-    imageScanDirs: [path.join(mediaManager.downloadRoot, 'image')],
-    sessionManager,
-    config: currentConfig,
-  });
-  const stopCuratorTask = startCuratorTask(ctx, faceCurator, currentConfig);
 
   // 5. 挂载出方向事件流桥接器 (过滤 reasoning/tool-call，Markdown Strip 后分段下发)
   outboundBridge = new OutboundStreamBridge(ctx, {
@@ -1241,9 +1214,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     process.removeListener('SIGTERM', onProcessExit);
     process.removeListener('beforeExit', onProcessExit);
     stopCleanupTask();
-    if (typeof stopCuratorTask === 'function') {
-      stopCuratorTask();
-    }
     unregisterTools();
     waitRegistry.clear();
     memoryService.dispose();
