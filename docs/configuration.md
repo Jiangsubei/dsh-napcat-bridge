@@ -61,7 +61,13 @@
 | `memory_storage_dir` | `string` | `".dsh/napcat/napcat_memory"` | 记忆 Markdown 文件的根存储目录。 |
 | `group_memory_budget_chars` | `number` | `2200` | 群聊场景下注入 System Prompt 的群规与群友画像字符总上限。 |
 | `private_memory_budget_chars` | `number` | `1500` | 私聊场景下单用户画像注入与单次写入的字符上限。 |
-| `review_enabled` | `boolean` | `true` | 是否启用后台自动回顾。 |
-| `review_turns_interval` | `number` | `10` | 触发后台回顾的对话轮次步长。每累计满指定轮次触发一次。 |
-| `review_tool_calls_interval` | `number` | `10` | 触发后台回顾的工具调用步长。每累计满指定调用次数触发一次。 |
-| `review_model` | `string` | `""` | 后台回顾使用的独立模型名称。留空时使用主模型。 |
+
+### 2.6 表情包系统
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `face_enabled` | `boolean` | `false` | 控制新建会话是否在预设中装载表情包工具集，保存后对后续新会话生效。 |
+| `face_store_max` | `number` | `100` | 本地表情库可用表情容量上限。 |
+| `face_store_dir` | `string` | `".dsh/napcat/faces"` | 本地表情图片文件存储目录。 |
+| `face_sub_type` | `number` | `1` | OneBot 11 发送表情图片消息段使用的 sub_type 值。 |
+| `face_evict_policy` | `string` | `"evict_lru"` | 容量满额时的淘汰策略（`"reject"` 拒绝新增 / `"evict_lru"` 淘汰最久未用）。 |

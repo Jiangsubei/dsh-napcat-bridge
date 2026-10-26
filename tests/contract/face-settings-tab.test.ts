@@ -49,8 +49,8 @@ describe('契约测试: Web UI 设置卡「表情包」Tab (Face Settings Tab Co
     const { html } = renderCard({ initialTab: 'face' });
 
     expect(html).toContain('napcat-tabpanel-face');
-    // 渲染总开关
-    expect(html).toContain('启用表情包系统');
+    // 渲染装载工具集开关
+    expect(html).toContain('装载表情包工具集');
     expect(html).toContain('id="napcat-face-enabled"');
 
     // 总开关关闭时，不展示内部配额与画廊

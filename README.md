@@ -81,10 +81,10 @@ dsh --profile web
 | `memory_storage_dir` | 记忆文件存储目录 | `.dsh/napcat/napcat_memory` |
 | `group_memory_budget_chars` | 群聊用户画像注入总字符预算上限 | `2200` |
 | `private_memory_budget_chars` | 私聊用户画像注入总字符预算上限 | `1500` |
-| `review_enabled` | 启用后台自动回顾 | `true` |
-| `review_turns_interval` | 回顾触发轮次间隔 | `10` |
-| `review_tool_calls_interval` | 回顾触发工具调用间隔 | `10` |
-| `review_model` | 后台回顾专用子模型（留空跟随主模型） | `''` |
+| `face_enabled` | 控制新建会话是否装载表情包工具集 | `false` |
+| `face_store_max` | 本地表情库存储容量上限 | `100` |
+| `face_store_dir` | 本地表情库文件存储目录 | `.dsh/napcat/faces` |
+| `face_evict_policy` | 库容满额淘汰策略 (`reject` / `evict_lru`) | `evict_lru` |
 
 ## 🛠️ 开发
 

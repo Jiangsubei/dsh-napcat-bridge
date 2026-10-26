@@ -26,9 +26,11 @@ import {
   DEFAULT_MEMORY_DIR,
   DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
   DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
-  DEFAULT_REVIEW_ENABLED,
-  DEFAULT_REVIEW_TURNS_INTERVAL,
-  DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
+  DEFAULT_FACE_ENABLED,
+  DEFAULT_FACE_STORE_MAX,
+  DEFAULT_FACE_STORE_DIR,
+  DEFAULT_FACE_SUB_TYPE,
+  DEFAULT_FACE_EVICT_POLICY,
   SETTINGS_NAMESPACE,
 } from '../constants/index.js';
 
@@ -56,10 +58,11 @@ export const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   memory_storage_dir: DEFAULT_MEMORY_DIR,
   group_memory_budget_chars: DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
   private_memory_budget_chars: DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
-  review_enabled: DEFAULT_REVIEW_ENABLED,
-  review_turns_interval: DEFAULT_REVIEW_TURNS_INTERVAL,
-  review_tool_calls_interval: DEFAULT_REVIEW_TOOL_CALLS_INTERVAL,
-  review_model: '',
+  face_enabled: DEFAULT_FACE_ENABLED,
+  face_store_max: DEFAULT_FACE_STORE_MAX,
+  face_store_dir: DEFAULT_FACE_STORE_DIR,
+  face_sub_type: DEFAULT_FACE_SUB_TYPE,
+  face_evict_policy: DEFAULT_FACE_EVICT_POLICY,
 };
 
 export function sendJson(res: ServerResponse, status: number, data: unknown): void {
