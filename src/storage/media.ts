@@ -113,6 +113,9 @@ export class MediaStorageManager {
     if (options.fileId && this.db) {
       const record = this.db.getByFileId(options.fileId);
       if (record?.local_path && fs.existsSync(record.local_path)) {
+        // 活跃引用刷新 mtime 续期 TTL
+        const now = new Date();
+        await fsp.utimes(record.local_path, now, now).catch(() => {});
         return {
           localPath: record.local_path,
           fingerprint: record.fingerprint || '',
@@ -147,6 +150,9 @@ export class MediaStorageManager {
             this.db.updateLocalPathByFileId(options.fileId, validPath, fingerprint);
           } catch {}
         }
+        // 活跃引用刷新 mtime 续期 TTL
+        const now = new Date();
+        await fsp.utimes(validPath, now, now).catch(() => {});
         return {
           localPath: validPath,
           fingerprint,
@@ -327,20 +333,46 @@ export async function cleanExpiredMedia(
 
 /**
  * 启动媒体 TTL 清理定时任务
+ * @param ctx 上下文对象
+ * @param manager 媒体存储管理器
+ * @param intervalMs 周期性清理间隔，默认 24 小时 (24 * 60 * 60 * 1000)
+ * @param initialDelayMs 启动后初次执行延迟（毫秒），默认 5000ms（5 秒后自动执行首轮清理，清理离线停机期间积累的超期文件）
  */
 export function startMediaCleanupTask(
   ctx: Context | any,
   manager: MediaStorageManager,
-  intervalMs = 24 * 60 * 60 * 1000
+  intervalMs = 24 * 60 * 60 * 1000,
+  initialDelayMs = 5000
 ): () => void {
-  const timer = setInterval(() => {
+  let timer: NodeJS.Timeout | null = null;
+  let initialTimer: NodeJS.Timeout | null = null;
+
+  const runCleanup = () => {
     manager.cleanExpired().catch((err) => {
-      ctx.logger?.error?.('[MediaCleanup] 定时清理任务执行异常:', err);
+      ctx?.logger?.error?.('[MediaCleanup] 定时清理任务执行异常:', err);
     });
-  }, intervalMs);
+  };
+
+  // 1. 启动初期延迟执行首轮清理（避开插件启动瞬间的 I/O 竞争，清理停机期间过期的旧文件）
+  if (initialDelayMs >= 0) {
+    initialTimer = setTimeout(() => {
+      initialTimer = null;
+      runCleanup();
+    }, initialDelayMs);
+  }
+
+  // 2. 周期定时清理
+  timer = setInterval(runCleanup, intervalMs);
 
   const stop = () => {
-    clearInterval(timer);
+    if (initialTimer) {
+      clearTimeout(initialTimer);
+      initialTimer = null;
+    }
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
   };
 
   if (typeof ctx?.on === 'function') {
