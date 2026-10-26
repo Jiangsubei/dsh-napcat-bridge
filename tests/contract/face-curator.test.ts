@@ -264,7 +264,7 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
       ctx: { agents: mockAgentsService } as any,
       db,
       faceStoreDir,
-      config: () => ({ face_enabled: true, face_auto_curate: true }),
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 0 }),
     });
 
     // 绑定活跃会话，但仅有纯文本消息
@@ -308,7 +308,7 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
       db,
       faceStoreDir,
       sessionManager: mockSessionManager,
-      config: () => ({ face_enabled: true, face_auto_curate: true }),
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 0 }),
     });
 
     // 会话 A: 已归档
@@ -364,7 +364,7 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
       ctx: { agents: mockAgentsService } as any,
       db,
       faceStoreDir,
-      config: () => ({ face_enabled: true, face_auto_curate: true }),
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 0 }),
     });
 
     db.saveSessionState({
@@ -440,7 +440,7 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
       ctx: { agents: mockAgentsService } as any,
       db,
       faceStoreDir,
-      config: () => ({ face_enabled: true, face_auto_curate: true }),
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 0 }),
     });
 
     db.saveSessionState({
@@ -464,5 +464,154 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
     const results = await curator.runAllActivePeers();
     expect(results.length).toBe(1);
     expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('契约 11: 会话独立计时与打标完成重置：未满周期跳过，满周期触发，打标完成后重置该 peer 专属倒计时', async () => {
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: { followup: vi.fn(), whenIdle: vi.fn().mockResolvedValue(undefined) },
+    };
+    const mockAgentsService = {
+      create: vi.fn().mockResolvedValue(mockAgentHandle),
+    };
+
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 60 }),
+    });
+
+    db.saveSessionState({
+      peer: 'group_interval_peer',
+      current_session_id: 'qq-group-interval_peer',
+    });
+    db.saveMessage({
+      msg_id: 100,
+      peer: 'group_interval_peer',
+      user_id: '1001',
+      sender_name: 'Tester',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      self: 0,
+      raw: {},
+    });
+
+    // 1. 刚启动，距 startTime 仅 0ms，未满 60 分钟 -> 跳过
+    let results = await curator.runAllActivePeers();
+    expect(results.length).toBe(0);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+
+    // 2. 模拟 61 分钟已过 (修改该 peer 上次完成时间)
+    curator.setLastCuratedAt('group_interval_peer', Date.now() - 61 * 60 * 1000);
+    results = await curator.runAllActivePeers();
+    expect(results.length).toBe(1);
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+
+    // 3. 验证打标完成后，该 peer 的 lastCuratedAt 已被刷新至最新完成时间
+    const updatedLastAt = curator.getLastCuratedAt('group_interval_peer');
+    expect(Date.now() - updatedLastAt).toBeLessThan(2000);
+
+    // 4. 再次巡检，因为刚重置倒计时（0 分钟 < 60 分钟），再次跳过
+    mockAgentsService.create.mockClear();
+    results = await curator.runAllActivePeers();
+    expect(results.length).toBe(0);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+  });
+
+  it('契约 12: 用户新图判定 (self = 0)：机器人自身发送的图片消息 (self = 1) 绝不算作用户新图，不会误触发后台巡检', async () => {
+    const mockAgentsService = {
+      create: vi.fn(),
+    };
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 0 }),
+    });
+
+    db.saveSessionState({
+      peer: 'group_bot_only',
+      current_session_id: 'qq-group-bot_only',
+    });
+
+    // 只有机器人自己发出的图片 (self = 1)
+    db.saveMessage({
+      msg_id: 200,
+      peer: 'group_bot_only',
+      user_id: '888888',
+      sender_name: 'BotSelf',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      self: 1,
+      raw: {},
+    });
+
+    const results = await curator.runAllActivePeers();
+    // 机器人自己的图片不触发后台巡检
+    expect(results).toEqual([]);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+  });
+
+  it('契约 13: 多会话天然错峰：Peer A 与 Peer B 在不同时间点完成打标，各自的下次触发时间自然错开', async () => {
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: { followup: vi.fn(), whenIdle: vi.fn().mockResolvedValue(undefined) },
+    };
+    const mockAgentsService = {
+      create: vi.fn().mockResolvedValue(mockAgentHandle),
+    };
+
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true, face_curate_interval_mins: 60 }),
+    });
+
+    // 会话 A 和 会话 B
+    db.saveSessionState({ peer: 'group_A', current_session_id: 'qq-group-A' });
+    db.saveSessionState({ peer: 'group_B', current_session_id: 'qq-group-B' });
+
+    db.saveMessage({
+      msg_id: 301,
+      peer: 'group_A',
+      user_id: '1001',
+      sender_name: 'UserA',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      self: 0,
+      raw: {},
+    });
+    db.saveMessage({
+      msg_id: 302,
+      peer: 'group_B',
+      user_id: '1002',
+      sender_name: 'UserB',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      self: 0,
+      raw: {},
+    });
+
+    // 设定 会话 A 已经过了 70 分钟，而 会话 B 只过了 20 分钟
+    curator.setLastCuratedAt('group_A', Date.now() - 70 * 60 * 1000);
+    curator.setLastCuratedAt('group_B', Date.now() - 20 * 60 * 1000);
+
+    const results = await curator.runAllActivePeers();
+
+    // 只有到期的 会话 A 触发巡检，会话 B 错峰等待
+    expect(results.length).toBe(1);
+    expect(results[0].peer).toBe('group_A');
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+
+    // 会话 A 触发后被重置为当前时间
+    expect(Date.now() - curator.getLastCuratedAt('group_A')).toBeLessThan(2000);
+    // 会话 B 的计时保持原来的 20 分钟不变
+    expect(Date.now() - curator.getLastCuratedAt('group_B')).toBeGreaterThan(15 * 60 * 1000);
   });
 });
