@@ -493,6 +493,40 @@ export class MessageDatabase {
     }));
   }
 
+  /**
+   * 检查指定 peer 在特定 msg_id 之后是否有新到达的图片/贴图消息
+   */
+  hasNewImageMessages(peer: string, sinceMsgId: number = 0): { hasNew: boolean; latestMsgId: number } {
+    const db = this.ensureDb();
+    const row = db.prepare(`
+      SELECT COUNT(*) as cnt, COALESCE(MAX(msg_id), ?) as max_id
+      FROM messages
+      WHERE peer = ? AND msg_id > ? AND (
+        type IN ('image', 'sticker') OR
+        content LIKE '%[图片]%' OR
+        content LIKE '%[动画表情]%' OR
+        content LIKE '%CQ:image%' OR
+        (raw LIKE '%"type":"image"%' OR raw LIKE '%CQ:image%')
+      )
+    `).get(sinceMsgId, peer, sinceMsgId) as any;
+
+    const count = Number(row?.cnt ?? 0);
+    const latestMsgId = Number(row?.max_id ?? sinceMsgId);
+    return {
+      hasNew: count > 0,
+      latestMsgId,
+    };
+  }
+
+  /**
+   * 获取指定 peer 的最大 msg_id (用于初始化最后巡检位置)
+   */
+  getLatestMsgId(peer: string): number {
+    const db = this.ensureDb();
+    const row = db.prepare(`SELECT MAX(msg_id) as max_id FROM messages WHERE peer = ?`).get(peer) as any;
+    return Number(row?.max_id ?? 0);
+  }
+
   markRecalled(msgId: number): void {
     const db = this.ensureDb();
     db.prepare(`UPDATE messages SET recalled = 1, content = '〔已撤回〕' WHERE msg_id = ?`).run(msgId);

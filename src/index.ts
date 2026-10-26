@@ -426,6 +426,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     db,
     faceStoreDir,
     imageScanDirs: [path.join(mediaManager.downloadRoot, 'image')],
+    sessionManager,
     config: currentConfig,
   });
   const stopCuratorTask = startCuratorTask(ctx, faceCurator, currentConfig);

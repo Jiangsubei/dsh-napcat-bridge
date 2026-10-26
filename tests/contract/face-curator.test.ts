@@ -255,4 +255,214 @@ describe('契约测试: 后台表情包整理 Agent (Face Curator Contract)', ()
     expect(mockAgentHandle.dispose).toHaveBeenCalled();
     expect(mockSessions.deleteSession).toHaveBeenCalled();
   });
+
+  it('契约 7: runAllActivePeers 三条件门控：若该会话无新图片消息且表情库无未打标表情，彻底静默，绝不拉起 Agent (0 Token 浪费)', async () => {
+    const mockAgentsService = {
+      create: vi.fn(),
+    };
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true }),
+    });
+
+    // 绑定活跃会话，但仅有纯文本消息
+    db.saveSessionState({
+      peer: 'group_text_only',
+      current_session_id: 'qq-group-text_only',
+    });
+    db.saveMessage({
+      msg_id: 1,
+      peer: 'group_text_only',
+      user_id: '1001',
+      sender_name: 'Alice',
+      time: Date.now(),
+      type: 'text',
+      content: '纯文字消息，没有表情包',
+      raw: {},
+    });
+
+    const results = await curator.runAllActivePeers();
+
+    // 彻底静默：跳过执行，0 结果，绝不创建 Agent
+    expect(results).toEqual([]);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+  });
+
+  it('契约 8: runAllActivePeers 三条件门控：仅对当前绑定的活跃会话触发，已归档会话被过滤', async () => {
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: { followup: vi.fn(), whenIdle: vi.fn().mockResolvedValue(undefined) },
+    };
+    const mockAgentsService = {
+      create: vi.fn().mockResolvedValue(mockAgentHandle),
+    };
+    const mockSessionManager = {
+      isQQSession: vi.fn().mockReturnValue(true),
+      isSessionArchived: vi.fn().mockImplementation((sid: string) => sid.includes('archived')),
+    };
+
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      sessionManager: mockSessionManager,
+      config: () => ({ face_enabled: true, face_auto_curate: true }),
+    });
+
+    // 会话 A: 已归档
+    db.saveSessionState({
+      peer: 'group_archived',
+      current_session_id: 'qq-group-archived',
+    });
+    db.saveMessage({
+      msg_id: 10,
+      peer: 'group_archived',
+      user_id: '1001',
+      sender_name: 'Bob',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      raw: {},
+    });
+
+    // 会话 B: 活跃会话
+    db.saveSessionState({
+      peer: 'group_active',
+      current_session_id: 'qq-group-active',
+    });
+    db.saveMessage({
+      msg_id: 20,
+      peer: 'group_active',
+      user_id: '1002',
+      sender_name: 'Charlie',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      raw: {},
+    });
+
+    const results = await curator.runAllActivePeers();
+
+    // 仅活跃会话触发
+    expect(results.length).toBe(1);
+    expect(results[0].peer).toBe('group_active');
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('契约 9: runAllActivePeers 三条件门控：新入站图片消息到达时触发并推进游标，无新消息时下次巡检静默', async () => {
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: { followup: vi.fn(), whenIdle: vi.fn().mockResolvedValue(undefined) },
+    };
+    const mockAgentsService = {
+      create: vi.fn().mockResolvedValue(mockAgentHandle),
+    };
+
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true }),
+    });
+
+    db.saveSessionState({
+      peer: 'group_cursor_test',
+      current_session_id: 'qq-group-cursor_test',
+    });
+
+    // 轮次 1: 仅文本，不触发
+    db.saveMessage({
+      msg_id: 1,
+      peer: 'group_cursor_test',
+      user_id: '1001',
+      sender_name: 'David',
+      time: Date.now(),
+      type: 'text',
+      content: 'hello',
+      raw: {},
+    });
+    let results = await curator.runAllActivePeers();
+    expect(results.length).toBe(0);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+
+    // 轮次 2: 收到新图片消息，触发巡检
+    db.saveMessage({
+      msg_id: 5,
+      peer: 'group_cursor_test',
+      user_id: '1001',
+      sender_name: 'David',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      raw: {},
+    });
+    results = await curator.runAllActivePeers();
+    expect(results.length).toBe(1);
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+    // 游标已推进到 5
+    expect(curator.getLastCuratedMsgId('group_cursor_test')).toBeGreaterThanOrEqual(5);
+
+    // 轮次 3: 定时到达但没有新消息，静默跳过 (0 Token 消耗)
+    mockAgentsService.create.mockClear();
+    results = await curator.runAllActivePeers();
+    expect(results.length).toBe(0);
+    expect(mockAgentsService.create).not.toHaveBeenCalled();
+
+    // 轮次 4: 再次收到新图片消息，再次触发
+    db.saveMessage({
+      msg_id: 12,
+      peer: 'group_cursor_test',
+      user_id: '1002',
+      sender_name: 'Eve',
+      time: Date.now(),
+      type: 'image',
+      content: '[图片]',
+      raw: {},
+    });
+    results = await curator.runAllActivePeers();
+    expect(results.length).toBe(1);
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+    expect(curator.getLastCuratedMsgId('group_cursor_test')).toBeGreaterThanOrEqual(12);
+  });
+
+  it('契约 10: 本地表情库有未打标表情时，即使无新图片消息也会触发补标巡检', async () => {
+    const mockAgentHandle = {
+      dispose: vi.fn().mockResolvedValue(undefined),
+      agent: { followup: vi.fn(), whenIdle: vi.fn().mockResolvedValue(undefined) },
+    };
+    const mockAgentsService = {
+      create: vi.fn().mockResolvedValue(mockAgentHandle),
+    };
+
+    const curator = new FaceCurator({
+      ctx: { agents: mockAgentsService } as any,
+      db,
+      faceStoreDir,
+      config: () => ({ face_enabled: true, face_auto_curate: true }),
+    });
+
+    db.saveSessionState({
+      peer: 'group_untagged_test',
+      current_session_id: 'qq-group-untagged_test',
+    });
+
+    // 插入未打标表情
+    db.insertFace({
+      id: 'face_untagged_1',
+      file_path: '/path/to/face1.png',
+      md5: 'md5_untagged_1',
+      source: 'user',
+      tags: [],
+      mood: '',
+      size: 100,
+      format: 'png',
+      enabled: true,
+    });
+
+    const results = await curator.runAllActivePeers();
+    expect(results.length).toBe(1);
+    expect(mockAgentsService.create).toHaveBeenCalledTimes(1);
+  });
 });
