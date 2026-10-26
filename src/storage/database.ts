@@ -494,14 +494,14 @@ export class MessageDatabase {
   }
 
   /**
-   * 检查指定 peer 在特定 msg_id 之后是否有新到达的图片/贴图消息
+   * 检查指定 peer 在特定 msg_id 之后是否有新到达的用户图片/贴图消息 (严格限制 self = 0)
    */
   hasNewImageMessages(peer: string, sinceMsgId: number = 0): { hasNew: boolean; latestMsgId: number } {
     const db = this.ensureDb();
     const row = db.prepare(`
       SELECT COUNT(*) as cnt, COALESCE(MAX(msg_id), ?) as max_id
       FROM messages
-      WHERE peer = ? AND msg_id > ? AND (
+      WHERE peer = ? AND self = 0 AND msg_id > ? AND (
         type IN ('image', 'sticker') OR
         content LIKE '%[图片]%' OR
         content LIKE '%[动画表情]%' OR

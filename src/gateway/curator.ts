@@ -50,6 +50,7 @@ export interface FaceCuratorOptions {
   memoryStorage?: any;
   sessionManager?: any;
   config?: () => BridgePluginConfig;
+  initialCuratedAt?: number;
 }
 
 export interface CurateReport {
@@ -69,10 +70,29 @@ export interface CurateRunResult {
 export class FaceCurator {
   private isRunning = false;
   private readonly ctx?: Context;
+  private startTime: number;
+  private lastCuratedAt = new Map<string, number>();
   private lastCuratedMsgId = new Map<string, number>();
 
   constructor(private readonly options: FaceCuratorOptions) {
     this.ctx = options.ctx;
+    this.startTime = options.initialCuratedAt ?? Date.now();
+  }
+
+  getStartTime(): number {
+    return this.startTime;
+  }
+
+  setStartTime(timestamp: number): void {
+    this.startTime = timestamp;
+  }
+
+  getLastCuratedAt(peer: string): number {
+    return this.lastCuratedAt.get(peer) ?? this.startTime;
+  }
+
+  setLastCuratedAt(peer: string, timestamp: number): void {
+    this.lastCuratedAt.set(peer, timestamp);
   }
 
   getLastCuratedMsgId(peer: string): number {
@@ -361,16 +381,20 @@ export class FaceCurator {
 
   /**
    * 巡检所有活跃会话（基于 SQLite 存储的会话状态表），对每个会话执行 Fork 审视
-   * 三条件门控：
-   * 1. 定时到期（由外部定时器触发调用）；
-   * 2. 新图与补标门控：自上次巡检后有新入站图片消息，或表情库中有未打标表情需补标；若无新图且无未打标表情，彻底静默，0 Token 损耗；
-   * 3. 活跃会话校验：仅限当前 peer 绑定的最新活跃会话，排除已归档、已物理删除或非 QQ 会话。
+   * 门控标准：
+   * 1. 活跃会话校验（硬标准）：仅限当前 peer 绑定的最新活跃会话，排除已归档、已物理删除或非 QQ 会话；
+   * 2. 会话独立计时（触发条件 1）：每个 peer 独立计时（默认 60 分钟），任务完成后重置，实现天然错峰；
+   * 3. 用户新图与补标门控（触发条件 2）：自上次巡检后有用户发送的新图 (self=0)，或表情库有未打标表情需补标；若无新图且无未打标表情，彻底静默，0 Token 损耗。
    */
   async runAllActivePeers(): Promise<CurateRunResult[]> {
     const cfg = this.options.config ? this.options.config() : {};
     if (!cfg.face_enabled || !cfg.face_auto_curate) {
       return [];
     }
+
+    const intervalMins = cfg.face_curate_interval_mins ?? DEFAULT_FACE_CURATE_INTERVAL_MINS;
+    const intervalMs = Math.max(intervalMins, 0) * 60 * 1000;
+    const now = Date.now();
 
     const states = this.options.db.getAllSessionStates();
     const results: CurateRunResult[] = [];
@@ -383,7 +407,7 @@ export class FaceCurator {
       if (!state.peer || !state.current_session_id) continue;
       const sid = state.current_session_id;
 
-      // 条件 3: 活跃会话校验 (排除已归档、已删除、非QQ会话)
+      // 硬标准: 活跃会话校验 (排除已归档、已删除、非QQ会话)
       if (sm) {
         if (typeof sm.isQQSession === 'function' && !sm.isQQSession(sid)) {
           continue;
@@ -396,7 +420,13 @@ export class FaceCurator {
         }
       }
 
-      // 条件 2: 新图门控 + 补标门控
+      // 触发条件 1: 会话专属独立倒计时 (默认 60 分钟)
+      const lastAt = this.getLastCuratedAt(state.peer);
+      if (now - lastAt < intervalMs) {
+        continue;
+      }
+
+      // 触发条件 2: 用户发了新图 (self = 0) 或表情库有未打标表情需补标
       const lastMsgId = this.getLastCuratedMsgId(state.peer);
       const { hasNew, latestMsgId } = this.options.db.hasNewImageMessages(state.peer, lastMsgId);
       const hasUntagged = this.options.db.queryFaces({ untagged: true, limit: 1 }).total > 0;
@@ -421,6 +451,8 @@ export class FaceCurator {
         if (res.executed) {
           const maxId = Math.max(latestMsgId, this.options.db.getLatestMsgId(state.peer));
           this.setLastCuratedMsgId(state.peer, maxId);
+          // 明确信号：打标完成，临时会话销毁后，才开启该会话下一次 60 分钟倒计时 (实现各会话天然错峰)
+          this.setLastCuratedAt(state.peer, Date.now());
         }
         results.push(res);
       } catch (err: any) {
@@ -436,16 +468,15 @@ export class FaceCurator {
 }
 
 /**
- * 启动后台表情包定时巡检任务（基于插件启动时间起算）
+ * 启动后台表情包定时巡检任务（轻量调度轮询各会话专属倒计时）
  */
 export function startCuratorTask(
   _ctx: Context,
   curator: FaceCurator,
   getConfig: () => BridgePluginConfig
 ): () => void {
-  const cfg = getConfig();
-  const intervalMins = cfg.face_curate_interval_mins ?? DEFAULT_FACE_CURATE_INTERVAL_MINS;
-  const intervalMs = Math.max(intervalMins, 1) * 60 * 1000;
+  // 轻量调度轮询：每 60 秒检查一次各活跃会话专属倒计时是否到期
+  const TICKER_INTERVAL_MS = 60 * 1000;
 
   const timer = setInterval(async () => {
     try {
@@ -455,7 +486,7 @@ export function startCuratorTask(
       }
       await curator.runAllActivePeers();
     } catch {}
-  }, intervalMs);
+  }, TICKER_INTERVAL_MS);
 
   return () => {
     clearInterval(timer);
