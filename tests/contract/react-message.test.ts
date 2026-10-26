@@ -31,8 +31,11 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
   function setupTestApp() {
     const ctx = new Context();
     const registeredTools: any[] = [];
-    let guardFn: ((exec: any) => string | undefined) | null = null;
-    let assembleHandler: ((assembly: any, assembleCtx: any, next: any) => Promise<any>) | null = null;
+    const mockGateway: any = {
+      setMsgEmojiLike: vi.fn(async (msgId: number, emojiId: string) => {
+        return { status: 'ok', retcode: 0, data: null };
+      }),
+    };
 
     ctx.provide('tools');
     ctx.set('tools', {
@@ -43,177 +46,83 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
           if (idx >= 0) registeredTools.splice(idx, 1);
         };
       },
-      guard: (fn: (exec: any) => string | undefined) => {
-        guardFn = fn;
-        return () => {
-          guardFn = null;
-        };
-      },
     });
 
-    // 拦截 on('system-prompt/assemble')
-    const origOn = ctx.on.bind(ctx);
-    ctx.on = ((event: string, listener: any) => {
-      if (event === 'system-prompt/assemble') {
-        assembleHandler = listener;
-      }
-      return origOn(event, listener);
-    }) as any;
+    registerAgentTools(ctx, {
+      gateway: mockGateway,
+      inboundMsgIdGetter: () => 100,
+    });
 
-    apply(ctx, { bot_qq: '12345678', ws_port: 29876 });
+    const reactTool = registeredTools.find((t) => t.name === 'react_message');
 
     return {
       ctx,
       registeredTools,
-      getGuardFn: () => guardFn,
-      getAssembleHandler: () => assembleHandler,
+      reactTool,
+      mockGateway,
     };
   }
 
-  it('群聊 Session (qq-group-*) 下 prompt 装配保留 react_message', async () => {
-    const { getAssembleHandler } = setupTestApp();
-    const handler = getAssembleHandler()!;
-    expect(handler).toBeDefined();
+  it('私聊 Session (qq-user-*) 调用 react_message 被工具执行前置拦截拒执行', async () => {
+    const { reactTool } = setupTestApp();
+    expect(reactTool).toBeDefined();
 
-    const mockNext = async () => ({
-      tools: [
-        { name: 'read_chat_history' },
-        { name: 'react_message' },
-        { name: 'send_file' },
-      ],
-    });
+    await expect(
+      reactTool.execute(
+        { emoji: 'thumbs_up', message_id: 100 },
+        { agent: { session: { id: 'qq-user-11223344' } } }
+      )
+    ).rejects.toThrow('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
+  });
 
-    const res = await handler(
-      {},
-      { agent: { session: { id: 'qq-group-987654321' } } },
-      mockNext
+  it('私聊 Session (user_*) 调用 react_message 被工具执行前置拦截拒执行', async () => {
+    const { reactTool } = setupTestApp();
+    expect(reactTool).toBeDefined();
+
+    await expect(
+      reactTool.execute(
+        { emoji: 'thumbs_up', message_id: 100 },
+        { agent: { session: { id: 'user_11223344' } } }
+      )
+    ).rejects.toThrow('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
+  });
+
+  it('Web / 非群聊 Session 调用 react_message 被工具执行前置拦截拒执行', async () => {
+    const { reactTool } = setupTestApp();
+    expect(reactTool).toBeDefined();
+
+    await expect(
+      reactTool.execute(
+        { emoji: 'thumbs_up', message_id: 100 },
+        { agent: { session: { id: 'web-session-test' } } }
+      )
+    ).rejects.toThrow('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
+  });
+
+  it('群聊 Session (qq-group-*) 调用 react_message 正常放行', async () => {
+    const { reactTool, mockGateway } = setupTestApp();
+    expect(reactTool).toBeDefined();
+
+    const res = await reactTool.execute(
+      { emoji: 'thumbs_up', message_id: 100 },
+      { agent: { session: { id: 'qq-group-987654321' } } }
     );
-
-    const toolNames = res.tools.map((t: any) => t.name);
-    expect(toolNames).toContain('react_message');
-    expect(toolNames).toContain('read_chat_history');
+    expect(res.success).toBe(true);
+    expect(res.emoji_id).toBe('76');
+    expect(mockGateway.setMsgEmojiLike).toHaveBeenCalledWith(100, '76');
   });
 
-  it('群聊 Session (group_*) 下 prompt 装配保留 react_message', async () => {
-    const { getAssembleHandler } = setupTestApp();
-    const handler = getAssembleHandler()!;
+  it('群聊 Session (group_*) 调用 react_message 正常放行', async () => {
+    const { reactTool, mockGateway } = setupTestApp();
+    expect(reactTool).toBeDefined();
 
-    const mockNext = async () => ({
-      tools: [{ name: 'react_message' }, { name: 'poke_user' }],
-    });
-
-    const res = await handler(
-      {},
-      { agent: { session: { id: 'group_987654321' } } },
-      mockNext
+    const res = await reactTool.execute(
+      { emoji: 'thumbs_up', message_id: 200 },
+      { agent: { session: { id: 'group_987654321' } } }
     );
-
-    const toolNames = res.tools.map((t: any) => t.name);
-    expect(toolNames).toContain('react_message');
-  });
-
-  it('私聊 Session (qq-user-* / user_*) 下 prompt 装配过滤 react_message，但保留其他 QQ 工具', async () => {
-    const { getAssembleHandler } = setupTestApp();
-    const handler = getAssembleHandler()!;
-
-    const mockNext = async () => ({
-      tools: [
-        { name: 'read_chat_history' },
-        { name: 'react_message' },
-        { name: 'send_file' },
-        { name: 'poke_user' },
-      ],
-    });
-
-    // 测试 qq-user- 格式
-    const res1 = await handler(
-      {},
-      { agent: { session: { id: 'qq-user-11223344' } } },
-      mockNext
-    );
-    const toolNames1 = res1.tools.map((t: any) => t.name);
-    expect(toolNames1).not.toContain('react_message');
-    expect(toolNames1).toContain('read_chat_history');
-    expect(toolNames1).toContain('send_file');
-
-    // 测试 user_ 格式
-    const res2 = await handler(
-      {},
-      { agent: { session: { id: 'user_11223344' } } },
-      mockNext
-    );
-    const toolNames2 = res2.tools.map((t: any) => t.name);
-    expect(toolNames2).not.toContain('react_message');
-    expect(toolNames2).toContain('read_chat_history');
-  });
-
-  it('非 QQ 会话 (Web / external) 下 prompt 装配过滤包括 react_message 在内的全部 NapCat 工具', async () => {
-    const { getAssembleHandler } = setupTestApp();
-    const handler = getAssembleHandler()!;
-
-    const mockNext = async () => ({
-      tools: [
-        { name: 'read_chat_history' },
-        { name: 'react_message' },
-        { name: 'general_tool' },
-      ],
-    });
-
-    const res = await handler(
-      {},
-      { agent: { session: { id: 'web-session-abc' } } },
-      mockNext
-    );
-    const toolNames = res.tools.map((t: any) => t.name);
-    expect(toolNames).not.toContain('react_message');
-    expect(toolNames).not.toContain('read_chat_history');
-    expect(toolNames).toContain('general_tool');
-  });
-
-  it('私聊 Session 调用 react_message 被 tools.guard 拦截拒执行', () => {
-    const { getGuardFn } = setupTestApp();
-    const guard = getGuardFn()!;
-    expect(guard).toBeDefined();
-
-    const decisionPrivate = guard({
-      name: 'react_message',
-      agent: { session: { id: 'qq-user-11223344' } },
-    });
-    expect(decisionPrivate).toBe('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
-
-    const decisionUser = guard({
-      name: 'react_message',
-      agent: { session: { id: 'user_11223344' } },
-    });
-    expect(decisionUser).toBe('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
-  });
-
-  it('Web / 非群聊 Session 调用 react_message 被 tools.guard 拦截拒执行', () => {
-    const { getGuardFn } = setupTestApp();
-    const guard = getGuardFn()!;
-
-    const decisionWeb = guard({
-      name: 'react_message',
-      agent: { session: { id: 'web-session-test' } },
-    });
-    expect(decisionWeb).toBe('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
-  });
-
-  it('群聊 Session 调用 react_message 被 tools.guard 正常放行', () => {
-    const { getGuardFn } = setupTestApp();
-    const guard = getGuardFn()!;
-
-    const decisionGroup1 = guard({
-      name: 'react_message',
-      agent: { session: { id: 'qq-group-987654321' } },
-    });
-    expect(decisionGroup1).toBeUndefined();
-
-    const decisionGroup2 = guard({
-      name: 'react_message',
-      agent: { session: { id: 'group_987654321' } },
-    });
-    expect(decisionGroup2).toBeUndefined();
+    expect(res.success).toBe(true);
+    expect(res.emoji_id).toBe('76');
+    expect(mockGateway.setMsgEmojiLike).toHaveBeenCalledWith(200, '76');
   });
 });
 
@@ -305,7 +214,7 @@ describe('契约 2: 语义键查表映射与执行契约 (Emoji Mapping Contract
 
     expect(registeredTool).toBeDefined();
     expect(registeredTool.name).toBe('react_message');
-    expect(registeredTool.description).toBe('收到消息时可调用本工具，以表情回应。');
+    expect(registeredTool.description).toContain('为当前或指定入站消息贴一个小表情回应');
 
     // 成功 render
     const rendered = registeredTool.output.render(

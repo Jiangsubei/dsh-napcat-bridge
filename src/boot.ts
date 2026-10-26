@@ -91,6 +91,16 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
     await fsp.writeFile(profilePackageJson, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   }
 
+  // 建立 profile node_modules 下插件自身的软链接，使 Cordis loader 在测试环境下能解析 dsh-napcat-bridge/*
+  const profileNodeModules = path.join(profileDir, 'node_modules');
+  const pluginLink = path.join(profileNodeModules, 'dsh-napcat-bridge');
+  try {
+    await fsp.mkdir(profileNodeModules, { recursive: true });
+    if (!fs.existsSync(pluginLink)) {
+      await fsp.symlink(path.resolve(process.cwd()), pluginLink, 'junction');
+    }
+  } catch {}
+
   // 3. 加载 @deepseek-ai/dsh-base 的 bundle patch
   const baseDir = resolveBundleDir('napcat-test', '@deepseek-ai/dsh-base', installAnchor, profileDir);
   const baseManifest = JSON.parse(await fsp.readFile(path.join(baseDir, 'package.json'), 'utf8'));
@@ -129,6 +139,11 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
         {
           id: 'workspace',
           name: '@deepseek-ai/dsh-workspace',
+        },
+        {
+          id: 'agent-preset-registry',
+          name: '@deepseek-ai/dsh-agent-preset-registry',
+          config: { default: 'qq-session' },
         },
       ],
     },

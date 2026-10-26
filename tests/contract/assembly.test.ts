@@ -66,9 +66,7 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
 
   it('断言 2: dsh-napcat-bridge 插件已成功注册并在 Context 上生效', () => {
     expect(booted.ctx).toBeDefined();
-    // 插件 settings 注册
-    const settings = booted.ctx.get('settings');
-    expect(settings).toBeDefined();
+    expect(booted.ctx.get('napcatBridgeTools') || (booted.ctx as any).napcatBridgeTools).toBeDefined();
   });
 
   it('B2-契约 3: 插件通过 user-questions/request waterfall 接入 NapCat 提问渠道', async () => {
@@ -130,11 +128,13 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
     }
   });
 
-  it('B3-契约 5: tools.guard 执行侧隔离 — 非 QQ 会话调用 NapCat 工具被拒绝，QQ 会话放行', async () => {
+  it('B3-契约 5: 预设体系工具隔离 — 非 QQ 会话不含 NapCat 专属工具，QQ 会话挂载预设正常放行', async () => {
     const tools: any = booted.ctx.get('tools');
-    expect(typeof tools.guard).toBe('function');
 
-    // 非 QQ (Web) 会话 agent
+    await fsp.mkdir(path.join(tmpHome, 'web-ws'), { recursive: true });
+    await fsp.mkdir(path.join(tmpHome, 'qq-ws'), { recursive: true });
+
+    // 非 QQ (Web) 会话 agent (未挂载 qq-session 预设)
     const webHandle = await booted.ctx.agents.create({
       sessionId: 'web-session-1',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -148,13 +148,15 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
       signal: new AbortController().signal,
     });
     expect(denied.isError).toBe(true);
-    expect((denied as any).error?.message).toContain('仅限 QQ 会话');
 
-    // QQ 会话 agent
+    // QQ 会话 agent (挂载 qq-session 预设)
     const qqHandle = await booted.ctx.agents.create({
       sessionId: 'qq-group-1001',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       meta: { cwd: path.join(tmpHome, 'qq-ws') },
+      setup: async (agentCtx: any) => {
+        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
+      },
     });
     const qqAgent = qqHandle.agent || qqHandle;
     const allowed = await tools.execute({
@@ -166,7 +168,7 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
     expect(allowed.isError).toBe(false);
   });
 
-  it('B3-契约 6: system-prompt/assemble 呈现侧隔离 — Web 装配不含 NapCat 工具，QQ 装配含全量', async () => {
+  it('B3-契约 6: system-prompt/assemble 呈现侧预设隔离 — Web 装配不含 NapCat 工具，QQ 装配含全量', async () => {
     const NAPCAT_TOOLS = new Set([
       'read_chat_history',
       'fetch_chat_resource',
@@ -174,6 +176,9 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
       'send_file',
       'poke_user',
     ]);
+
+    await fsp.mkdir(path.join(tmpHome, 'web-ws-2'), { recursive: true });
+    await fsp.mkdir(path.join(tmpHome, 'qq-ws-2'), { recursive: true });
 
     const webHandle = await booted.ctx.agents.create({
       sessionId: 'web-session-2',
@@ -189,6 +194,9 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
       sessionId: 'qq-group-1002',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       meta: { cwd: path.join(tmpHome, 'qq-ws-2') },
+      setup: async (agentCtx: any) => {
+        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
+      },
     });
     const qqAgent = qqHandle.agent || qqHandle;
     const asmQq = await booted.ctx.systemPrompt.assemble({ scope: qqAgent, agent: qqAgent } as any);

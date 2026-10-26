@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./tools": {
+      "types": "./dist/tools/plugin.d.ts",
+      "default": "./dist/tools/plugin.js"
+    },
     "./client": "./dist/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*": "./locale/*",

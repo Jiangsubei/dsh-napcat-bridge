@@ -28,7 +28,9 @@ import { SessionManager } from './gateway/session.js';
 import { shouldWakeup, parseNormalizedContent, resolveAtNicknames } from './gateway/wakeup.js';
 import { CachedGroupMemberResolver } from './gateway/members.js';
 import { ProactiveManager } from './gateway/proactive.js';
-import { registerAgentTools } from './tools/index.js';
+import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
+import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
+import { createMemoryToolDefinitions } from './memory/tools.js';
 import { FaceCurator, startCuratorTask } from './gateway/curator.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
@@ -284,7 +286,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   let outboundBridge: OutboundStreamBridge | null = null;
 
   // 4. 注册 Agent 工具集与 7 天 TTL 定时清理任务
-  const unregisterTools = registerAgentTools(ctx, {
+  const toolsOptions: AgentToolsOptions = {
     db,
     gateway: server,
     mediaManager,
@@ -303,7 +305,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       }
       return inboundCtx?.msg_id;
     },
-  });
+  };
+  // 工具不再全局直挂到 root ctx，杜绝向 Web UI 等非 QQ 会话泄露；
+  // 统一通过 qq-session 预设（dsh-napcat-bridge/tools 插件）挂载至具体 QQ Agent 实例 Context。
+  const unregisterTools = () => {};
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
   const currentSpeakers = new Map<string, string>();
@@ -313,6 +318,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   memoryService = setupMemoryService(ctx, {
     storageDir: normalizedMemoryDir,
     dshHome,
+    registerGlobalTools: false,
     groupBudgetChars: currentConfig().group_memory_budget_chars,
     privateBudgetChars: currentConfig().private_memory_budget_chars,
     getGroupBudgetChars: () =>
@@ -336,103 +342,103 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     sessionManager,
   });
 
-  // 4.1 限制 NapCat 专属工具仅在 QQ 会话中呈现并允许调用 (隔离 Web UI 正常对话，杜绝工具泄露)
-  const NAPCAT_TOOL_NAMES = new Set([
-    'read_chat_history',
-    'fetch_chat_resource',
-    'expand_forward_message',
-    'send_file',
-    'poke_user',
-    'list_group_files',
-    'wait_for_user_messages',
-    'read_memory',
-    'create_memory',
-    'edit_memory',
-    'react_message',
-    'send_face',
-    'list_faces',
-    'collect_face',
-    'manage_faces',
-  ]);
-
-  const extractSessionId = (agent: any): string => {
-    if (!agent) return '';
-    return (
-      agent?.session?.id ||
-      agent?.sessionId ||
-      agent?.id ||
-      (typeof agent === 'string' ? agent : '')
-    );
+  // 5.1 构造 NapCat 专属工具提供者 (供 dsh-napcat-bridge/tools 插件与 qq-session 预设挂载)
+  const napcatBridgeTools: NapCatBridgeToolsProvider = {
+    registerTools(targetCtx: Context) {
+      const unregAgent = registerAgentTools(targetCtx, toolsOptions);
+      const unregMemory: Array<() => void> = [];
+      if (memoryService?.tools) {
+        const toolsService =
+          (targetCtx as any).tools ||
+          (typeof (targetCtx as any).get === 'function' ? (targetCtx as any).get('tools') : undefined);
+        if (toolsService && typeof toolsService.register === 'function') {
+          const defs = createMemoryToolDefinitions(memoryService.tools);
+          for (const def of defs) {
+            if (typeof toolsService.get === 'function' && toolsService.get(def.name)) {
+              continue;
+            }
+            unregMemory.push(toolsService.register(def));
+          }
+        }
+      }
+      return () => {
+        try {
+          unregAgent();
+        } catch {}
+        for (const unreg of unregMemory) {
+          try {
+            unreg();
+          } catch {}
+        }
+      };
+    },
   };
 
-  // 呈现侧：非 QQ 会话的 prompt 装配中过滤掉 NapCat 专属工具 (system-prompt/assemble 官方 waterfall)
-  const unregisterToolAssemblyFilter = (ctx as any).on(
-    'system-prompt/assemble',
-    async (_assembly: any, assembleCtx: any, next: any) => {
-      const res = await next();
-      const agent = assembleCtx?.agent || assembleCtx?.scope;
-      const sessionId = extractSessionId(agent);
-      const isQQ = Boolean(
-        sessionId &&
-          (sessionManager.isQQSession(sessionId) ||
-            sessionId.startsWith('review-') ||
-            sessionId.startsWith('curator-') ||
-            sessionId.startsWith('group_') ||
-            sessionId.startsWith('user_'))
-      );
-      const isQQGroup = Boolean(
-        sessionId &&
-          (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
-      );
-
-      if (Array.isArray(res?.tools)) {
-        if (!isQQ) {
-          res.tools = res.tools.filter((t: any) => !NAPCAT_TOOL_NAMES.has(t.name));
-        } else {
-          if (!isQQGroup) {
-            res.tools = res.tools.filter((t: any) => t.name !== 'react_message');
-          }
-        }
-      }
-      return res;
-    }
-  );
-
-  // 执行侧：官方 monotonic guard 替换原先返回字符串 'deny' 的伪拦截 (PreToolDecision 对象契约)。
-  // 非 QQ 会话调用 NapCat 专属工具时，返回拒绝原因字符串，由 ToolRuntime 物化为错误结果。
-  let unregisterToolGuard: (() => void) | null = null;
-  const toolsSvc = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
-  if (toolsSvc && typeof toolsSvc.guard === 'function') {
-    unregisterToolGuard = toolsSvc.guard((exec: any) => {
-      if (NAPCAT_TOOL_NAMES.has(exec?.name)) {
-        const sessionId = extractSessionId(exec?.agent);
-        if (exec?.name === 'react_message') {
-          const isQQGroup = Boolean(
-            sessionId &&
-              (sessionId.startsWith('qq-group-') || sessionId.startsWith('group_'))
-          );
-          if (!isQQGroup) {
-            return 'dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行';
-          }
-        }
-        const isAllowed = Boolean(
-          sessionId &&
-            (sessionManager.isQQSession(sessionId) ||
-              sessionId.startsWith('review-') ||
-              sessionId.startsWith('curator-') ||
-              sessionId.startsWith('group_') ||
-              sessionId.startsWith('user_'))
-        );
-        if (!isAllowed) {
-          return 'dsh-napcat-bridge: 该工具仅限 QQ 会话调用，当前会话不可执行';
-        }
-      }
-      return undefined;
-    });
-  } else {
-    logger.warn?.('[Plugin] tools.guard 服务不可用，NapCat 专属工具的执行侧隔离未生效');
+  setGlobalBridgeToolsProvider(napcatBridgeTools);
+  if (typeof (ctx as any).provide === 'function') {
+    try {
+      (ctx as any).provide('napcatBridgeTools', napcatBridgeTools);
+    } catch {}
   }
 
+  // 5.2 若当前环境提供了 agentPresets 且未注册 qq-session 预设，则动态补全注册
+  (ctx as any).inject?.(['agentPresets'], (presetCtx: Context) => {
+    const agentPresetsSvc = (presetCtx as any).agentPresets;
+    if (agentPresetsSvc && typeof agentPresetsSvc.register === 'function') {
+      agentPresetsSvc.list?.().then((presetsList: any[]) => {
+        const exists = Array.isArray(presetsList) && presetsList.some((p: any) => p.id === 'qq-session');
+        if (!exists) {
+          agentPresetsSvc.register({
+            id: 'qq-session',
+            name: 'QQ 智能助手',
+            description: 'QQ 会话专属预设，包含工作区文件与跨平台 Shell、官方 Web 搜索与 NapCat QQ 交互能力',
+            order: 10,
+            plugins: [
+              {
+                id: 'persona',
+                name: '@deepseek-ai/dsh-persona',
+                config: {
+                  prefix: '当前会话是 qq 会话。',
+                  complete: true,
+                  includeRuntimeContext: false,
+                },
+              },
+              { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
+              { id: 'tool-working-directory', name: '@deepseek-ai/dsh-tool-working-directory' },
+              {
+                id: 'tool-workspace-dependencies',
+                name: '@deepseek-ai/dsh-tool-workspace-dependencies',
+                disabled: !(process.env.DSH_PRIMARY_RUNTIME || process.env.DSH_BUNDLED_PRIMARY_RUNTIME),
+                config: {
+                  source: process.env.DSH_PRIMARY_RUNTIME || process.env.DSH_BUNDLED_PRIMARY_RUNTIME || '',
+                },
+              },
+              {
+                id: 'tool-bash',
+                name: '@deepseek-ai/dsh-tool-bash',
+                disabled: process.platform === 'win32',
+              },
+              {
+                id: 'tool-pwsh',
+                name: '@deepseek-ai/dsh-tool-pwsh',
+                disabled: process.platform !== 'win32',
+              },
+              {
+                id: 'tool-web',
+                name: '@deepseek-ai/dsh-tool-web',
+                config: { fetch: true, searchTimeoutMs: 30000 },
+              },
+              { id: 'napcat-tools', name: 'dsh-napcat-bridge/tools' },
+            ],
+          }).catch((err: any) => {
+            logger.debug?.('[Plugin] 动态注册 qq-session 预设已跳过或失败:', err?.message);
+          });
+        }
+      }).catch(() => {});
+    }
+  });
+
+  // 4.1 初始化后台媒体清理任务
   const stopCleanupTask = startMediaCleanupTask(ctx, mediaManager);
 
   // 4.1 初始化后台表情包整理 Agent (Face Curator)
@@ -1249,12 +1255,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
     if (typeof unregisterDynamicPrompt === 'function') {
       unregisterDynamicPrompt();
-    }
-    if (typeof unregisterToolAssemblyFilter === 'function') {
-      unregisterToolAssemblyFilter();
-    }
-    if (typeof unregisterToolGuard === 'function') {
-      unregisterToolGuard();
     }
     await server.stop().catch(() => {});
     await sessionManager.dispose().catch(() => {});
