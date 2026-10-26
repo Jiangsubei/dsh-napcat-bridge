@@ -69,9 +69,18 @@ export interface CurateRunResult {
 export class FaceCurator {
   private isRunning = false;
   private readonly ctx?: Context;
+  private lastCuratedMsgId = new Map<string, number>();
 
   constructor(private readonly options: FaceCuratorOptions) {
     this.ctx = options.ctx;
+  }
+
+  getLastCuratedMsgId(peer: string): number {
+    return this.lastCuratedMsgId.get(peer) ?? 0;
+  }
+
+  setLastCuratedMsgId(peer: string, msgId: number): void {
+    this.lastCuratedMsgId.set(peer, msgId);
   }
 
   /**
@@ -352,6 +361,10 @@ export class FaceCurator {
 
   /**
    * 巡检所有活跃会话（基于 SQLite 存储的会话状态表），对每个会话执行 Fork 审视
+   * 三条件门控：
+   * 1. 定时到期（由外部定时器触发调用）；
+   * 2. 新图与补标门控：自上次巡检后有新入站图片消息，或表情库中有未打标表情需补标；若无新图且无未打标表情，彻底静默，0 Token 损耗；
+   * 3. 活跃会话校验：仅限当前 peer 绑定的最新活跃会话，排除已归档、已物理删除或非 QQ 会话。
    */
   async runAllActivePeers(): Promise<CurateRunResult[]> {
     const cfg = this.options.config ? this.options.config() : {};
@@ -364,20 +377,51 @@ export class FaceCurator {
     const sessions =
       (this.ctx as any)?.sessions ||
       (typeof (this.ctx as any)?.get === 'function' ? (this.ctx as any).get('sessions') : undefined);
+    const sm = this.options.sessionManager;
 
     for (const state of states) {
       if (!state.peer || !state.current_session_id) continue;
+      const sid = state.current_session_id;
+
+      // 条件 3: 活跃会话校验 (排除已归档、已删除、非QQ会话)
+      if (sm) {
+        if (typeof sm.isQQSession === 'function' && !sm.isQQSession(sid)) {
+          continue;
+        }
+        if (typeof sm.isSessionArchived === 'function' && sm.isSessionArchived(sid)) {
+          continue;
+        }
+        if (typeof sm.isSessionPhysicallyPresent === 'function' && !sm.isSessionPhysicallyPresent(sid)) {
+          continue;
+        }
+      }
+
+      // 条件 2: 新图门控 + 补标门控
+      const lastMsgId = this.getLastCuratedMsgId(state.peer);
+      const { hasNew, latestMsgId } = this.options.db.hasNewImageMessages(state.peer, lastMsgId);
+      const hasUntagged = this.options.db.queryFaces({ untagged: true, limit: 1 }).total > 0;
+
+      if (!hasNew && !hasUntagged) {
+        // 无新图片且无未打标表情，彻底静默，0 Token 消耗
+        continue;
+      }
+
       let parentSession: any = undefined;
       if (sessions && typeof sessions.get === 'function') {
         try {
-          parentSession = sessions.get(state.current_session_id);
+          parentSession = sessions.get(sid);
         } catch {}
       }
+
       try {
         const res = await this.runCurator(state.peer, {
-          sessionId: state.current_session_id,
+          sessionId: sid,
           parentSession,
         });
+        if (res.executed) {
+          const maxId = Math.max(latestMsgId, this.options.db.getLatestMsgId(state.peer));
+          this.setLastCuratedMsgId(state.peer, maxId);
+        }
         results.push(res);
       } catch (err: any) {
         results.push({
