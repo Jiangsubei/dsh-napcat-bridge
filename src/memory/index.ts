@@ -48,6 +48,8 @@ export interface MemoryServiceOptions {
   getCurrentSpeaker?: (peer: string) => string | undefined;
   db?: MessageDatabase;
   sessionManager?: SessionManager;
+  /** 是否向 root ctx.tools 注册全局 Memory 工具（默认 true；在配合预设架构时传入 false 隔离 Web 会话） */
+  registerGlobalTools?: boolean;
 }
 
 export function registerMemoryPromptContext(
@@ -183,20 +185,22 @@ export function setupMemoryService(
     }
   };
 
-  const initialTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
-  if (initialTools) {
-    doRegisterTools(initialTools);
-  }
+  if (options.registerGlobalTools !== false) {
+    const initialTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
+    if (initialTools) {
+      doRegisterTools(initialTools);
+    }
 
-  const checkReadyTools = () => {
-    const readyTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
-    if (readyTools) doRegisterTools(readyTools);
-  };
-  const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
-  if (appReady && typeof appReady.onReady === 'function') {
-    appReady.onReady(checkReadyTools);
+    const checkReadyTools = () => {
+      const readyTools = typeof (ctx as any).get === 'function' ? (ctx as any).get('tools') : undefined;
+      if (readyTools) doRegisterTools(readyTools);
+    };
+    const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
+    if (appReady && typeof appReady.onReady === 'function') {
+      appReady.onReady(checkReadyTools);
+    }
+    (ctx as any).on?.('ready', checkReadyTools);
   }
-  (ctx as any).on?.('ready', checkReadyTools);
 
   // 2. 注册 systemPrompt.context 动态记忆段
   const promptDisposer = registerMemoryPromptContext(

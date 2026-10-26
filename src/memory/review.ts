@@ -458,7 +458,24 @@ export class BackgroundReviewManager {
           agentHandle = await agentsService.create({
             sessionId: reviewSessionId,
             model: reviewModelSelection?.model,
-            setup: (agentCtx: any) => {
+            setup: async (agentCtx: any) => {
+              const presets =
+                (this.ctx as any)?.agentPresets ||
+                (typeof (this.ctx as any)?.get === 'function' ? (this.ctx as any).get('agentPresets') : undefined);
+              if (presets && typeof presets.mount === 'function') {
+                try {
+                  await presets.mount(agentCtx, 'qq-session');
+                } catch {}
+              } else {
+                const provider =
+                  (this.ctx as any)?.napcatBridgeTools ||
+                  (typeof (this.ctx as any)?.get === 'function' ? (this.ctx as any).get('napcatBridgeTools') : undefined);
+                if (provider && typeof provider.registerTools === 'function') {
+                  try {
+                    provider.registerTools(agentCtx);
+                  } catch {}
+                }
+              }
               const toolsSvc =
                 (typeof agentCtx.get === 'function' ? agentCtx.get('tools') : undefined) ||
                 agentCtx.tools;

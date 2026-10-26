@@ -1059,21 +1059,23 @@ export function splitMessageText(text: string, maxLength = 1500): string[] {
   return chunks;
 }
 
+export interface AgentToolsOptions {
+  db: MessageDatabase;
+  gateway?: NapCatGatewayServer;
+  mediaManager: MediaStorageManager;
+  sender?: SerialSender;
+  dshHome?: string;
+  waitRegistry?: MessageWaitRegistry;
+  inboundMsgIdGetter?: (peer: string) => number | undefined;
+  config?: (() => BridgePluginConfig) | BridgePluginConfig;
+}
+
 /**
  * 注册 Agent 工具集至 DSH 工具运行时 (ctx.tools)
  */
 export function registerAgentTools(
   ctx: Context,
-  options: {
-    db: MessageDatabase;
-    gateway?: NapCatGatewayServer;
-    mediaManager: MediaStorageManager;
-    sender?: SerialSender;
-    dshHome?: string;
-    waitRegistry?: MessageWaitRegistry;
-    inboundMsgIdGetter?: (peer: string) => number | undefined;
-    config?: (() => BridgePluginConfig) | BridgePluginConfig;
-  }
+  options: AgentToolsOptions
 ): () => void {
   const getConfig = (): BridgePluginConfig => {
     if (typeof (options as any).config === 'function') {
@@ -1480,8 +1482,16 @@ export function registerAgentTools(
           },
           async execute(args, exec) {
             const session = (exec.agent as any)?.session;
-            const rawPeer = session?.id || '';
+            const rawPeer = session?.id || (exec.agent as any)?.sessionId || '';
             const peer = normalizePeer(rawPeer);
+            const isQQGroup = Boolean(
+              rawPeer.startsWith('qq-group-') ||
+              peer.startsWith('group_') ||
+              rawPeer.startsWith('group_')
+            );
+            if (!isQQGroup) {
+              throw new Error('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
+            }
             const res = (await reactMessage(args, {
               gateway: options.gateway,
               inboundMsgIdGetter: options.inboundMsgIdGetter,

@@ -63,6 +63,12 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
       face_sub_type: 1,
     });
 
+    const provider = (booted.ctx.get('napcatBridgeTools') || (booted.ctx as any).napcatBridgeTools) as any;
+    expect(provider).toBeDefined();
+
+    // 挂载到测试上下文获取注册工具
+    provider.registerTools(booted.ctx);
+
     const toolsService = (booted.ctx.get('tools') || (booted.ctx as any).tools) as any;
     expect(toolsService).toBeDefined();
 
@@ -103,7 +109,7 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     expect(Object.hasOwn(res2, 'next_cursor')).toBe(false);
   });
 
-  it('装配 3: 表情工具仅限 QQ 会话呈现与执行 — WebUI 拦截且从 assemble 中剔除，QQ 与 curator- 会话放行', async () => {
+  it('装配 3: 表情工具仅限 QQ 会话呈现与执行 — WebUI 隔离且从 assemble 中剔除，QQ 与 curator- 会话放行', async () => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-face-asm-guard-'));
     booted = await bootDshNapcatBridge({
       dshHome: tmpHome,
@@ -135,7 +141,7 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     const webFaces = (asmWeb.tools as any[]).filter((t) => FACE_TOOL_NAMES.has(t.name));
     expect(webFaces).toHaveLength(0);
 
-    // 2. Web 会话 Agent: 调用表情工具被 tools.guard 拦截
+    // 2. Web 会话 Agent: 调用未在预设中的表情工具被 DSH 拦截拒绝
     const tools: any = booted.ctx.get('tools');
     const denied = await tools.execute({
       name: 'list_faces',
@@ -144,13 +150,15 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
       signal: new AbortController().signal,
     });
     expect(denied.isError).toBe(true);
-    expect((denied as any).error?.message).toContain('仅限 QQ 会话');
 
-    // 3. QQ 会话 Agent: assemble 中包含全量表情工具，调用放行
+    // 3. QQ 会话 Agent: 挂载 qq-session 预设，assemble 中包含全量表情工具，调用放行
     const qqHandle = await booted.ctx.agents.create({
       sessionId: 'qq-group-8000000002',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
+      },
     });
     const qqAgent = qqHandle.agent || qqHandle;
     const asmQq = await booted.ctx.systemPrompt.assemble({ scope: qqAgent, agent: qqAgent } as any);
@@ -165,11 +173,14 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     });
     expect(allowed.isError).toBe(false);
 
-    // 4. curator- 临时巡检会话: assemble 与调用均放行
+    // 4. curator- 临时巡检会话: 挂载 qq-session 预设，assemble 与调用均放行
     const curatorHandle = await booted.ctx.agents.create({
       sessionId: 'curator-group_8000000002-12345678',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       meta: { cwd: curatorWs },
+      setup: async (agentCtx: any) => {
+        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
+      },
     });
     const curatorAgent = curatorHandle.agent || curatorHandle;
     const asmCurator = await booted.ctx.systemPrompt.assemble({ scope: curatorAgent, agent: curatorAgent } as any);
@@ -196,6 +207,9 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
       ws_port: 29994,
       face_enabled: true,
     });
+
+    const provider = (booted.ctx.get('napcatBridgeTools') || (booted.ctx as any).napcatBridgeTools) as any;
+    provider.registerTools(booted.ctx);
 
     const toolsService = (booted.ctx.get('tools') || (booted.ctx as any).tools) as any;
     const collectFaceTool = toolsService.get('collect_face');

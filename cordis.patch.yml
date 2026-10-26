@@ -1,4 +1,55 @@
-# dsh-napcat-bridge bundle patch: inserts this plugin into the profile layer stack.
+# dsh-napcat-bridge bundle patch: inserts this plugin and the qq-session preset into the profile layer stack.
 - insert:
     - id: dsh-napcat-bridge
       name: dsh-napcat-bridge
+
+    - id: preset-qq-session
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: qq-session
+        name: QQ 智能助手
+        description: QQ 会话专属预设，包含工作区文件与跨平台 Shell、官方 Web 搜索与 NapCat QQ 交互能力
+        order: 10
+        plugins:
+          # 1. 专属轻量提示词（complete: true 彻底屏蔽 DSH 繁杂的 Coding 提示词）
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: 当前会话是 qq 会话。
+              complete: true
+              includeRuntimeContext: false
+
+          # 2. 基础工作区与文件工具（edit, write, read, read_image）
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+
+          # 3. 工作区路径
+          - id: tool-working-directory
+            name: '@deepseek-ai/dsh-tool-working-directory'
+
+          # 4. 工作区依赖工具 (有运行时环境时自动激活)
+          - id: tool-workspace-dependencies
+            name: '@deepseek-ai/dsh-tool-workspace-dependencies'
+            disabled: !!js "!(process.env.DSH_PRIMARY_RUNTIME ?? process.env.DSH_BUNDLED_PRIMARY_RUNTIME)"
+            config:
+              source: !!js "process.getBuiltinModule('node:path').resolve(process.env.DSH_PRIMARY_RUNTIME ?? process.env.DSH_BUNDLED_PRIMARY_RUNTIME ?? '')"
+
+          # 5. 跨平台 Shell：Windows 激活 pwsh，macOS/Linux 激活 bash
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+
+          # 6. 官方联网搜索 (web_search, web_fetch)
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 30000
+
+          # 7. NapCat 专属工具组 (标准 Cordis 插件导出)
+          - id: napcat-tools
+            name: 'dsh-napcat-bridge/tools'

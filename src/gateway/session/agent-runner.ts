@@ -330,16 +330,24 @@ export class SessionAgentRunner {
         agentCtx?.get?.('agentPresets') || (this.ctx as any).agentPresets;
       if (presets?.mount) {
         return presets
-          .mount(agentCtx)
+          .mount(agentCtx, 'qq-session')
           .then(() => undefined)
           .catch((err: any) => {
             this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
-              '[SessionAgentRunner] mount preset:',
+              '[SessionAgentRunner] mount preset qq-session failed, falling back:',
               err?.message
             );
+            const provider =
+              (this.ctx as any).napcatBridgeTools ||
+              (this.ctx.root as any)?.napcatBridgeTools;
+            provider?.registerTools?.(agentCtx);
             return undefined;
           });
       }
+      const provider =
+        (this.ctx as any).napcatBridgeTools ||
+        (this.ctx.root as any)?.napcatBridgeTools;
+      provider?.registerTools?.(agentCtx);
       return undefined;
     };
 
