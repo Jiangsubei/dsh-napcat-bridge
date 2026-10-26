@@ -65,7 +65,10 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toContain('主动回复');
 
       expect(html).toContain('id="napcat-tab-memory"');
-      expect(html).toContain('记忆与回顾');
+      expect(html).toContain('记忆');
+
+      expect(html).toContain('id="napcat-tab-face"');
+      expect(html).toContain('表情包');
 
       // 3. 验证 SETTINGS_TABS 常量定义严格匹配
       expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
@@ -74,8 +77,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
         'persona',
         'proactive',
         'memory',
+        'face',
       ]);
-      expect(SETTINGS_TABS).toHaveLength(5);
+      expect(SETTINGS_TABS).toHaveLength(6);
 
       // 4. 严禁渲染工具权限 Tab (E8 明确约定)
       expect(html).not.toContain('工具权限');
@@ -227,18 +231,18 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(proactiveHtml).toContain('夜间免打扰模式 (proactive_night_dnd)');
     });
 
-    it('切换到 Tab 5 (记忆与回顾) 时展示对应 6 个记忆配置项', () => {
+    it('切换到 Tab 5 (记忆) 时展示对应 3 个核心记忆配置项，且不包含已下线的回顾项', () => {
       const html = renderCard({ initialTab: 'memory' });
 
       expect(html).toMatch(/id="napcat-tab-memory"[^>]*aria-selected="true"/);
       expect(html).not.toMatch(/id="napcat-tabpanel-memory"[^>]*hidden/);
 
       const panelMatch = html.match(
-        /id="napcat-tabpanel-memory"[\s\S]*?(?=<div[^>]*class="[^"]*napcat_footer)/
+        /id="napcat-tabpanel-memory"[\s\S]*?(?=<div[^>]*id="napcat-tabpanel-face")/
       );
       const memoryHtml = panelMatch![0];
 
-      // 6 个字段逐一核对
+      // 3 个核心记忆字段核对
       expect(memoryHtml).toContain('id="napcat-memory-storage-dir"');
       expect(memoryHtml).toContain('记忆存储目录 (memory_storage_dir)');
 
@@ -248,17 +252,11 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(memoryHtml).toContain('id="napcat-private-memory-budget-chars"');
       expect(memoryHtml).toContain('私聊记忆预算字符上限 (private_memory_budget_chars)');
 
-      expect(memoryHtml).toContain('id="napcat-review-enabled"');
-      expect(memoryHtml).toContain('启用后台自动回顾 (review_enabled)');
-
-      expect(memoryHtml).toContain('id="napcat-review-turns-interval"');
-      expect(memoryHtml).toContain('自动回顾轮次间隔 (review_turns_interval)');
-
-      expect(memoryHtml).toContain('id="napcat-review-tool-calls-interval"');
-      expect(memoryHtml).toContain('自动回顾工具调用间隔 (review_tool_calls_interval)');
-
-      expect(memoryHtml).toContain('id="napcat-review-model"');
-      expect(memoryHtml).toContain('后台回顾专用子模型 (review_model)');
+      // 已下线回顾字段排他断言
+      expect(memoryHtml).not.toContain('id="napcat-review-enabled"');
+      expect(memoryHtml).not.toContain('id="napcat-review-turns-interval"');
+      expect(memoryHtml).not.toContain('id="napcat-review-tool-calls-interval"');
+      expect(memoryHtml).not.toContain('id="napcat-review-model"');
     });
 
     it('setActiveTab 正确触发 onTabChange 回调通知', () => {

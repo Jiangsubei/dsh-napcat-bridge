@@ -116,8 +116,8 @@ NapCatGatewayServer 接收并解析 JSON
 3. **容量预算治理**：
    - 每次生成 System Prompt 时，将记忆 Markdown 注入上下文；
    - 区分 `group_memory_budget_chars`（群聊上限，默认 2200 字符）与 `private_memory_budget_chars`（私聊上限，默认 1500 字符），防止超出模型上下文预算。
-4. **后台自动回顾**：
-   - 在后台根据对话轮次 (`review_turns_interval`) 或工具调用频次 (`review_tool_calls_interval`) 触发独立回顾 Agent，提取增量事实并更新 Markdown 记忆文件。
+4. **单 Agent 统筹顺手维护**：
+   - 彻底摒弃独立的后台 Fork 回顾会话，由主会话 Agent 在出站回复用户后，在同轮次内顺手调用 `create_memory` / `edit_memory` 提炼沉淀核心事实，自然平稳终结。
 
 ---
 

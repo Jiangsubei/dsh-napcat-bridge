@@ -42,16 +42,9 @@ export const DEFAULT_GROUP_MEMORY_BUDGET_CHARS = 2200;
 export const DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS = 1500;
 export const DEFAULT_USER_PROFILE_CHAR_LIMIT = 1500;
 export const DEFAULT_SESSION_MEMORY_CHAR_LIMIT = 2200;
-export const DEFAULT_REVIEW_ENABLED = true;
-export const DEFAULT_REVIEW_TURNS_INTERVAL = 10;
-export const DEFAULT_REVIEW_TOOL_CALLS_INTERVAL = 10;
-
 export const DEFAULT_FACE_ENABLED = false;
 export const DEFAULT_FACE_STORE_MAX = 100;
 export const DEFAULT_FACE_STORE_DIR = '.dsh/napcat/faces';
-export const DEFAULT_FACE_AUTO_CURATE = false;
-export const DEFAULT_FACE_CURATE_CRON = '0 */2 * * *';
-export const DEFAULT_FACE_CURATE_INTERVAL_MINS = 60;
 export const DEFAULT_FACE_QUERY_LIMIT = 100;
 export const DEFAULT_FACE_SUB_TYPE = 1;
 export const DEFAULT_FACE_EVICT_POLICY = 'evict_lru';

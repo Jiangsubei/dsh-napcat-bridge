@@ -70,7 +70,7 @@ export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'reply', label: '回复行为' },
   { id: 'persona', label: '人格与准则' },
   { id: 'proactive', label: '主动回复' },
-  { id: 'memory', label: '记忆与回顾' },
+  { id: 'memory', label: '记忆' },
   { id: 'face', label: '表情包' },
 ] as const;
 
@@ -132,15 +132,9 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   memory_storage_dir: '.dsh/napcat/napcat_memory',
   group_memory_budget_chars: 2200,
   private_memory_budget_chars: 1500,
-  review_enabled: true,
-  review_turns_interval: 10,
-  review_tool_calls_interval: 10,
-  review_model: '',
   face_enabled: false,
   face_store_max: 100,
   face_store_dir: '.dsh/napcat/faces',
-  face_auto_curate: false,
-  face_curate_cron: '0 */2 * * *',
   face_sub_type: 1,
   face_evict_policy: 'evict_lru',
 };
@@ -872,55 +866,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('private_memory_budget_chars')}
             onChange={(val) => handleFieldChange('private_memory_budget_chars', parseInt(val, 10) || 1500)}
           />
-
-          <SwitchField
-            id="napcat-review-enabled"
-            label="启用后台自动回顾 (review_enabled)"
-            hint="定时在后台异步回顾对话内容，提炼群聊规则与用户画像偏好"
-            checked={draft.review_enabled ?? true}
-            disabled={saving}
-            overridden={model.isOverridden('review_enabled')}
-            onReset={() => handleResetField('review_enabled')}
-            onChange={(checked) => handleFieldChange('review_enabled', checked)}
-          />
-
-          <ValueField
-            id="napcat-review-turns-interval"
-            label="自动回顾轮次间隔 (review_turns_interval)"
-            hint="触发后台回顾的对话轮次阈值 (默认 10 轮)"
-            placeholder="10"
-            numeric
-            value={String(draft.review_turns_interval ?? 10)}
-            disabled={saving || !draft.review_enabled}
-            overridden={model.isOverridden('review_turns_interval')}
-            onReset={() => handleResetField('review_turns_interval')}
-            onChange={(val) => handleFieldChange('review_turns_interval', parseInt(val, 10) || 10)}
-          />
-
-          <ValueField
-            id="napcat-review-tool-calls-interval"
-            label="自动回顾工具调用间隔 (review_tool_calls_interval)"
-            hint="触发后台回顾的累计工具调用次数阈值 (默认 10 次)"
-            placeholder="10"
-            numeric
-            value={String(draft.review_tool_calls_interval ?? 10)}
-            disabled={saving || !draft.review_enabled}
-            overridden={model.isOverridden('review_tool_calls_interval')}
-            onReset={() => handleResetField('review_tool_calls_interval')}
-            onChange={(val) => handleFieldChange('review_tool_calls_interval', parseInt(val, 10) || 10)}
-          />
-
-          <ValueField
-            id="napcat-review-model"
-            label="后台回顾专用子模型 (review_model)"
-            hint="后台回顾使用的轻量模型名称 (可选，留空则继承主会话模型)"
-            placeholder="例如: deepseek-chat"
-            value={draft.review_model || ''}
-            disabled={saving || !draft.review_enabled}
-            overridden={model.isOverridden('review_model')}
-            onReset={() => handleResetField('review_model')}
-            onChange={(val) => handleFieldChange('review_model', val)}
-          />
         </div>
 
         <div
@@ -937,8 +882,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
         >
           <SwitchField
             id="napcat-face-enabled"
-            label="启用表情包系统 (face_enabled)"
-            hint="总开关：开启后 Agent 可调用 list_faces/send_face/collect_face 工具，且可开启后台定期整理。关闭时不产生任何后台活动。"
+            label="装载表情包工具集 (face_enabled)"
+            hint="控制新建会话是否在预设中包含表情包工具集，保存后对后续新会话生效"
             checked={Boolean(draft.face_enabled)}
             disabled={saving}
             overridden={model.isOverridden('face_enabled')}
@@ -991,17 +936,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 </select>
                 <p className={fieldStyle.hint}>达到容量上限后的行为策略。淘汰的表情在硬盘上保留 7 天后悔期。</p>
               </div>
-
-              <SwitchField
-                id="napcat-face-auto-curate"
-                label="启用后台定期整理与识别 (face_auto_curate)"
-                hint="后台定期扫描已落盘的群聊/私聊图片，结合多模态模型提炼沙雕图/表情包沉淀入库（纯文本模型请勿开启）"
-                checked={Boolean(draft.face_auto_curate)}
-                disabled={saving}
-                overridden={model.isOverridden('face_auto_curate')}
-                onReset={() => handleResetField('face_auto_curate')}
-                onChange={(checked) => handleFieldChange('face_auto_curate', checked)}
-              />
 
               <ValueField
                 id="napcat-face-store-dir"

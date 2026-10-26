@@ -26,27 +26,39 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
       .map((line) => line.split(':')[0].trim())
       .sort();
 
-    // 断言 1: 三方键数量均为 25
-    expect(schemaKeys.length).toBe(25);
-    expect(serverKeys.length).toBe(25);
-    expect(clientKeys.length).toBe(25);
+    // 断言 1: 三方键数量均为 26
+    expect(schemaKeys.length).toBe(26);
+    expect(serverKeys.length).toBe(26);
+    expect(clientKeys.length).toBe(26);
 
     // 断言 2: 三方键集合完全恒等
     expect(schemaKeys).toEqual(serverKeys);
     expect(clientKeys).toEqual(serverKeys);
 
-    // 断言 3: memory_budget_chars 不存在于任何一方
-    expect(schemaKeys.includes('memory_budget_chars')).toBe(false);
-    expect(serverKeys.includes('memory_budget_chars')).toBe(false);
-    expect(clientKeys.includes('memory_budget_chars')).toBe(false);
+    // 断言 3: 废弃字段不存在于任何一方
+    const deadKeys = [
+      'memory_budget_chars',
+      'review_enabled',
+      'review_turns_interval',
+      'review_tool_calls_interval',
+      'review_model',
+      'face_auto_curate',
+      'face_curate_cron',
+      'face_curate_interval_mins',
+    ];
+    for (const deadKey of deadKeys) {
+      expect(schemaKeys.includes(deadKey)).toBe(false);
+      expect(serverKeys.includes(deadKey)).toBe(false);
+      expect(clientKeys.includes(deadKey)).toBe(false);
+    }
   });
 
   it('A7: 运行时配置字段均标记为 .volatile()（包含 bot_qq），以支持 DSH 0.2.1 设置面板保存与热更新', () => {
     const schemaShape = (BridgeConfigSchema as any).dict || (BridgeConfigSchema as any).shape || {};
     const schemaKeys = Object.keys(schemaShape);
 
-    // 验证全量 25 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
-    expect(schemaKeys.length).toBe(25);
+    // 验证全量 26 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
+    expect(schemaKeys.length).toBe(26);
     expect(schemaShape.bot_qq?.meta?.volatile).toBe(true);
 
     for (const field of schemaKeys) {

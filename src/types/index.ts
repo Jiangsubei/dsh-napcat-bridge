@@ -527,26 +527,12 @@ export interface BridgePluginConfig {
   group_memory_budget_chars?: number;
   /** 私聊会话规则与单用户画像注入总字符预算上限 (默认 1500) */
   private_memory_budget_chars?: number;
-  /** 是否启用后台自动回顾 (默认 true) */
-  review_enabled?: boolean;
-  /** 触发后台回顾的对话轮次间隔 (默认 10) */
-  review_turns_interval?: number;
-  /** 触发后台回顾的工具调用次数间隔 (默认 10) */
-  review_tool_calls_interval?: number;
-  /** 后台回顾使用的独立子模型名称 (可选，留空继承主模型) */
-  review_model?: string;
-  /** 是否启用表情包系统 (总开关，默认 false，关闭时工具不注册、后台不运行) */
+  /** 控制新建会话是否装载表情包工具集，对后续新会话生效 */
   face_enabled?: boolean;
   /** 本地表情库存储容量上限 (默认 100 张) */
   face_store_max?: number;
   /** 本地表情库文件存储目录 (默认 .dsh/napcat/faces) */
   face_store_dir?: string;
-  /** 是否启用后台定期整理/识别表情包 (默认 false) */
-  face_auto_curate?: boolean;
-  /** 后台定期整理 Cron 表达式 (默认每 2 小时) */
-  face_curate_cron?: string;
-  /** 后台定期整理执行间隔 (分钟，默认 60 分钟，以启动时间起算) */
-  face_curate_interval_mins?: number;
   /** 发送表情包消息段使用的 sub_type (默认 1) */
   face_sub_type?: number;
   /** 表情库满额淘汰策略 ('reject' 拒绝新增 / 'evict_lru' 淘汰最久未用，默认 'reject') */
