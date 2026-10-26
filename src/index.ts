@@ -400,7 +400,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
                 config: {
                   prefix: '当前会话是 qq 会话。',
                   complete: true,
-                  includeRuntimeContext: false,
+                },
+              },
+              {
+                id: 'agent-instructions',
+                name: '@deepseek-ai/dsh-agent-instructions',
+                config: {
+                  maxBytes: 65536,
                 },
               },
               { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
@@ -428,6 +434,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
                 name: '@deepseek-ai/dsh-tool-web',
                 config: { fetch: true, searchTimeoutMs: 30000 },
               },
+              { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
+              { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
               { id: 'napcat-tools', name: 'dsh-napcat-bridge/tools' },
             ],
           }).catch((err: any) => {

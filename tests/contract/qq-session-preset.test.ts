@@ -119,7 +119,10 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     expect(toolNames.has('web_search')).toBe(true);
     expect(toolNames.has('web_fetch')).toBe(true);
 
-    // 4. NapCat 专属工具
+    // 4. 技能工具
+    expect(toolNames.has('skill')).toBe(true);
+
+    // 5. NapCat 专属工具
     expect(toolNames.has('read_chat_history')).toBe(true);
     expect(toolNames.has('fetch_chat_resource')).toBe(true);
     expect(toolNames.has('expand_forward_message')).toBe(true);
@@ -151,5 +154,32 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     const fullPrompt = ((asm as any).sections as any[]).map((s) => s.text).join('\n');
     expect(fullPrompt).toContain('当前会话是 qq 会话。');
     expect(fullPrompt).not.toContain('You are a coding agent');
+  });
+
+  it('契约 5: 挂载 qq-session 预设的 Agent，运行时上下文 napcat:memory 未被抑制并正常注入', async () => {
+    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const agent = await sessionManager.getOrCreateAgent('group:8000000002');
+
+    const asm = await booted.ctx.systemPrompt.assemble({ scope: agent, agent } as any);
+    const contextNames = (asm.contexts as any[]).map((c) => c.name);
+
+    // 验证 napcat:memory 运行时上下文存在（未被 persona.includeRuntimeContext: false 抑制）
+    expect(contextNames).toContain('napcat:memory');
+    expect(contextNames.some((n: string) => n.startsWith('working-directory'))).toBe(true);
+  });
+
+  it('契约 6: qq-session 预设配置必须完整包含 agent-instructions、skill-filesystem 与 tool-skill 插件定义', async () => {
+    const presetsSvc: any = (booted.ctx as any).agentPresets || (booted.ctx as any).get?.('agentPresets');
+    const qqDef = presetsSvc.definitions?.get?.('qq-session');
+    expect(qqDef).toBeDefined();
+
+    const plugins = qqDef.config.plugins;
+    const pluginIds = plugins.map((p: any) => p.id);
+    expect(pluginIds).toContain('agent-instructions');
+    expect(pluginIds).toContain('skill-filesystem');
+    expect(pluginIds).toContain('tool-skill');
+
+    const instructionsPlugin = plugins.find((p: any) => p.id === 'agent-instructions');
+    expect(instructionsPlugin.config?.maxBytes).toBe(65536);
   });
 });
