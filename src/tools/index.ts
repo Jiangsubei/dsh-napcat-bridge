@@ -32,11 +32,16 @@ import type {
   SendFaceResult,
   CollectFaceParams,
   CollectFaceResult,
+  ManageFacesParams,
+  ManageFacesResult,
   BridgePluginConfig,
   MessageRecord,
 } from '../types/index.js';
+export type { ManageFacesParams, ManageFacesResult };
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
+import { manageFaces } from './manage-faces.js';
+export { manageFaces };
 import type { MessageDatabase } from '../storage/database.js';
 import { formatDateTime } from '../storage/database.js';
 import type { MediaStorageManager } from '../storage/media.js';
@@ -81,6 +86,10 @@ export function setGlobalToolContext(context: ToolExecutionContext): void {
 
 export function resetGlobalToolContext(): void {
   globalToolContext = {};
+}
+
+export function getGlobalToolContext(): ToolExecutionContext {
+  return globalToolContext;
 }
 
 /**
@@ -389,9 +398,8 @@ export async function sendFile(
   }
 
   try {
-    // IS-S2: file_type 强制生效，缺省按扩展名自动推导
-    // 注意: 返回 'image' | 'file' 均为真值字符串，必须显式比较，严禁 if (isImage) 真值判等
-    const fileKind = detectSendFileType(params.file_type, src.value);
+    // 移除 file_type 参数，直接按扩展名自动推导
+    const fileKind = detectSendFileType(undefined, src.value);
 
     let msgPayload: any;
     if (fileKind === 'image') {
@@ -437,7 +445,7 @@ export async function pokeUser(
   const ctx = { ...globalToolContext, ...context };
 
   if (!params || !params.user_id || typeof params.user_id !== 'string' || params.user_id.trim() === '') {
-    return { success: false, error: '你需要指定 User ID' };
+    return { success: false, error: '你需要指定 user_id（目标用户的 QQ 号）' };
   }
 
   const userId = params.user_id.trim();
@@ -605,9 +613,8 @@ export async function waitForUserMessages(
 
   // 3. user_id 语法级校验（依赖层）：格式非法 → 原文报错；私聊对象不符 → 原文报错
   let userId: string | undefined;
-  const rawUserId = params?.user_id;
-  if (rawUserId !== undefined && rawUserId !== null) {
-    const uid = String(rawUserId).trim();
+  if (params?.user_id !== undefined && params?.user_id !== null) {
+    const uid = String(params.user_id).trim();
     if (uid === '' || !QQ_ID_RE.test(uid)) {
       return { success: false, error: 'Unknown user_id, cannot wait for messages' };
     }
@@ -744,16 +751,15 @@ export async function listFaces(
 ): Promise<ListFacesResult> {
   const ctx = { ...globalToolContext, ...context };
   if (!ctx.db) {
-    return { faces: [], total: 0, has_more: false };
+    return { faces: [], total: 0 };
   }
   const limit = Math.min(Math.max(params?.limit ?? 100, 1), 100);
-  const offset = params?.cursor ? parseInt(params.cursor, 10) || 0 : 0;
   const queryRes = ctx.db.queryFaces({
     mood: params?.mood,
     tag: params?.tag,
     untagged: params?.untagged,
     limit,
-    offset,
+    offset: 0,
     enabledOnly: true,
   });
 
@@ -777,11 +783,7 @@ export async function listFaces(
   const res: ListFacesResult = {
     faces,
     total: queryRes.total,
-    has_more: queryRes.has_more,
   };
-  if (queryRes.has_more) {
-    res.next_cursor = String(offset + limit);
-  }
 
   return toLosslessJson(res);
 }
@@ -917,9 +919,9 @@ export async function sendFace(
 }
 
 /**
- * 6.11 即时偷表情/收藏/编辑工具 (collect_face)
- * - 若提供 face_id: 执行表情编辑/补标模式（Agent 必须提供 tags 与 mood）
- * - 若未提供 face_id: 从指定消息（或当前正在回复的入站消息）中提取图片并收录进表情库（Agent 必须提供 tags 与 mood）
+ * 6.11 偷表情/收藏工具 (collect_face)
+ * 从指定消息（或当前正在回复的入站消息）中提取图片并收录进本地表情库。
+ * 修改已有表情标签或删除表情请使用 manage_faces。
  */
 export async function collectFace(
   params: CollectFaceParams,
@@ -937,25 +939,7 @@ export async function collectFace(
     return { success: false, error: '数据库不可用' };
   }
 
-  // 分支 1: 编辑/补标已有表情
-  if (params.face_id && typeof params.face_id === 'string' && params.face_id.trim()) {
-    const faceId = params.face_id.trim();
-    const existing = ctx.db.getFaceById(faceId);
-    if (!existing) {
-      return { success: false, error: `表情 ID "${faceId}" 不存在` };
-    }
-    const updated = ctx.db.updateFace(faceId, {
-      tags: params.tags,
-      mood: params.mood.trim(),
-    });
-    return toLosslessJson({
-      success: true,
-      face_id: faceId,
-      message: `已成功为表情 "${faceId}" 补全标签与情绪（标签: [${(updated?.tags || []).join(', ')}]，情绪: ${updated?.mood || '未设置'}）`,
-    });
-  }
-
-  // 分支 2: 偷图/收藏新表情
+  // 偷图/收藏新表情
   const sessionPeer = ctx.peer || '';
   let targetMsgId = params.message_id;
   if (!targetMsgId && ctx.inboundMsgIdGetter && sessionPeer) {
@@ -1130,7 +1114,7 @@ export function registerAgentTools(
         defineTool({
           name: 'read_chat_history',
           description:
-            '检索当前群聊或私聊的历史聊天记录，支持关键词、发送者昵称、消息类型、相对时间/自然日期等多维度组合筛选。',
+            '检索当前会话的本地历史聊天记录。在群聊中查询两条消息之间有什么其他的消息，需要查询指定的时间段，建议在两条消息之间间隔超过 5 分钟时调用，根据聊天节奏决定是否每次查询；亦用于指代不明追溯前情、响应用户查询/复述历史发言，或为贴表情/收藏表情等下游工具捞取目标消息的 message_id。查找群文件请使用专用的 list_group_files。',
           parameters: {
             keyword: { type: 'string', description: '按消息文本内容关键词模糊搜索' },
             sender_name: { type: 'string', description: '按发送者昵称或群名片模糊搜索' },
@@ -1179,7 +1163,8 @@ export function registerAgentTools(
       tools.register(
         defineTool({
           name: 'fetch_chat_resource',
-          description: '凭 file_id（群文件附带 busid）现拉外部文件到本地，返回可读取路径。',
+          description:
+            '根据资源 file_id（群文件需附带 busid）将外部文件或富媒体拉取到本地磁盘。用于需要深入阅读、分析聊天中的文档、音视频或图片内容时；下载完成后返回本地物理路径（local_path），供后续文件或图片读取工具消费。',
           parameters: {
             file_id: { type: 'string', required: true, description: '资源 ID (必填)' },
             busid: { type: 'number', description: '群文件专用 busid (群文件必填)' },
@@ -1227,7 +1212,7 @@ export function registerAgentTools(
         defineTool({
           name: 'expand_forward_message',
           description:
-            '根据 forward_id 展开合并转发消息内容。内层图片会自动下载到本地，段内返回 local_path，可直接用 read_image 查看。',
+            '展开聊天记录合并转发（多条消息聚合卡片）的内部真实对话。用于会话中用户分享合并转发记录并要求查看、总结或评价其中内容时；返回层级消息列表，内层图片会自动缓存并附带本地路径。',
           parameters: {
             forward_id: { type: 'string', required: true, description: '合并转发 ID (必填)' },
           },
@@ -1265,10 +1250,10 @@ export function registerAgentTools(
       tools.register(
         defineTool({
           name: 'send_file',
-          description: 'Agent 主动向当前会话发送本地生成的文件、报告或图片产物。',
+          description:
+            '向当前聊天发送本地磁盘上的文件、生成的图片或导出报告。用于向用户交付具体的文件或图片实体产物；系统会自动根据文件扩展名选择以图片或文件卡片形式下发。切勿用于发送普通文本聊天消息。',
           parameters: {
             file_path: { type: 'string', required: true, description: '本地绝对路径、file:// URI 或 URL (必填)' },
-            file_type: { type: 'string', enum: ['image', 'file'], description: '文件类型 (默认按扩展名自动推导)' },
           },
           output: {
             schema: { type: 'json' },
@@ -1304,7 +1289,7 @@ export function registerAgentTools(
       tools.register(
         defineTool({
           name: 'poke_user',
-          description: '主动在群内戳指定用户或在私聊窗口抖动用户。',
+          description: '在群内戳指定用户，或在私聊窗口向对方发送抖动。用于趣味调侃、打招呼，或对方主动要求“戳我一下”时。',
           parameters: {
             user_id: { type: 'string', required: true, description: '目标用户的 QQ 号 (必填)' },
           },
@@ -1343,7 +1328,7 @@ export function registerAgentTools(
         defineTool({
           name: 'list_group_files',
           description:
-            '获取当前群聊的历史上传文件列表。返回包含文件名、上传者、时间、file_id 和 busid 的清单。获取到所需文件的 file_id 和 busid 后，可调用 fetch_chat_resource 工具进行下载。',
+            '获取当前群聊已上传的文件列表与索引清单。用于用户查找群共享文件、查询资料是否已存在时；返回结果包含文件名、上传者、file_id 和 busid。如需读取文件内容，需将返回的 file_id 与 busid 传给 fetch_chat_resource 下载。切勿用于检索聊天文字。',
           parameters: {
             file_name: { type: 'string', description: '按群文件名模糊搜索（如 ".pdf", "周报"）' },
             sender_name: { type: 'string', description: '按上传者昵称或群名片模糊搜索' },
@@ -1393,7 +1378,7 @@ export function registerAgentTools(
         defineTool({
           name: 'wait_for_user_messages',
           description:
-            '挂起等待当前会话的新用户消息：设置一个等待窗口（timeout 秒），收集窗口内到达的该会话消息后一次性返回。适用于对方只说了半句话、需要用户继续补充内容时（实现单轮多消息交互）。窗口内收到多少条就返回多少条；一条都没收到会返回状态层报错，可反复调用直到收齐或决定结束本轮。',
+            '临时挂起会话并等待用户继续发送消息，在指定窗口时间内收集到达的新消息后统一恢复执行。用于用户话只说了半句、提示“等等还有”、连续多段发言或正在补充报错截图时；窗口内收集到消息后一次性返回供综合答复。',
           parameters: {
             timeout: {
               type: 'number',
@@ -1419,9 +1404,6 @@ export function registerAgentTools(
               peer,
               signal: exec.signal,
             })) as any;
-            if (res && 'error' in res && !('messages' in res)) {
-              throw new Error(res.error || 'wait_for_user_messages 失败');
-            }
             return res;
           },
         })
@@ -1433,7 +1415,8 @@ export function registerAgentTools(
       tools.register(
         defineTool({
           name: 'react_message',
-          description: '收到消息时可调用本工具，以表情回应。',
+          description:
+            '为当前或指定入站消息贴一个小表情回应。用于对调侃、搞笑图、日常问候做快速情绪化表态，或确认收到指令；无需冗长文字即可生动闭环。',
           parameters: {
             emoji: {
               type: 'string',
@@ -1521,7 +1504,7 @@ export function registerAgentTools(
           defineTool({
             name: 'list_faces',
             description:
-              '检索当前本地表情包库中的可用表情。支持按情绪 (mood)、内容标签 (tag) 或筛选未打标表情 (untagged) 检索，返回表情列表与本地图片路径（可供查看）。严禁在回复中编造不存在的表情 ID。',
+              '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；返回合法 face_id、标签、情绪及本地路径。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
             parameters: {
               mood: {
                 type: 'string',
@@ -1539,10 +1522,6 @@ export function registerAgentTools(
                 type: 'number',
                 description: '返回数量上限 (默认 100，上限 100)',
               },
-              cursor: {
-                type: 'string',
-                description: '分页游标偏移量 (取自上一次返回的 next_cursor)',
-              },
             },
             output: {
               schema: { type: 'json' },
@@ -1557,9 +1536,6 @@ export function registerAgentTools(
                   const tagStr = f.tags && f.tags.length > 0 ? ` 标签: [${f.tags.join(', ')}]` : ' [无标签]';
                   const pathStr = f.file_path ? ` | 路径: ${f.file_path}` : '';
                   lines.push(`• ID: ${f.id} (${f.format})${moodStr}${tagStr}${pathStr}`);
-                }
-                if (v.has_more && v.next_cursor) {
-                  lines.push(`(还有更多表情，可传入 cursor: "${v.next_cursor}" 获取下一页)`);
                 }
                 return [{ type: 'text', text: lines.join('\n') }];
               },
@@ -1578,7 +1554,7 @@ export function registerAgentTools(
           defineTool({
             name: 'send_face',
             description:
-              '根据表情 ID 发送一张表情包到当前群聊或私聊中（独立表情气泡）。请在语境合适且有明确意图时调用，禁止连续刷屏发表情。',
+              '根据表情 ID 将一张本地表情包作为独立表情消息发送到聊天中。用于聊天中需要精准表达情绪、接梗斗图时；表情 ID 需来自 list_faces 检索结果。业务图片产物请使用 send_file。',
             parameters: {
               face_id: {
                 type: 'string',
@@ -1629,12 +1605,8 @@ export function registerAgentTools(
           defineTool({
             name: 'collect_face',
             description:
-              '【收藏/编辑表情】将聊天消息中的图片转存至本地表情库，或为已有表情包补全/编辑标签与情绪。传入 face_id 时为补标编辑模式；不传 face_id 时从指定消息（或当前入站消息）中偷图收藏。注意：调用本工具时必须明确给出你对画面的理解标签 (tags) 和情绪意图 (mood)。',
+              '将聊天中的图片收录入本地表情库，并打上初始标签与情绪。用于用户要求“把这图存成表情”、聊天中出现值得收藏的好梗图时。修改已有表情标签或删除表情请使用 manage_faces。',
             parameters: {
-              face_id: {
-                type: 'string',
-                description: '已有表情 ID。若提供此参数，则为补标编辑模式；若省略则为收藏新表情模式',
-              },
               tags: {
                 type: 'array',
                 required: true,
@@ -1678,6 +1650,63 @@ export function registerAgentTools(
                 inboundMsgIdGetter: options.inboundMsgIdGetter,
                 dshHome: options.dshHome,
                 faceDir: resolveDshPath(options.dshHome, cfg.face_store_dir, DEFAULT_FACE_STORE_DIR),
+                faceStoreMax: cfg.face_store_max,
+                faceEvictPolicy: cfg.face_evict_policy,
+              });
+              return toLosslessJson(res) as any;
+            },
+          })
+        )
+      );
+
+      // 9.4 manage_faces
+      unregisters.push(
+        tools.register(
+          defineTool({
+            name: 'manage_faces',
+            description:
+              '管理与维护本地表情包库。用于补充或修改已有表情的标签/情绪、按 ID 删除表情、查询当前表情库存储配额占用，以及在库容满时按 LRU 或指定规则清理淘汰冷门表情。',
+            parameters: {
+              action: {
+                type: 'string',
+                required: true,
+                enum: ['update', 'delete', 'query_quota', 'evict'],
+                description: '操作类型: update (改标签/情绪), delete (删除表情), query_quota (查存储配额), evict (按 LRU 淘汰冷门表情)',
+              },
+              face_id: {
+                type: 'string',
+                description: '目标表情 ID（action 为 update 或 delete 时必填）',
+              },
+              tags: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '更新表情时的内容画面标签列表（action 为 update 时使用）',
+              },
+              mood: {
+                type: 'string',
+                description: '更新表情时的情绪意图（action 为 update 时使用）',
+              },
+              count: {
+                type: 'number',
+                description: '淘汰表情数量（action 为 evict 时使用，默认 10）',
+              },
+            },
+            output: {
+              schema: { type: 'json' },
+              render: (_args, value) => {
+                const v = value as any;
+                if (!v) return [{ type: 'text', text: '表情管理操作完成。' }];
+                if (v.success) {
+                  return [{ type: 'text', text: v.message || '操作成功' }];
+                }
+                return [{ type: 'text', text: `表情管理操作失败: ${v.error}` }];
+              },
+            },
+            async execute(args, _exec) {
+              const cfg = getConfig();
+              const res = await manageFaces(args, {
+                db: options.db,
+                dshHome: options.dshHome,
                 faceStoreMax: cfg.face_store_max,
                 faceEvictPolicy: cfg.face_evict_policy,
               });

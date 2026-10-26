@@ -16,6 +16,7 @@ import {
   collectFace,
   registerAgentTools,
 } from '../../src/tools/index.js';
+import { manageFaces } from '../../src/tools/manage-faces.js';
 import type { FaceRecord } from '../../src/types/index.js';
 
 describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
@@ -301,7 +302,7 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(resNoImg.error).toMatch(/未找到图片/);
   });
 
-  it('契约 8: collect_face 支持传入 face_id 为已有未打标表情补全 tags 与 mood', async () => {
+  it('契约 8: manage_faces 支持传入 face_id 为已有表情补全/更新 tags 与 mood', async () => {
     // 预先存入一个无标签表情
     db.insertFace({
       id: 'face_to_edit',
@@ -314,17 +315,18 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
       format: 'png',
     });
 
-    // Agent 补标：缺少 tags 必须报错拒绝
-    const failNoTags = await collectFace(
-      { face_id: 'face_to_edit', mood: '疑惑' } as any,
+    // 缺少 tags 与 mood 必须报错拒绝
+    const failNoTags = await manageFaces(
+      { action: 'update', face_id: 'face_to_edit' } as any,
       { db }
     );
     expect(failNoTags.success).toBe(false);
-    expect(failNoTags.error).toMatch(/tags/);
+    expect(failNoTags.error).toMatch(/tags 或 mood/);
 
-    // Agent 补标：合法参数更新
-    const successEdit = await collectFace(
+    // 合法参数更新
+    const successEdit = await manageFaces(
       {
+        action: 'update',
         face_id: 'face_to_edit',
         tags: ['新打标猫猫', '喝水'],
         mood: '呆萌',
@@ -358,6 +360,7 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(registeredNamesFalse).not.toContain('list_faces');
     expect(registeredNamesFalse).not.toContain('send_face');
     expect(registeredNamesFalse).not.toContain('collect_face');
+    expect(registeredNamesFalse).not.toContain('manage_faces');
 
     // 2. 开启总开关 (face_enabled = true)
     mockTools.register.mockClear();
@@ -371,6 +374,7 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(registeredNamesTrue).toContain('list_faces');
     expect(registeredNamesTrue).toContain('send_face');
     expect(registeredNamesTrue).toContain('collect_face');
+    expect(registeredNamesTrue).toContain('manage_faces');
   });
 
   it('契约 9: 达到容量上限且为 reject 策略时，collect_face 友好返回错误对象而非崩溃抛错', async () => {

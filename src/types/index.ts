@@ -315,7 +315,6 @@ export interface ExpandForwardMessageResult {
 
 export interface SendFileParams {
   file_path: string;
-  file_type?: 'image' | 'file';
 }
 
 export interface SendFileResult {
@@ -332,6 +331,11 @@ export interface PokeUserParams {
 export interface PokeUserResult {
   success: boolean;
   error?: string;
+}
+
+export interface WaitForUserMessagesParams {
+  timeout?: number;
+  user_id?: string;
 }
 
 export const EMOJI_MAP: Record<string, { id: string; name: string }> = {
@@ -422,14 +426,11 @@ export interface ListFacesParams {
   mood?: string;
   untagged?: boolean;
   limit?: number;
-  cursor?: string;
 }
 
 export interface ListFacesResult {
   faces: FaceSummaryItem[];
   total: number;
-  has_more: boolean;
-  next_cursor?: string;
 }
 
 export interface SendFaceParams {
@@ -443,16 +444,36 @@ export interface SendFaceResult {
 }
 
 export interface CollectFaceParams {
-  face_id?: string;
+  tags: string[];
+  mood: string;
   message_id?: number;
-  tags?: string[];
-  mood?: string;
 }
 
 export interface CollectFaceResult {
   success: boolean;
   duplicated?: boolean;
   face_id?: string;
+  message?: string;
+  error?: string;
+}
+
+export interface ManageFacesParams {
+  action: 'update' | 'delete' | 'query_quota' | 'evict';
+  face_id?: string;
+  tags?: string[];
+  mood?: string;
+  count?: number;
+}
+
+export interface ManageFacesResult {
+  success: boolean;
+  action?: 'update' | 'delete' | 'query_quota' | 'evict';
+  face_id?: string;
+  total?: number;
+  max_quota?: number;
+  available?: number;
+  total_bytes?: number;
+  evicted_count?: number;
   message?: string;
   error?: string;
 }
