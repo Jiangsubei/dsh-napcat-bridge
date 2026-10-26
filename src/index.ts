@@ -41,6 +41,7 @@ import { setupMemoryService } from './memory/index.js';
 import { registerConfigRoute } from './server/routes.js';
 import { registerFacesRoutes } from './server/face-routes.js';
 import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
+import { migrateFaceStoragePaths } from './storage/face-migration.js';
 
 export * from './memory/index.js';
 
@@ -257,6 +258,15 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const db = new MessageDatabase(dbPath);
   db.init();
 
+  // 启动时自动规范化存量表情包存储路径，并从工作区 profiles 目录自愈找回物理文件
+  try {
+    const rawFaceDir = currentConfig().face_store_dir;
+    const faceStoreDir = resolveDshPath(dshHome, rawFaceDir, DEFAULT_FACE_STORE_DIR);
+    migrateFaceStoragePaths({ db, dshHome, faceStoreDir });
+  } catch (migErr) {
+    logger.warn?.('[Plugin] 启动时表情包存储路径自愈迁移失败:', migErr);
+  }
+
   // 挂载表情包管理 REST 路由 (列表、上传、大图预览、编辑、删除)
   unregisterFacesRoutes = registerFacesRoutes({ ctx, db, getConfig: currentConfig, dshHome });
 
@@ -339,6 +349,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'create_memory',
     'edit_memory',
     'react_message',
+    'send_face',
+    'list_faces',
+    'collect_face',
   ]);
 
   const extractSessionId = (agent: any): string => {
@@ -362,6 +375,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         sessionId &&
           (sessionManager.isQQSession(sessionId) ||
             sessionId.startsWith('review-') ||
+            sessionId.startsWith('curator-') ||
             sessionId.startsWith('group_') ||
             sessionId.startsWith('user_'))
       );
@@ -404,6 +418,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           sessionId &&
             (sessionManager.isQQSession(sessionId) ||
               sessionId.startsWith('review-') ||
+              sessionId.startsWith('curator-') ||
               sessionId.startsWith('group_') ||
               sessionId.startsWith('user_'))
         );
@@ -424,6 +439,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const faceCurator = new FaceCurator({
     ctx,
     db,
+    dshHome,
     faceStoreDir,
     imageScanDirs: [path.join(mediaManager.downloadRoot, 'image')],
     sessionManager,

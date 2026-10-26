@@ -908,6 +908,11 @@ export class MessageDatabase {
     return this.getFaceById(id, { includeDeleted: true });
   }
 
+  updateFaceFilePath(id: string, filePath: string): void {
+    const db = this.ensureDb();
+    db.prepare(`UPDATE faces SET file_path = ? WHERE id = ?`).run(filePath, id);
+  }
+
   deleteFace(id: string): boolean {
     const db = this.ensureDb();
     const info = db.prepare(`

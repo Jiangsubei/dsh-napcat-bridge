@@ -18,7 +18,8 @@ import * as crypto from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from '../storage/database.js';
 import type { BridgePluginConfig } from '../types/index.js';
-import { DEFAULT_FACE_CURATE_INTERVAL_MINS } from '../constants/index.js';
+import { DEFAULT_FACE_CURATE_INTERVAL_MINS, DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
+import { resolveDshPath } from '../utils/path.js';
 
 export const ALLOWED_FACE_CURATOR_TOOLS: readonly string[] = [
   'collect_face',
@@ -44,6 +45,7 @@ Identify suitable memes, stickers, or funny reaction images, and collect or tag 
 export interface FaceCuratorOptions {
   ctx?: Context;
   db: MessageDatabase;
+  dshHome?: string;
   faceStoreDir?: string;
   imageScanDirs?: string[];
   llmService?: any;
@@ -281,7 +283,7 @@ export class FaceCurator {
 
     try {
       const scanDirs = this.options.imageScanDirs || [];
-      const storeDir = this.options.faceStoreDir || path.resolve('.dsh/napcat/faces');
+      const storeDir = resolveDshPath(this.options.dshHome, this.options.faceStoreDir, DEFAULT_FACE_STORE_DIR);
       fs.mkdirSync(storeDir, { recursive: true });
 
       // 收集待扫描的图片文件
