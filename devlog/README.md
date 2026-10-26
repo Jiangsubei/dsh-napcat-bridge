@@ -10,7 +10,7 @@
 | :--- | :--- | :--- |
 | **社交关系与群感知** | [`需求文档-好友与群管理工具及专用Session.md`](./需求文档-好友与群管理工具及专用Session.md)<br>[`Checklist-好友与群管理工具及专用Session.md`](./Checklist-好友与群管理工具及专用Session.md) | 待审阅批注。涵盖：好友管理工具、群管理白名单工具、常规群成员感知（`get_group_members`）、单条消息深度透视（`get_message_detail`）、加好友专用独立 Session 与后台审计日志。 |
 | **表情包系统** | [`需求文档-表情包管理工具与本地表情库.md`](./需求文档-表情包管理工具与本地表情库.md)<br>[`Checklist-表情包管理工具与本地表情库.md`](./Checklist-表情包管理工具与本地表情库.md) | 待实测与审阅。涵盖：本地表情库落盘与标签索引、`list_faces` / `send_face` 工具、拓展“即时偷表情”工具 `collect_face`、设置卡表情包 Tab 与后台定期整理。 |
-| **预设与工具沙箱** | [`spec_session_preset_system.md`](./spec_session_preset_system.md) | 待决策方案。涵盖：QQ 会话专属轻量预设（Session Profile System）、工具白名单硬裁剪与 Agent 自修改演进机制。 |
+| **预设与工具规范** | [`架构与规范-AllInOne单Agent统筹与工具定义标准.md`](./架构与规范-AllInOne单Agent统筹与工具定义标准.md) | 架构基准与标准规范。涵盖：All-in-One 单 Agent 统筹机制、`send_qq_message` 回归、表情管理工具补全、工具定义规范与四大设计铁律。 |
 
 ---
 

@@ -336,7 +336,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     sessionManager,
   });
 
-  // 4.1 限制 NapCat 专属工具仅在 QQ 会话中呈现并允许调用 (隔离 Web UI 正常对话)
+  // 4.1 限制 NapCat 专属工具仅在 QQ 会话中呈现并允许调用 (隔离 Web UI 正常对话，杜绝工具泄露)
   const NAPCAT_TOOL_NAMES = new Set([
     'read_chat_history',
     'fetch_chat_resource',
@@ -352,6 +352,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     'send_face',
     'list_faces',
     'collect_face',
+    'manage_faces',
   ]);
 
   const extractSessionId = (agent: any): string => {

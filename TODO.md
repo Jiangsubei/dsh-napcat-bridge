@@ -12,10 +12,11 @@
 |:---:|---|---|:---:|---|
 | **P0** | *(暂无紧急阻塞)* | - | - | 预留位，随时响应生产故障或重大阻断缺陷 |
 | **P1** | **表情包管理工具 · 本地表情库 · 设置卡表情包 Tab** | `src/tools/`<br>`src/client/`<br>`src/storage/` | **已完成**<br>(生产装配闭环) | 交付用户真机体验与验收 |
-| **P1** | **QQ 会话专属预设系统**（提示词纯净化 & 工具白名单硬隔离） | `src/gateway/session/`<br>`src/prompt/` | **方案收敛**<br>(待装配验证) | 验证 `complete: true` 覆盖与 `tools.restrict` 隔离，改造 `agent-runner.ts` |
+| **P1** | **QQ 会话专属预设 · 工具定义规范化 · 表情包管理工具** | `src/gateway/session/`<br>`src/prompt/`<br>`src/tools/` | **方案收敛**<br>(推进中) | 验证预设隔离，按 v2 规范重构工具定义，实现纯粹的 `collect_face` 与独立 `manage_faces` 管理工具 |
 | **P2** | **JEV 决策模型前置群聊感知与主动唤醒** | `src/gateway/wakeup.ts`<br>`src/gateway/jev.ts` | **方案定稿**<br>(沙盒实测验证通过) | 编写 TDD 契约测试，实现 JEV 客户端与门控装配 |
 | **P3** | **Agent 自修改演进机制**（群专属人设/行为准则自我演进） | `src/gateway/session/`<br>`src/tools/` | **架构调研草案**<br>(待方案细化) | 细化自修改工具协议与权限栅栏设计，编写契约测试 |
 | **P4** | **好友与群管理工具及专用管理 Session** | `src/gateway/`<br>`src/tools/` | **需求收敛**<br>(待实测与实现) | 验证管理 API 可达性，实现管理工具及独立 Session 隔离 |
+| **P5** | **All-in-One 单 Agent 统筹重构**（表情管理工具补齐 · `send_qq_message` 回归 · 淘汰独立后台 Agent） | `src/gateway/`<br>`src/tools/`<br>`src/outbound/` | **架构远景规划**<br>(详见架构规范文档) | 补齐 `manage_faces`，引入 `send_qq_message` 解耦出站与回合，实现发完消息顺手整理表情包与记忆 |
 
 ---
 
@@ -43,15 +44,22 @@
 
 ---
 
-### 【P1】QQ 会话专属预设系统（提示词纯净化 & 工具白名单硬隔离）
+### 【P1】QQ 会话专属预设系统 · 工具定义规范化 · 表情包管理工具
 
 - **相关文档**:
-  - 架构方案: [devlog/spec_session_preset_system.md](./devlog/spec_session_preset_system.md)
+  - 架构与规范: [devlog/架构与规范-AllInOne单Agent统筹与工具定义标准.md](./devlog/架构与规范-AllInOne单Agent统筹与工具定义标准.md)
 - **核心定位**:
-  - 解决 QQ 会话全量继承 DSH 默认 Coding 预设导致的提示词膨胀问题（消除 "You are a coding agent..." 等冗余上下文）；
-  - 建立工具白名单裁剪与隔离机制（`tools.restrict`），防止群聊中提示词注入（Prompt Injection）触发宿主系统级高危工具（如 bash/pwsh）；
-  - 支持按群聊/私聊差异化装配纯净 Prompt 与安全工具集。
+  - 实施工具定义规范化重构（Tool Definition Specification v2）：精炼低 Token、自然融入 When、以代码报错替代提示词恐吓、消除寒蝉效应词汇；
+  - 统一入参命名：全量统一为 `user_id`（目标用户的 QQ 号），不留多余兼容代码；
+  - 参数精简优化：移除 `send_file` 多余的 `file_type`、砍掉 `list_faces` 无用 `cursor`；
+  - 表情包工具纯净化与解耦：`collect_face` 纯粹只做入库，将补充/修改标签、删除与配额管理独立为 `manage_faces` 工具；
+  - 后续阶段推进 QQ 会话专属预设系统（消除 coding 提示词，实施 `tools.restrict` 白名单隔离）。
 - **执行清单 (Next Steps)**:
+  - [x] 全量工具中文定义规范化重构与 Memory 使用准则自然融入落地
+  - [x] 全量参数统一规范为 `user_id`，彻底清除向下兼容胶水
+  - [x] 设计并实现独立 `manage_faces` 表情管理工具（更新标签、删除、配额查询与淘汰）
+  - [x] 纯化 `collect_face` 工具为仅负责入库，砍掉 `file_type` 与 `cursor`
+  - [x] 完善配套契约测试并通过生产装配验证 (33/33 测试全绿)
   - [ ] 验证 `@deepseek-ai/dsh-system-prompt` 中 `complete: true` 的覆盖行为与纯净 Prompt 组装
   - [ ] 验证 `@deepseek-ai/dsh-tools` 中 `tools.restrict` 白名单裁剪隔离效果
   - [ ] 改造 `src/gateway/session/agent-runner.ts` 装配纯净 QQ 专属预设
@@ -109,3 +117,21 @@
   - [ ] 设计并实现专用管理 Session 路由与生命周期管理
   - [ ] 注册管理类工具集并实施管理员白名单鉴权
   - [ ] 编写管理工具契约测试与装配验证
+
+---
+
+### 【P5】All-in-One 单 Agent 统筹重构（表情管理工具 · 发送与终结解耦 · 后台 Agent 下线）
+
+- **相关文档**:
+  - 架构与规范: [devlog/架构与规范-AllInOne单Agent统筹与工具定义标准.md](./devlog/架构与规范-AllInOne单Agent统筹与工具定义标准.md)
+- **核心定位**:
+  - 彻底去除零散的 Background Agent（下线独立 Curator、独立 Background Reviewer 会话与倒计时调度）；
+  - 研发并注册 `manage_faces` 表情管理工具，赋予 Agent 自治查询配额占用、淘汰低频表情、删除指定表情的能力；
+  - 重新引入 `send_qq_message` 工具，实现出站文本发送与回合终结彻底解耦；
+  - 打通“即时出站回复 -> 顺手在后台维护表情包（`collect_face` / `manage_faces`）与记忆（`create_memory` / `edit_memory`） -> 平稳收敛终结”的单 Agent 统一治理链路。
+- **执行清单 (Next Steps)**:
+  - [ ] 设计并实现表情管理工具 `manage_faces`（支持 `query_quota`、`evict_faces`、`delete_face` 等动作）
+  - [ ] 重新接入 `send_qq_message`，验证非终结出站机制
+  - [ ] 改造会话执行流，编写单 Agent 顺手完成表情与记忆维护的契约测试
+  - [ ] 下线独立后台 Agent 及配套调度代码，完成技术债清退
+

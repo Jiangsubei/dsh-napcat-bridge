@@ -14,6 +14,7 @@ import {
 
 export interface ReadMemoryArgs {
   type?: MemoryType;
+  user_id?: string;
   qq?: string;
   peer?: string;
 }
@@ -21,6 +22,7 @@ export interface ReadMemoryArgs {
 export interface CreateMemoryArgs {
   type: MemoryType;
   content: string;
+  user_id?: string;
   qq?: string;
   peer?: string;
 }
@@ -29,6 +31,7 @@ export interface EditMemoryArgs {
   type: MemoryType;
   old_string: string;
   new_string?: string;
+  user_id?: string;
   qq?: string;
   peer?: string;
 }
@@ -113,12 +116,13 @@ export class MemoryTools {
   }
 
   /**
-   * 归一化 user 类型的记忆 identity（QQ 号）。
-   * 优先级：显式 qq > peer 的 user_ 前缀派生 > 报错（不再退回 default）。
+   * 归一化 user 类型的记忆 identity（目标用户的 QQ 号）。
+   * 优先级：显式 user_id / qq > peer 的 user_ 前缀派生 > 报错（不再退回 default）。
    */
-  private resolveUserTarget(args: { qq?: string; peer?: string }): string | null {
-    const qq = args.qq?.trim();
-    if (qq && qq !== 'default') return qq;
+  private resolveUserTarget(args: { user_id?: string; qq?: string; peer?: string }): string | null {
+    const raw = args.user_id ?? args.qq;
+    const uid = raw?.trim();
+    if (uid && uid !== 'default') return uid;
     if (args.peer?.startsWith('user_')) {
       const derived = args.peer.slice(5).trim();
       if (derived && derived !== 'default') return derived;
@@ -140,7 +144,7 @@ export class MemoryTools {
     if (type === 'user') {
       const targetQQ = this.resolveUserTarget(args);
       if (!targetQQ) {
-        return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
+        return { success: false, message: 'user 类型记忆必须指定 user_id 参数（目标用户的 QQ 号）或传入 user_xxx 格式的 peer。' };
       }
       const rawContent = await this.storage.readUserProfileRaw(targetQQ);
       const content = rawContent || '';
@@ -199,7 +203,7 @@ export class MemoryTools {
     if (type === 'user') {
       const targetQQ = this.resolveUserTarget(args);
       if (!targetQQ) {
-        return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
+        return { success: false, message: 'user 类型记忆必须指定 user_id 参数（目标用户的 QQ 号）或传入 user_xxx 格式的 peer。' };
       }
 
       if (await this.storage.existsUserProfile(targetQQ)) {
@@ -268,7 +272,7 @@ export class MemoryTools {
     if (type === 'user') {
       const targetQQ = this.resolveUserTarget(args);
       if (!targetQQ) {
-        return { success: false, message: 'user 类型记忆必须指定 qq 参数或传入 user_xxx 格式的 peer。' };
+        return { success: false, message: 'user 类型记忆必须指定 user_id 参数（目标用户的 QQ 号）或传入 user_xxx 格式的 peer。' };
       }
       target = targetQQ;
     } else {
@@ -375,7 +379,8 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
   return [
     defineTool({
       name: 'read_memory',
-      description: '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。在需要修改、合并或精简记忆前调用，以获取最新内容与唯一 old_string。目标文件不存在或内容为空时不报错。',
+      description:
+        '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。用于在需要修改、合并或精简记忆前获取最新内容与唯一 old_string，或在需要确认深层用户偏好时查验。目标文件不存在或内容为空时不报错。',
       parameters: {
         type: {
           type: 'string',
@@ -387,9 +392,9 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           type: 'string',
           description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
         },
-        qq: {
+        user_id: {
           type: 'string',
-          description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动读取当前对话者）。",
+          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
         },
       },
       output: {
@@ -405,12 +410,12 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
           return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
         }
         return tools.readMemory({
           type: args.type || 'session',
-          qq: args.qq || resolved.qq,
+          user_id: args.user_id || resolved.qq,
           peer: args.peer || resolved.peer,
         }) as any;
       },
@@ -418,11 +423,7 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     defineTool({
       name: 'create_memory',
       description:
-        '创建用户持久画像（type=\'user\'，跨群聊私聊通用）或会话专属规则/长期群文化（type=\'session\'，仅当前群或私聊）。记忆每轮对话均会全量注入，必须保持极度紧凑（Compact）与高信号（High-signal）。\n' +
-        '【调用契机】：日常对话切勿主动调用，仅在用户明确要求记住某事或修改设定时调用。日常记忆提炼由后台自动处理。\n' +
-        '【WHEN 记录项】：仅记录跨会话持久有效的人设、偏好、工作风格、通用群规，或长期稳定的群梗/代号/固定互动剧本。\n' +
-        '【SKIP 忽略项】：严禁记录单次技术排查流水账、一次性跑分测试、临时报错、日常琐碎寒暄、一过性玩笑或易重新获取的信息。\n' +
-        '【FORMAT 格式】：必须为精简单行的陈述事实（建议 <80 字，如 "- 偏好：xxx" 或 "- 梗/互动：xxx"），严禁长篇大论或附带背景。设有严格容量硬上限（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回具体提示。仅当文件不存在时可用，文件已存在时必须用 edit_memory。',
+        '创建跨场景通用的个人偏好画像（type=\'user\'），或当前会话专属的规则与文化（type=\'session\'）。日常对话切勿主动调用，仅在用户明确要求记住特定事实/偏好/群规，或顺手提炼出长期稳定事实时调用。记忆每轮对话均全量注入，必须保持极度紧凑（Compact）与高信号，严禁记录单次技术排查流水账、一次性跑分测试、临时报错、日常琐碎寒暄、一过性玩笑或易重新获取的信息。内容必须为精简单行的陈述事实（建议单条 <80 字，如 "- 偏好：xxx" 或 "- 梗/互动：xxx"），严禁长篇大论或附带背景。严格受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符，超限直接拒绝写入）。仅当文件不存在时可用，记忆已存在时切勿重复创建，必须使用 edit_memory 修改。',
       parameters: {
         type: {
           type: 'string',
@@ -439,9 +440,9 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           type: 'string',
           description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
         },
-        qq: {
+        user_id: {
           type: 'string',
-          description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动绑定当前对话者）。",
+          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
         },
       },
       output: {
@@ -455,13 +456,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
           return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
         }
         return tools.createMemory({
           type: args.type || 'session',
           content: args.content,
-          qq: args.qq || resolved.qq,
+          user_id: args.user_id || resolved.qq,
           peer: args.peer || resolved.peer,
         }) as any;
       },
@@ -469,10 +470,7 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     defineTool({
       name: 'edit_memory',
       description:
-        '定向修改或删减已有记忆。通过 old_string 精确匹配替换为 new_string；若 new_string 省略或为空则直接删除该片段。\n' +
-        '【调用契机】：日常对话切勿主动调用，仅在用户明确要求修改或删除设定时调用。\n' +
-        '【核心用途】：优先用于合并相似事实、精简过长条目、更新偏好或删除过时无用的琐碎记忆（Consolidation），使记忆文件保持短小精炼。\n' +
-        '【约束】：禁止拼接入大段叙事，修改后同样受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回提示。要求 old_string 在目标文件中必须唯一存在。',
+        '定向修改、精简或删减已有的长期记忆条目。通过 old_string 精确匹配替换为 new_string；若 new_string 省略或为空字符串则直接删除该匹配片段。日常对话切勿主动调用，仅在用户明确要求修改或删除设定时调用；核心优先用于合并相似事实、精简过长条目、更新偏好或删除过时无用的琐碎记忆（Consolidation），使记忆文件保持短小精炼。禁止拼接入大段叙事或流水账，修改后同样受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回提示。要求 old_string 在目标文件中必须唯一存在。',
       parameters: {
         type: {
           type: 'string',
@@ -493,9 +491,9 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
           type: 'string',
           description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
         },
-        qq: {
+        user_id: {
           type: 'string',
-          description: "目标用户的 QQ 号（仅当 type='user' 时有效，留空自动绑定当前对话者）。",
+          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
         },
       },
       output: {
@@ -509,14 +507,14 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
       },
       async execute(args: any, exec) {
         const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.qq) {
+        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
           return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
         }
         return tools.editMemory({
           type: args.type || 'session',
           old_string: args.old_string,
           new_string: args.new_string,
-          qq: args.qq || resolved.qq,
+          user_id: args.user_id || resolved.qq,
           peer: args.peer || resolved.peer,
         }) as any;
       },
