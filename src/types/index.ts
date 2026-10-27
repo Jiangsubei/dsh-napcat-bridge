@@ -165,6 +165,7 @@ export interface WakeupPayload {
     from_name: string;
     content: string;
     msg_id?: number;
+    replied?: boolean;
   }>;
   /** 定时任务 ID (当 trigger === 'scheduled' 时提供) */
   task_id?: string;
@@ -701,6 +702,8 @@ export interface BridgePluginConfig {
   proactive_only_text?: boolean;
   /** 主动回复轮询窗口期 (单位: 分钟，默认 3) */
   proactive_interval_mins?: number;
+  /** 主动回复滑动窗口消息保留条数 (默认 10) */
+  proactive_buffer_size?: number;
   /** 是否启用群聊普通消息概率唤醒 */
   proactive_random_enabled?: boolean;
   /** 群聊普通消息概率唤醒几率 (0.01 ~ 1.0) */

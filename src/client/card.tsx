@@ -121,6 +121,7 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   behavior: '',
   proactive_reply_enabled: false,
   proactive_interval_mins: 3,
+  proactive_buffer_size: 10,
   proactive_only_text: false,
   proactive_random_enabled: false,
   proactive_random_probability: 0.05,
@@ -774,6 +775,19 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('proactive_interval_mins')}
             onReset={() => handleResetField('proactive_interval_mins')}
             onChange={(val) => handleFieldChange('proactive_interval_mins', parseInt(val, 10) || 3)}
+          />
+
+          <ValueField
+            id="napcat-proactive-buffer-size"
+            label="滑动窗口保留条数 (proactive_buffer_size)"
+            hint="群聊消息滑动窗口队列最大保留条数 (默认 10 条，新入旧汰)"
+            placeholder="10"
+            numeric
+            value={String(draft.proactive_buffer_size ?? 10)}
+            disabled={saving || !draft.proactive_reply_enabled}
+            overridden={model.isOverridden('proactive_buffer_size')}
+            onReset={() => handleResetField('proactive_buffer_size')}
+            onChange={(val) => handleFieldChange('proactive_buffer_size', parseInt(val, 10) || 10)}
           />
 
           <SwitchField

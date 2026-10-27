@@ -1,18 +1,21 @@
 /**
  * dsh-napcat-bridge: 群聊主动回复管理器 (Proactive Manager)
- * 管理群聊窗口期新消息聚合轮询、潜水超时定时巡检、夜间免打扰判定与防死循环。
+ * 管理群聊滑动窗口消息队列、Per-Group 观测计时重置、潜水超时定时巡检、夜间免打扰与已审阅标记流转。
  */
 
 import type { BridgePluginConfig, WakeupPayload } from '../types/index.js';
 
-export interface BufferedGroupMessage {
+export interface WindowGroupMessage {
   timestamp: number;
   from_user: string;
   from_name: string;
   content: string;
   msg_id?: number;
+  replied: boolean;
   isTextOnly?: boolean;
 }
+
+export type BufferedGroupMessage = WindowGroupMessage;
 
 export interface ProactiveCheckOptions {
   config: BridgePluginConfig;
@@ -28,7 +31,7 @@ export class ProactiveManager {
   private humanMessageTimes = new Map<string, number>();
   private lastProactiveTimes = new Map<string, number>();
   private idleTriggered = new Set<string>();
-  private bufferedMessages = new Map<string, BufferedGroupMessage[]>();
+  private windowMessages = new Map<string, WindowGroupMessage[]>();
   private timer: NodeJS.Timeout | null = null;
 
   /**
@@ -41,11 +44,11 @@ export class ProactiveManager {
   }
 
   /**
-   * 收集并缓冲群聊普通消息
+   * 收集并存入群聊普通消息到滑动窗口队列
    */
   recordGroupMessage(
     peer: string,
-    msg: BufferedGroupMessage,
+    msg: Omit<WindowGroupMessage, 'replied'>,
     config: BridgePluginConfig
   ): void {
     if (!config.proactive_reply_enabled) {
@@ -57,27 +60,65 @@ export class ProactiveManager {
 
     this.recordHumanMessage(peer, msg.timestamp);
 
-    const list = this.bufferedMessages.get(peer) || [];
-    list.push(msg);
-    // 单群最多保留 50 条最近消息，防止内存堆积
-    if (list.length > 50) {
-      list.splice(0, list.length - 50);
+    const list = this.windowMessages.get(peer) || [];
+    list.push({
+      ...msg,
+      replied: false,
+    });
+
+    const maxLimit = Math.max(1, config.proactive_buffer_size ?? 10);
+    while (list.length > maxLimit) {
+      list.shift();
     }
-    this.bufferedMessages.set(peer, list);
+    this.windowMessages.set(peer, list);
   }
 
   /**
-   * 获取某群当前积攒的待读消息列表
+   * 记录发生了一次即时直接唤醒 (如 @、戳一戳、引用)
+   * 顺延/重置该群的主动回复观测计时，并将直接唤醒消息标记为 replied: true 存入滑动窗口
    */
-  getBufferedMessages(peer: string): BufferedGroupMessage[] {
-    return this.bufferedMessages.get(peer) || [];
+  recordDirectWakeup(
+    peer: string,
+    timestamp = Date.now(),
+    msg?: { from_user: string; from_name: string; content: string; msg_id?: number }
+  ): void {
+    this.recordHumanMessage(peer, timestamp);
+    this.lastProactiveTimes.set(peer, timestamp);
+
+    if (msg) {
+      const list = this.windowMessages.get(peer) || [];
+      list.push({
+        ...msg,
+        timestamp,
+        replied: true,
+      });
+      const maxLimit = 10;
+      while (list.length > maxLimit) {
+        list.shift();
+      }
+      this.windowMessages.set(peer, list);
+    }
   }
 
   /**
-   * 清空某群待读消息缓冲池
+   * 获取某群当前滑动窗口中的消息列表
+   */
+  getWindowMessages(peer: string): WindowGroupMessage[] {
+    return this.windowMessages.get(peer) || [];
+  }
+
+  /**
+   * 兼容方法：获取缓冲池消息
+   */
+  getBufferedMessages(peer: string): WindowGroupMessage[] {
+    return this.getWindowMessages(peer);
+  }
+
+  /**
+   * 清空某群消息队列
    */
   clearBufferedMessages(peer: string): void {
-    this.bufferedMessages.delete(peer);
+    this.windowMessages.delete(peer);
   }
 
   /**
@@ -88,7 +129,7 @@ export class ProactiveManager {
   }
 
   /**
-   * 记录某群触发了一次主动回复
+   * 记录某群触发了一次主动回复并重置该群计时
    */
   recordProactiveReply(peer: string, timestamp = Date.now()): void {
     this.lastProactiveTimes.set(peer, timestamp);
@@ -136,7 +177,7 @@ export class ProactiveManager {
     for (const peer of this.humanMessageTimes.keys()) {
       peersToCheck.add(peer);
     }
-    for (const peer of this.bufferedMessages.keys()) {
+    for (const peer of this.windowMessages.keys()) {
       peersToCheck.add(peer);
     }
     if (typeof options.knownPeers === 'function') {
@@ -152,9 +193,8 @@ export class ProactiveManager {
 
     // 4. 逐群检测
     for (const peer of peersToCheck) {
-      // 4.1 Busy 态检测：若 Agent 处于 Busy 态（比如有正在运行的 ReAct 循环或未完成的任务），直接丢弃本轮主动唤醒
+      // 4.1 Busy 态检测：若 Agent 处于 Busy 态，保留消息队列流转，跳过本轮避免冲突
       if (options.isSessionBusy?.(peer)) {
-        this.clearBufferedMessages(peer);
         continue;
       }
 
@@ -173,7 +213,6 @@ export class ProactiveManager {
         if (!this.idleTriggered.has(peer)) {
           this.idleTriggered.add(peer);
           this.recordProactiveReply(peer, now);
-          this.clearBufferedMessages(peer);
 
           const payload: WakeupPayload = {
             trigger: 'proactive',
@@ -192,11 +231,23 @@ export class ProactiveManager {
         }
       }
 
-      // 4.3 窗口期新消息聚合唤醒判定
-      const buffered = this.bufferedMessages.get(peer);
-      if (buffered && buffered.length > 0) {
-        const messagesToSend = [...buffered];
-        this.clearBufferedMessages(peer);
+      // 4.3 Per-Group 观测计时检查
+      const intervalMins = config.proactive_interval_mins ?? 3;
+      const intervalMs = intervalMins * 60 * 1000;
+      const lastTrigger = this.lastProactiveTimes.get(peer);
+      if (intervalMs > 0 && lastTrigger && now - lastTrigger < intervalMs) {
+        continue;
+      }
+
+      // 4.4 滑动窗口未回复消息聚合判定
+      const list = this.windowMessages.get(peer) || [];
+      const unreplied = list.filter((m) => !m.replied);
+
+      if (unreplied.length > 0) {
+        // 关键流转：将未回复消息标记为已审阅
+        for (const m of list) {
+          m.replied = true;
+        }
         this.recordProactiveReply(peer, now);
 
         const payload: WakeupPayload = {
@@ -206,7 +257,7 @@ export class ProactiveManager {
           from_user: '',
           from_name: '',
           content: '',
-          buffered_messages: messagesToSend,
+          buffered_messages: [...unreplied],
           timestamp: now,
         };
 
@@ -278,6 +329,6 @@ export class ProactiveManager {
     this.humanMessageTimes.clear();
     this.lastProactiveTimes.clear();
     this.idleTriggered.clear();
-    this.bufferedMessages.clear();
+    this.windowMessages.clear();
   }
 }
