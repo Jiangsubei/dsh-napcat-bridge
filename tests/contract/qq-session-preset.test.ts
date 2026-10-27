@@ -78,6 +78,9 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
 
     // 专属 Prompt 验证：包含目标指令且完全不包含默认 coding 提示词
     expect(fullPrompt).toContain(QQ_PRESET_PERSONA_PREFIX);
+    expect(fullPrompt).toContain('在发言前，需要先进行角色心理推演。');
+    expect(fullPrompt).toContain('分析对方的情绪和意图，自己的心理反应以及回复策略，然后再组织发言。即使是简短闲聊也不可跳过。');
+    expect(fullPrompt).toContain('当用户交给你具体任务时，你需要是有帮助的助手。');
     expect(fullPrompt).not.toContain('You are a coding agent');
     expect(fullPrompt).not.toContain('git commit');
   });

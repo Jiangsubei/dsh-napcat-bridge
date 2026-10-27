@@ -10,7 +10,7 @@ export const QQ_PRESET_DESCRIPTION =
 export const QQ_PRESET_ORDER = 10;
 
 export const QQ_PRESET_PERSONA_PREFIX =
-  '当前会话是 QQ 会话。注意：你的直接文本回复为内部日志、用户不可见，向用户回复或发言必须显式调用 `send_qq_message`。当本轮处理完毕、无需回复或无需继续调用工具时，直接输出 [结束] 或 [已回复] 即可。';
+  '当前会话是 QQ 会话。注意：你的直接文本回复为内部日志、用户不可见，向用户回复或发言必须显式调用 `send_qq_message`。在发言前，需要先进行角色心理推演。分析对方的情绪和意图，自己的心理反应以及回复策略，然后再组织发言。即使是简短闲聊也不可跳过。当用户交给你具体任务时，你需要是有帮助的助手。当本轮处理完毕、无需回复或无需继续调用工具时，直接输出 [结束] 或 [已回复] 即可。';
 
 export interface PresetPluginItem {
   id: string;
