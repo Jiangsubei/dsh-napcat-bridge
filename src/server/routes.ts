@@ -10,6 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
 import type { BridgePluginConfig } from '../types/index.js';
+import { sanitizeConfigPayload, healProfileConfigFile } from '../config/heal.js';
 import {
   DEFAULT_WS_PORT,
   DEFAULT_IMAGE_TTL_DAYS,
@@ -108,7 +109,8 @@ export function registerConfigRoute(
 
     if (method === 'GET') {
       try {
-        const cfg = currentConfigGetter() || {};
+        const rawCfg = currentConfigGetter() || {};
+        const { valid: cfg } = sanitizeConfigPayload(rawCfg);
         const hasSecret = Boolean(cfg.ws_token && String(cfg.ws_token).trim().length > 0);
         const safeConfig = {
           ...cfg,
@@ -130,17 +132,32 @@ export function registerConfigRoute(
       try {
         const body = (await parseJsonBody(req)) || {};
         const current = currentConfigGetter() || {};
-        const cleanPayload: BridgePluginConfig = { ...body };
+        const mergedCandidate: Record<string, any> = { ...body };
 
         // 秘钥防误清空逻辑：若未提交 ws_token（为空或未定义），但现有配置存在 ws_token，自动保留现有 token
         if (
-          (!cleanPayload.ws_token || String(cleanPayload.ws_token).trim() === '') &&
+          (!mergedCandidate.ws_token || String(mergedCandidate.ws_token).trim() === '') &&
           current.ws_token
         ) {
-          cleanPayload.ws_token = current.ws_token;
+          mergedCandidate.ws_token = current.ws_token;
         }
 
-        // 持久化到 settings
+        // 自愈过滤：提取 100% 符合当前 Schema 的干净配置字段，剔除任何已下线或未知字段
+        const { valid: cleanPayload, removed } = sanitizeConfigPayload(mergedCandidate);
+
+        if (removed.length > 0) {
+          logger.info?.(
+            `[Config] 保存时检测到并自愈过滤过时配置项 (${removed.length} 项): ${removed.join(', ')}`
+          );
+          // 异步触发物理配置文件自愈，清理持久层残留的死键
+          try {
+            healProfileConfigFile(undefined, undefined, logger);
+          } catch {
+            // 物理自愈静默
+          }
+        }
+
+        // 持久化到 settings (仅提交通过 Schema 白名单校验的干净字段，杜绝 DSH isVolatilePath 500 报错)
         const settings = (ctx as any).get?.('settings');
         if (settings) {
           try {
@@ -169,6 +186,8 @@ export function registerConfigRoute(
 
         sendJson(res, 200, {
           ok: true,
+          config: cleanPayload,
+          healedKeys: removed,
           hasSecret: Boolean(
             cleanPayload.ws_token && String(cleanPayload.ws_token).trim().length > 0
           ),

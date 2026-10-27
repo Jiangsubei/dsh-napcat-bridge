@@ -40,6 +40,7 @@ import { getRuntimePresetDefinition, QQ_PRESET_ID } from './constants/preset.js'
 import { registerConfigRoute } from './server/routes.js';
 import { registerFacesRoutes } from './server/face-routes.js';
 import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
+import { healProfileConfigFile, sanitizeConfigPayload } from './config/heal.js';
 import { migrateFaceStoragePaths } from './storage/face-migration.js';
 
 export * from './memory/index.js';
@@ -111,7 +112,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         merged = mergeConfigs(legacy, merged);
       }
     }
-    return merged;
+    return sanitizeConfigPayload(merged).valid;
   };
 
   // B6: bot_qq 为 Spec 必填项 (Spec §8.2 / §1.1)；缺失时明确告警，避免自循环防护静默降级
@@ -1133,12 +1134,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;
   if (appReady && typeof appReady.onReady === 'function') {
     appReady.onReady(() => {
+      try { healProfileConfigFile(dshHome, undefined, logger); } catch {} 
       void migrateLegacyConfig(ctx, currentConfig());
       void startServer().catch(() => {});
     });
   } else {
     // 独立环境 / 测试环境 / 未注入 appReady 的场景兜底直接触发
-    void migrateLegacyConfig(ctx, currentConfig());
+    try { healProfileConfigFile(dshHome, undefined, logger); } catch {} 
+      void migrateLegacyConfig(ctx, currentConfig());
     void startServer().catch(() => {});
   }
 
