@@ -326,7 +326,7 @@ export interface SendFileResult {
 
 export interface SendQqMessageParams {
   text: string;
-  reply_to?: number;
+  reply_to?: number | string;
   at_user?: string;
 }
 

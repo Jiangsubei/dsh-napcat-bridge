@@ -126,6 +126,28 @@ describe('契约 1: send_qq_message 工具回归与会话隔离契约', () => {
     expect(resNonQQ.success).toBe(false);
     expect(resNonQQ.error).toContain('QQ 聊天会话');
   });
+
+  it('1.5 send_qq_message 弱类型容错：reply_to 支持数字字符串自动解析为数字引用', async () => {
+    let capturedPayload: any;
+    const mockGateway: any = {
+      sendMsg: async (_peer: string, payload: any) => {
+        capturedPayload = payload;
+        return { status: 'ok', retcode: 0, data: { message_id: 99999 } };
+      },
+    };
+
+    const res = await sendQqMessage(
+      { text: '测试回复消息', reply_to: '12345' as any, at_user: '20001' },
+      { peer: 'group_8888', gateway: mockGateway }
+    );
+
+    expect(res.success).toBe(true);
+    expect(capturedPayload).toEqual([
+      { type: 'reply', data: { id: 12345 } },
+      { type: 'at', data: { qq: '20001' } },
+      { type: 'text', data: { text: '测试回复消息' } },
+    ]);
+  });
 });
 
 describe('契约 2: 文本分段工具函数 (splitMessageText)', () => {

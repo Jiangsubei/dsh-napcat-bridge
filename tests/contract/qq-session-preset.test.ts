@@ -119,8 +119,9 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     expect(toolNames.has('web_search')).toBe(true);
     expect(toolNames.has('web_fetch')).toBe(true);
 
-    // 4. 技能工具
+    // 4. 技能与提问工具
     expect(toolNames.has('skill')).toBe(true);
+    expect(toolNames.has('ask_user_question')).toBe(true);
 
     // 5. NapCat 专属工具
     expect(toolNames.has('send_qq_message')).toBe(true);
@@ -179,6 +180,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     expect(pluginIds).toContain('agent-instructions');
     expect(pluginIds).toContain('skill-filesystem');
     expect(pluginIds).toContain('tool-skill');
+    expect(pluginIds).toContain('tool-ask-user');
 
     const instructionsPlugin = plugins.find((p: any) => p.id === 'agent-instructions');
     expect(instructionsPlugin.config?.maxBytes).toBe(65536);

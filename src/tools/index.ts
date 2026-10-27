@@ -608,7 +608,7 @@ export async function waitForUserMessages(
     return { success: false, error: '你需要指定有效的 timeout（等待秒数，>0）' };
   }
 
-  // 2. 会话 peer 校验（review-* 等非 QQ 会话不支持等待）
+  // 2. 会话 peer 校验（非 QQ 会话不支持等待）
   const peer = normalizePeer(ctx.peer || '');
   if (!peer.startsWith('group_') && !peer.startsWith('user_')) {
     return { success: false, error: '当前会话不是 QQ 会话，无法等待用户消息' };
@@ -1064,7 +1064,7 @@ export function splitMessageText(text: string, maxLength = 1500): string[] {
 
 /**
  * 6.9 发送 QQ 消息工具 (send_qq_message)
- * 向当前 QQ 会话发送文本消息，是系统与用户交流的唯一出站通道。
+ * 向当前 QQ 会话发送普通文本消息。
  * 支持显式引用消息 (reply_to) 与艾特用户 (at_user)，超长自动分段，透明重试。
  * 执行成功后绝不调用 concludeTurn()，回合保持开放供后续顺手维护。
  */
@@ -1108,10 +1108,13 @@ export async function sendQqMessage(
     // 显式引用与艾特（仅首段携带，不重复注入后续分段）
     if (i === 0) {
       const segments: Array<Record<string, any>> = [];
-      const replyId =
-        typeof params.reply_to === 'number' && Number.isSafeInteger(params.reply_to) && params.reply_to > 0
-          ? params.reply_to
-          : undefined;
+      let replyId: number | undefined;
+      if (params.reply_to !== undefined && params.reply_to !== null) {
+        const num = typeof params.reply_to === 'number' ? params.reply_to : Number(String(params.reply_to).trim());
+        if (Number.isSafeInteger(num) && num > 0) {
+          replyId = num;
+        }
+      }
       const atQQ =
         isGroup && typeof params.at_user === 'string' && params.at_user.trim().length > 0
           ? params.at_user.trim()
@@ -1625,7 +1628,7 @@ export function registerAgentTools(
         defineTool({
           name: 'send_qq_message',
           description:
-            '向当前 QQ 会话发送一条文本消息，是系统向用户回复或主动发言的唯一合法出站通道。当需要回复用户、发起发言、同步长任务进展或输出最终结果时调用。如需引用消息，请显式传入其数字 reply_to；如需艾特特定用户，请显式传入 at_user。未调用本工具时系统在用户侧保持绝对静默。发送图片或文件请使用 send_file，发送表情包请使用 send_face。',
+            '向当前 QQ 会话发送文本消息。注意：你的直接文本回复不会自动显示给 QQ 用户，若要向用户发言、回答问题、同步进展或输出结论，必须调用本工具传入 text 参数，否则用户看不到任何内容。如需引用消息，请显式传入其数字 reply_to；如需艾特特定用户，请显式传入 at_user。发送图片或文件请使用 send_file，发送表情包请使用 send_face，向用户提问或抉择可使用 ask_user_question。',
           parameters: {
             text: {
               type: 'string',

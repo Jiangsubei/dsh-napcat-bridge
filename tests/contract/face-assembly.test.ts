@@ -109,7 +109,7 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     expect(Object.hasOwn(res2, 'next_cursor')).toBe(false);
   });
 
-  it('装配 3: 表情工具仅限 QQ 会话呈现与执行 — WebUI 隔离且从 assemble 中剔除，QQ 与 curator- 会话放行', async () => {
+  it('装配 3: 表情工具仅限 QQ 会话呈现与执行 — WebUI 隔离且从 assemble 中剔除，QQ 会话放行', async () => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-face-asm-guard-'));
     booted = await bootDshNapcatBridge({
       dshHome: tmpHome,
@@ -125,10 +125,8 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
 
     const webWs = path.join(tmpHome, 'web-ws');
     const qqWs = path.join(tmpHome, 'qq-ws');
-    const curatorWs = path.join(tmpHome, 'curator-ws');
     fs.mkdirSync(webWs, { recursive: true });
     fs.mkdirSync(qqWs, { recursive: true });
-    fs.mkdirSync(curatorWs, { recursive: true });
 
     // 1. Web 会话 Agent: assemble 中不能包含表情工具
     const webHandle = await booted.ctx.agents.create({
@@ -172,28 +170,6 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
       signal: new AbortController().signal,
     });
     expect(allowed.isError).toBe(false);
-
-    // 4. curator- 临时巡检会话: 挂载 qq-session 预设，assemble 与调用均放行
-    const curatorHandle = await booted.ctx.agents.create({
-      sessionId: 'curator-group_8000000002-12345678',
-      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      meta: { cwd: curatorWs },
-      setup: async (agentCtx: any) => {
-        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
-      },
-    });
-    const curatorAgent = curatorHandle.agent || curatorHandle;
-    const asmCurator = await booted.ctx.systemPrompt.assemble({ scope: curatorAgent, agent: curatorAgent } as any);
-    const curatorFaces = (asmCurator.tools as any[]).filter((t) => FACE_TOOL_NAMES.has(t.name));
-    expect(curatorFaces.map((t) => t.name).sort()).toEqual([...FACE_TOOL_NAMES].sort());
-
-    const curatorAllowed = await tools.execute({
-      name: 'list_faces',
-      arguments: {},
-      agent: curatorAgent,
-      signal: new AbortController().signal,
-    });
-    expect(curatorAllowed.isError).toBe(false);
   });
 
   it('装配 4: collect_face 收集表情包必须使用绝对路径规范落盘至 canonicalFaceStoreDir，绝不受 process.cwd 漂移影响', async () => {
