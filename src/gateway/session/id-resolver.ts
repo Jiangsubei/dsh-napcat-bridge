@@ -183,6 +183,16 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
     return `${channelStr}${msgIdStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
   }
 
+  if (payload.trigger === 'scheduled') {
+    const taskTag = payload.task_id ? ` [定时任务唤醒: #${payload.task_id}]` : ' [定时任务唤醒]';
+    const ruleTag = payload.task_rule ? `\n[任务类型: ${payload.task_rule}]` : '';
+    const guide = isGroup
+      ? '（说明：这是此前设定的定时任务触发。如果是群聊场景，建议先通过 read_chat_history 工具查看最近群聊动态再决定如何发言，发言内容应自然贴切，切勿向用户透露内部 task_id 或系统事件代码等调试信息。）'
+      : '（说明：这是此前设定的定时任务触发。发言内容应自然贴切，切勿向用户透露内部 task_id 或系统事件代码等调试信息。）';
+
+    return `${channelStr}${headerTime}${taskTag}${ruleTag}\n${guide}\n\n任务要求/备注:\n${payload.content}`;
+  }
+
   if (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') {
     return `${channelStr}${msgIdStr}${headerTime}\n（当前群聊已较长时间没有新发言，你正主动在群里发起一条消息。你需要先调用 read_chat_history 工具查询此前群内最近的消息记录以补充上下文再发言。切勿在回复中透露任何系统事件、潜水超时或定时任务等后台痕迹。）`;
   }
