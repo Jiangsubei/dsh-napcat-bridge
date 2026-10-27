@@ -5,7 +5,7 @@
  * 1. 规避大模型受群聊上下文欺骗（如用户声称“我是群主”导致的身份幻觉）；
  * 2. 基于 NapCat OneBot 11 get_group_member_list 批量接口，配合内存 TTL 缓存，避免单人接口频繁超时；
  * 3. 支持按 user_id 精确查询、按 query 模糊搜索（昵称/群名片）以及按 role 筛选特权群体；
- * 4. 会话门控：仅在群聊有效，私聊自动防御性拦截。
+ * 4. 会话门控：仅在群聊有效，私聊自动防御性拦截；群聊 ID 纯隐式从 Agent 运行时会话中自动继承，无需且不支持模型传入。
  */
 
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
@@ -126,18 +126,44 @@ export function formatMemberInfo(raw: GroupMemberRawItem): FormattedGroupMember 
 }
 
 /**
- * 解析当前执行上下文中的真实群号
+ * 从当前执行环境纯隐式解析真实群号（Agent 无需感知也无法指定群号，完全由会话继承）
+ * 支持来源优先级：
+ * 1. ctx.groupId（明确群号上下文）
+ * 2. exec?.agent?.session?.id 或 exec?.agent?.sessionId 等运行时 session ID
+ * 3. ctx.peer（归一化或未归一化的 peer 标识）
  */
-export function resolveGroupId(ctx: ToolExecutionContext): string | undefined {
+export function resolveGroupId(
+  ctx: ToolExecutionContext,
+  exec?: any
+): string | undefined {
   if (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') {
     return String(ctx.groupId).trim();
   }
-  if (ctx.peer && typeof ctx.peer === 'string') {
-    const match = ctx.peer.match(/^group_(\d+)$/);
-    if (match) {
-      return match[1];
+
+  const session = (exec?.agent as any)?.session;
+  const candidatePeers = [
+    session?.id,
+    (exec?.agent as any)?.sessionId,
+    (exec?.agent as any)?.id,
+    ctx.peer,
+  ];
+
+  for (const raw of candidatePeers) {
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const p = raw.trim();
+      // 1. qq-group-<group_id> 或 qq-group-<group_id>-<sub_id>
+      const qqGroupMatch = p.match(/^qq-group-([^-]+)/);
+      if (qqGroupMatch) return qqGroupMatch[1];
+
+      // 2. group_<group_id>
+      const groupUnderMatch = p.match(/^group_(\d+)/);
+      if (groupUnderMatch) return groupUnderMatch[1];
+
+      // 3. 裸数字群号
+      if (/^\d{5,12}$/.test(p)) return p;
     }
   }
+
   return undefined;
 }
 
@@ -146,9 +172,10 @@ export function resolveGroupId(ctx: ToolExecutionContext): string | undefined {
  */
 export async function queryGroupMemberInfo(
   params: QueryGroupMemberParams,
-  ctx: ToolExecutionContext
+  ctx: ToolExecutionContext,
+  exec?: any
 ): Promise<QueryGroupMemberResult> {
-  const groupId = resolveGroupId(ctx);
+  const groupId = resolveGroupId(ctx, exec);
   if (!groupId) {
     return {
       success: false,
@@ -297,9 +324,9 @@ export function createGetGroupMemberInfoTool(
         return [{ type: 'text', text: lines.join('\n') }];
       },
     },
-    async execute(args) {
+    async execute(args, exec) {
       const ctx = contextGetter();
-      return (await queryGroupMemberInfo(args as QueryGroupMemberParams, ctx)) as any;
+      return (await queryGroupMemberInfo(args as QueryGroupMemberParams, ctx, exec)) as any;
     },
   });
 }
