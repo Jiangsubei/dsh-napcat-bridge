@@ -58,7 +58,7 @@ const SafeIconChevronDown: React.ComponentType<{ className?: string }> = resolve
 
 export { DEFAULT_BASE_CONFIG };
 
-export type SettingsTabId = 'connection' | 'persona' | 'proactive' | 'memory' | 'face';
+export type SettingsTabId = 'connection' | 'persona' | 'proactive' | 'memory' | 'face' | 'slang';
 
 export interface TabItem {
   id: SettingsTabId;
@@ -71,6 +71,7 @@ export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'proactive', label: '主动回复' },
   { id: 'memory', label: '记忆' },
   { id: 'face', label: '表情包' },
+  { id: 'slang', label: '黑话学习' },
 ] as const;
 
 export interface CardController {
@@ -134,6 +135,9 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   face_store_dir: '.dsh/napcat/faces',
   face_sub_type: 1,
   face_evict_policy: 'evict_lru',
+  slang_enabled: true,
+  slang_budget_chars: 5000,
+  slang_storage_path: '.dsh/napcat/slang/slang.md',
 };
 
 function formatArrayToString(arr?: string[]): string {
@@ -258,6 +262,73 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
       void loadFaces();
     }
   }, [activeTab, loadFaces]);
+
+  const [slangEntries, setSlangEntries] = useState<Array<{ term: string; definition: string; example: string }>>([]);
+  const [slangTotal, setSlangTotal] = useState(0);
+  const [slangCharCount, setSlangCharCount] = useState(0);
+  const [slangBudgetChars, setSlangBudgetChars] = useState(5000);
+  const [slangLoading, setSlangLoading] = useState(false);
+  const [editingSlangTerm, setEditingSlangTerm] = useState<string | null>(null);
+  const [editingSlangNewTerm, setEditingSlangNewTerm] = useState('');
+  const [editingSlangDef, setEditingSlangDef] = useState('');
+  const [editingSlangEx, setEditingSlangEx] = useState('');
+
+  const loadSlang = useCallback(async () => {
+    setSlangLoading(true);
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/slang');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.ok && Array.isArray(data.entries)) {
+        setSlangEntries(data.entries);
+        setSlangTotal(data.total || data.entries.length);
+        setSlangCharCount(data.char_count || 0);
+        setSlangBudgetChars(data.budget_chars || 5000);
+      }
+    } catch {
+      // 离线或加载静默
+    } finally {
+      setSlangLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'slang') {
+      void loadSlang();
+    }
+  }, [activeTab, loadSlang]);
+
+  const handleDeleteSlang = async (term: string) => {
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/slang/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ term }),
+      });
+      if (res.ok) {
+        void loadSlang();
+      }
+    } catch {}
+  };
+
+  const handleSaveEditSlang = async (term: string) => {
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/slang/edit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          term,
+          new_term: editingSlangNewTerm.trim() || undefined,
+          definition: editingSlangDef.trim() || undefined,
+          example: editingSlangEx.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setEditingSlangTerm(null);
+        void loadSlang();
+      }
+    } catch {}
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1123,6 +1194,189 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                       </button>
                     </div>
                   </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div
+          id="napcat-tabpanel-slang"
+          data-testid="napcat-tabpanel-slang"
+          role="tabpanel"
+          aria-labelledby="napcat-tab-slang"
+          hidden={activeTab !== 'slang'}
+          className={[
+            cardStyle.tabPanel,
+            activeTab !== 'slang' ? cardStyle.tabPanelHidden : '',
+          ].filter(Boolean).join(' ')}
+          style={activeTab !== 'slang' ? { display: 'none' } : undefined}
+        >
+          <SwitchField
+            id="napcat-slang-enabled"
+            label="装载黑话学习套件 (slang_enabled)"
+            hint="控制新建会话是否在预设中包含黑话学习工具集与动态上下文，保存后对后续新会话生效"
+            checked={Boolean(draft.slang_enabled ?? true)}
+            disabled={saving}
+            overridden={model.isOverridden('slang_enabled')}
+            onReset={() => handleResetField('slang_enabled')}
+            onChange={(checked) => handleFieldChange('slang_enabled', checked)}
+          />
+
+          {(draft.slang_enabled ?? true) && (
+            <>
+              <ValueField
+                id="napcat-slang-budget-chars"
+                label="黑话字符预算上限 (slang_budget_chars)"
+                hint="黑话知识库字符预算上限，写入超额时拦截并提示清理 (默认 5000)"
+                placeholder="5000"
+                numeric
+                value={String(draft.slang_budget_chars ?? 5000)}
+                disabled={saving}
+                overridden={model.isOverridden('slang_budget_chars')}
+                onReset={() => handleResetField('slang_budget_chars')}
+                onChange={(val) => handleFieldChange('slang_budget_chars', parseInt(val, 10) || 5000)}
+              />
+
+              <ValueField
+                id="napcat-slang-storage-path"
+                label="黑话 Markdown 存储路径 (slang_storage_path)"
+                hint="全局黑话文档持久化路径 (默认 .dsh/napcat/slang/slang.md)"
+                placeholder=".dsh/napcat/slang/slang.md"
+                value={draft.slang_storage_path || '.dsh/napcat/slang/slang.md'}
+                disabled={saving}
+                overridden={model.isOverridden('slang_storage_path')}
+                onReset={() => handleResetField('slang_storage_path')}
+                onChange={(val) => handleFieldChange('slang_storage_path', val)}
+              />
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0 8px', borderTop: '1px solid var(--dsw-alias-border-l2)', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>
+                <div>
+                  共 <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{slangTotal}</strong> 条黑话词条
+                </div>
+                <div>
+                  字符占用: <strong style={{ color: slangCharCount > slangBudgetChars ? 'var(--dsw-alias-label-error)' : 'var(--dsw-alias-label-primary)' }}>{slangCharCount}</strong> / {slangBudgetChars} 字符
+                </div>
+              </div>
+
+              {slangLoading ? (
+                <div className={faceStyle.empty}>
+                  <p className={faceStyle.emptyText}>正在加载黑话库...</p>
+                </div>
+              ) : slangEntries.length === 0 ? (
+                <div className={faceStyle.empty}>
+                  <p className={faceStyle.emptyText}>暂无已收录黑话词条，聊天中 Agent 会自动学习或可手动通过 record_slang 工具添加。</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  {slangEntries.map((item) => {
+                    const isEditing = editingSlangTerm === item.term;
+                    return (
+                      <div
+                        key={item.term}
+                        style={{
+                          padding: '10px 12px',
+                          border: '1px solid var(--dsw-alias-border-l2)',
+                          borderRadius: '8px',
+                          background: 'var(--dsw-alias-bg-layer-2)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--dsw-alias-label-primary)', fontSize: '13px' }}>
+                            {item.term}
+                          </div>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              className={`napcat-slang-edit-btn ${faceStyle.actionBtn}`}
+                              title="编辑词条"
+                              onClick={() => {
+                                if (isEditing) {
+                                  setEditingSlangTerm(null);
+                                } else {
+                                  setEditingSlangTerm(item.term);
+                                  setEditingSlangNewTerm(item.term);
+                                  setEditingSlangDef(item.definition);
+                                  setEditingSlangEx(item.example);
+                                }
+                              }}
+                            >
+                              <IconEdit size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className={`napcat-slang-delete-btn ${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
+                              title="删除词条"
+                              onClick={() => handleDeleteSlang(item.term)}
+                            >
+                              <IconTrash size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {!isEditing ? (
+                          <>
+                            <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>
+                              {item.definition}
+                            </div>
+                            {item.example && (
+                              <div style={{ fontSize: '11px', color: 'var(--dsw-alias-label-tertiary)', fontStyle: 'italic' }}>
+                                例：{item.example}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className={faceStyle.inlineEditor}>
+                            <input
+                              type="text"
+                              value={editingSlangNewTerm}
+                              onChange={(e) => setEditingSlangNewTerm(e.target.value)}
+                              placeholder="词条名称"
+                              className={fieldStyle.input}
+                              style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                            />
+                            <input
+                              type="text"
+                              value={editingSlangDef}
+                              onChange={(e) => setEditingSlangDef(e.target.value)}
+                              placeholder="释义"
+                              className={fieldStyle.input}
+                              style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                            />
+                            <input
+                              type="text"
+                              value={editingSlangEx}
+                              onChange={(e) => setEditingSlangEx(e.target.value)}
+                              placeholder="例句"
+                              className={fieldStyle.input}
+                              style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                            />
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                              <button
+                                type="button"
+                                className={cardStyle.discard}
+                                onClick={() => setEditingSlangTerm(null)}
+                                style={{ height: '24px', padding: '0 8px', fontSize: '11px' }}
+                              >
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className={cardStyle.save}
+                                onClick={() => handleSaveEditSlang(item.term)}
+                                style={{ height: '24px', padding: '0 10px', fontSize: '11px' }}
+                              >
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>

@@ -58,6 +58,8 @@ import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 import type { TaskScheduler } from '../scheduler/index.js';
 import { createScheduleTaskTool, createManageScheduledTasksTool } from './scheduler.js';
 export { createScheduleTaskTool, createManageScheduledTasksTool };
+import { createSlangToolDefinitions, SlangStorage } from '../slang/index.js';
+export { createSlangToolDefinitions, SlangStorage };
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -84,6 +86,8 @@ export interface ToolExecutionContext {
   faceEvictPolicy?: 'reject' | 'evict_lru';
   /** 定时任务与周期调度引擎 */
   scheduler?: TaskScheduler | null;
+  /** 黑话存储管理器 */
+  slangStorage?: SlangStorage;
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -1189,6 +1193,7 @@ export interface AgentToolsOptions {
   waitRegistry?: MessageWaitRegistry;
   inboundMsgIdGetter?: (peer: string) => number | undefined;
   scheduler?: TaskScheduler;
+  slangStorage?: SlangStorage;
   config?: (() => BridgePluginConfig) | BridgePluginConfig;
 }
 
@@ -1202,6 +1207,9 @@ export function registerAgentTools(
   const getConfig = (): BridgePluginConfig => {
     if (typeof (options as any).config === 'function') {
       return (options as any).config() || {};
+    }
+    if (typeof (options as any).configGetter === 'function') {
+      return (options as any).configGetter() || {};
     }
     if ((options as any).config && typeof (options as any).config === 'object') {
       return (options as any).config;
@@ -1918,6 +1926,21 @@ export function registerAgentTools(
         })
       )
     );
+
+    // 12. 黑话学习工具集 (由 slang_enabled 总开关前置门控，默认开启)
+    if (getConfig().slang_enabled !== false) {
+      const storage =
+        options.slangStorage ||
+        new SlangStorage(
+          getConfig().slang_storage_path,
+          () => getConfig().slang_budget_chars ?? 5000,
+          options.dshHome
+        );
+      const slangDefs = createSlangToolDefinitions(storage);
+      for (const def of slangDefs) {
+        unregisters.push(tools.register(def));
+      }
+    }
 
     // 11. manage_scheduled_tasks
     unregisters.push(

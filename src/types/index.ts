@@ -572,6 +572,52 @@ export interface ManageScheduledTasksResult {
   error?: string;
 }
 
+// ==================== 4.6 黑话学习与管理契约 ====================
+
+export interface SlangEntry {
+  term: string;
+  definition: string;
+  example: string;
+}
+
+export interface RecordSlangParams {
+  term: string;
+  definition: string;
+  example: string;
+}
+
+export interface RecordSlangResult {
+  [key: string]: any;
+  success: boolean;
+  entry?: SlangEntry;
+  action: 'created' | 'updated';
+  char_count: number;
+  budget_chars: number;
+  message?: string;
+  error?: string;
+}
+
+export interface ManageSlangParams {
+  action: 'list' | 'edit' | 'delete';
+  term?: string;
+  definition?: string;
+  example?: string;
+  keyword?: string;
+}
+
+export interface ManageSlangResult {
+  [key: string]: any;
+  success: boolean;
+  action: 'list' | 'edit' | 'delete';
+  entries?: SlangEntry[];
+  entry?: SlangEntry;
+  total?: number;
+  char_count?: number;
+  budget_chars?: number;
+  message?: string;
+  error?: string;
+}
+
 // ==================== 5. 插件配置接口 ====================
 
 export interface BridgePluginConfig {
@@ -615,6 +661,12 @@ export interface BridgePluginConfig {
   face_sub_type?: number;
   /** 表情库满额淘汰策略 ('reject' 拒绝新增 / 'evict_lru' 淘汰最久未用，默认 'reject') */
   face_evict_policy?: 'reject' | 'evict_lru';
+  /** 控制新建会话是否装载黑话工具集与注入黑话上下文，对后续新会话生效 */
+  slang_enabled?: boolean;
+  /** 黑话知识库字符预算上限 (默认 5000 字符) */
+  slang_budget_chars?: number;
+  /** 黑话 Markdown 文档保存路径 (默认 .dsh/napcat/slang/slang.md) */
+  slang_storage_path?: string;
 }
 
 // ==================== 6. 出站串行队列与入站上下文契约 ====================

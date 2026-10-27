@@ -25,6 +25,9 @@ import {
   DEFAULT_FACE_STORE_DIR,
   DEFAULT_FACE_SUB_TYPE,
   DEFAULT_FACE_EVICT_POLICY,
+  DEFAULT_SLANG_ENABLED,
+  DEFAULT_SLANG_BUDGET_CHARS,
+  DEFAULT_SLANG_STORAGE_PATH,
 } from '../constants/index.js';
 import type { BridgePluginConfig } from '../types/index.js';
 
@@ -53,6 +56,9 @@ export const BridgeConfigSchema = z.object({
   face_store_dir: z.string().default(DEFAULT_FACE_STORE_DIR).volatile().description('本地表情库文件存储目录 (默认 .dsh/napcat/faces)'),
   face_sub_type: z.number().default(DEFAULT_FACE_SUB_TYPE).volatile().description('发送表情使用的 sub_type 值 (默认 1)'),
   face_evict_policy: z.union([z.const('reject'), z.const('evict_lru')]).default(DEFAULT_FACE_EVICT_POLICY).volatile().description('满额策略 (reject: 拒绝新增, evict_lru: 淘汰最久未用)'),
+  slang_enabled: z.boolean().default(DEFAULT_SLANG_ENABLED).volatile().description('控制新建会话是否装载黑话工具集与注入黑话上下文，对后续新会话生效'),
+  slang_budget_chars: z.number().default(DEFAULT_SLANG_BUDGET_CHARS).volatile().description('黑话知识库字符预算上限 (默认 5000 字符)'),
+  slang_storage_path: z.string().default(DEFAULT_SLANG_STORAGE_PATH).volatile().description('黑话 Markdown 文档保存路径 (默认 .dsh/napcat/slang/slang.md)'),
 });
 
 export type { BridgePluginConfig };
