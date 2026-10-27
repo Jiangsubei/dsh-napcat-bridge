@@ -289,6 +289,63 @@ export interface ListGroupFilesResult {
   error?: string;
 }
 
+export interface GroupMemberRawItem {
+  group_id: number;
+  user_id: number | string;
+  nickname: string;
+  card?: string;
+  sex?: string;
+  age?: number;
+  area?: string;
+  level?: string;
+  qq_level?: number;
+  join_time: number;
+  last_sent_time: number;
+  title_expire_time?: number;
+  unfriendly?: boolean;
+  card_changeable?: boolean;
+  is_robot?: boolean;
+  shut_up_timestamp?: number;
+  role: 'owner' | 'admin' | 'member';
+  title?: string;
+  [key: string]: unknown;
+}
+
+export interface QueryGroupMemberParams {
+  /** 目标成员的 QQ 号（精确匹配） */
+  user_id?: string;
+  /** 目标成员的昵称或群名片模糊搜索关键词 */
+  query?: string;
+  /** 按群身份角色筛选 ('owner' 群主, 'admin' 管理员, 'member' 普通成员, 'all' 全部) */
+  role?: 'owner' | 'admin' | 'member' | 'all';
+  /** 是否强制穿透缓存刷新群成员数据 (默认 false) */
+  no_cache?: boolean;
+}
+
+export interface FormattedGroupMember {
+  user_id: string;
+  display_name: string;
+  nickname: string;
+  card: string;
+  role: string;
+  title: string;
+  join_time: string;
+  last_sent_time: string;
+  level: string;
+  status: string;
+  is_robot: boolean;
+}
+
+export interface QueryGroupMemberResult {
+  success: boolean;
+  group_id?: string | number;
+  members: FormattedGroupMember[];
+  total: number;
+  total_matched?: number;
+  error?: string;
+  message?: string;
+}
+
 export interface FetchChatResourceParams {
   file_id: string;
   busid?: number;

@@ -60,6 +60,12 @@ import { createScheduleTaskTool, createManageScheduledTasksTool } from './schedu
 export { createScheduleTaskTool, createManageScheduledTasksTool };
 import { createSlangToolDefinitions, SlangStorage } from '../slang/index.js';
 export { createSlangToolDefinitions, SlangStorage };
+import {
+  createGetGroupMemberInfoTool,
+  queryGroupMemberInfo,
+  formatMemberInfo,
+} from './member-info.js';
+export { createGetGroupMemberInfoTool, queryGroupMemberInfo, formatMemberInfo };
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -1950,6 +1956,19 @@ export function registerAgentTools(
           return {
             scheduler: options.scheduler || g.scheduler,
             peer: g.peer,
+          };
+        })
+      )
+    );
+
+    // 13. get_group_member_info (群成员信息查询)
+    unregisters.push(
+      tools.register(
+        createGetGroupMemberInfoTool(() => {
+          const g = getGlobalToolContext();
+          return {
+            ...g,
+            gateway: options.gateway || g.gateway,
           };
         })
       )
