@@ -1231,12 +1231,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => () => {
-      void disposePlugin();
+      return disposePlugin();
     });
   }
 
   (ctx as any).on?.('dispose', () => {
-    void disposePlugin();
+    return disposePlugin();
   });
 }
 

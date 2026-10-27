@@ -164,7 +164,11 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
   }
 
   const dispose = async () => {
-    await (ctx as any).emit?.('dispose');
+    if (typeof (ctx as any).parallel === 'function') {
+      await (ctx as any).parallel('dispose');
+    } else {
+      await (ctx as any).emit?.('dispose');
+    }
     await (ctx as any).fiber?.dispose?.();
   };
 

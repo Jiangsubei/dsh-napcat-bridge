@@ -17,7 +17,7 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
       dshHome: tmpHome,
       config: {
         bot_qq: '1000000001',
-        ws_port: 8080,
+        ws_port: 18080,
       },
     });
   });
