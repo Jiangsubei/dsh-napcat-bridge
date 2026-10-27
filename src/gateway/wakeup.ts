@@ -896,55 +896,7 @@ export async function shouldWakeup(
     }
   }
 
-  // 3.3 群聊普通消息概率主动唤醒 (Proactive Random Wakeup)
-  if (
-    options.proactive?.proactive_reply_enabled &&
-    options.proactive?.proactive_random_enabled
-  ) {
-    // 消息类型排除检查 (纯单表情、视频、语音、卡片小组件等；仅回复文本内容模式下非纯文本一律排除)
-    const onlyText = Boolean(options.proactive?.proactive_only_text);
-    if (isExcludedFromProactive(msgEvent, onlyText)) {
-      return { wakeup: false };
-    }
-
-    // 夜间免打扰检查
-    if (
-      options.proactive.proactive_night_dnd !== false &&
-      options.proactiveManager?.isNightDnd(timestamp)
-    ) {
-      return { wakeup: false };
-    }
-
-    // 冷却期检查
-    const cooldownMins = options.proactive.proactive_cooldown_mins ?? 10;
-    if (
-      options.proactiveManager?.isCooldown(peer, cooldownMins, timestamp)
-    ) {
-      return { wakeup: false };
-    }
-
-    // 概率判定
-    const probability = options.proactive.proactive_random_probability ?? 0.05;
-    if (probability > 0 && Math.random() < probability) {
-      const payload: WakeupPayload = {
-        msg_id: inboundMsgId,
-        trigger: 'proactive',
-        sub_trigger: 'random',
-        peer,
-        from_user: fromUser,
-        from_name: fromName,
-        content,
-        quoted,
-        images: combinedImages.length > 0 ? combinedImages : undefined,
-        timestamp,
-      };
-      return {
-        wakeup: true,
-        trigger: 'proactive',
-        payload,
-      };
-    }
-  }
+  // 3.3 普通群消息不再即时唤醒，由 ProactiveManager 统一收集缓冲并在轮询窗口期集中研判
 
   return { wakeup: false };
 }

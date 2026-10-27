@@ -23,7 +23,7 @@ import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';
 import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
 import { OfflineMessageSyncer } from './gateway/sync.js';
 import { SessionManager } from './gateway/session.js';
-import { shouldWakeup, parseNormalizedContent, resolveAtNicknames } from './gateway/wakeup.js';
+import { shouldWakeup, parseNormalizedContent, resolveAtNicknames, isExcludedFromProactive } from './gateway/wakeup.js';
 import { CachedGroupMemberResolver } from './gateway/members.js';
 import { ProactiveManager } from './gateway/proactive.js';
 import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
@@ -431,6 +431,20 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   });
   sessionManager.setOutboundBridge?.(outboundBridge);
   const stopOutboundBridge = outboundBridge.start();
+
+  // 暴露 proactiveManager 与 sessionManager 供 Cordis 上下文获取
+  try {
+    if (typeof (ctx as any).provide === 'function') {
+      (ctx as any).provide('napcat-proactive');
+      (ctx as any).provide('napcat-session');
+    }
+  } catch {}
+  (ctx as any)['napcat-proactive'] = proactiveManager;
+  (ctx as any)['napcat-session'] = sessionManager;
+  if (typeof (ctx as any).set === 'function') {
+    (ctx as any).set('napcat-proactive', proactiveManager);
+    (ctx as any).set('napcat-session', sessionManager);
+  }
 
   // 6. 审批 waterfall 响应器（独立于提问 provider，不注册 userQuestions 以避免与官方冲突）
   // 注：提问 provider 注册已移除 —— DSH web profile 下官方 dsh-host-apiproxy 已注册唯一 userQuestions
@@ -928,6 +942,22 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             }
           },
         });
+      } else {
+        // 未触发即时唤醒：若为群聊普通消息且开启主动回复，将消息存入主动回复待读池
+        if (isGroup && !isSelf) {
+          proactiveManager.recordGroupMessage(
+            peer,
+            {
+              timestamp,
+              from_user: String(event.user_id),
+              from_name: event.sender?.card || event.sender?.nickname || '',
+              content: content || (event.raw_message ?? ''),
+              msg_id: Number(event.message_id) || undefined,
+              isTextOnly: !isExcludedFromProactive(event, true),
+            },
+            currentConfig()
+          );
+        }
       }
     } catch (err) {
       logger.error?.('[Plugin] 唤醒判定或下发异常:', err);
@@ -1160,17 +1190,18 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       });
     }
 
-    // 启动群聊潜水超时主动巡检定时器
-    proactiveManager.startIdleChecker(() => ({
+    // 启动群聊主动回复与潜水超时集中巡检定时器
+    proactiveManager.startChecker(() => ({
       config: currentConfig(),
+      isSessionBusy: (peer) => sessionManager.isBusy(peer),
       dispatchWakeup: async (payload) => {
-        logger.info?.(`[Plugin] 潜水超时触发主动唤醒 (peer: ${payload.peer})`);
+        logger.info?.(`[Plugin] 主动回复触发唤醒 (trigger: ${payload.trigger}, sub_trigger: ${payload.sub_trigger}, peer: ${payload.peer})`);
         const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');
         const blankContext = {
           msg_id: undefined as any,
           from_user: '',
           is_group: isGroup,
-          trigger: 'idle',
+          trigger: payload.sub_trigger || 'idle',
           is_synthetic: true,
         };
         outboundBridge.trackInboundContext(payload.peer, blankContext);
@@ -1189,7 +1220,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           return [];
         }
       },
-    }));
+    }), (currentConfig().proactive_interval_mins ?? 3) * 60 * 1000);
   };
 
   const appReady = typeof (ctx as any).get === 'function' ? (ctx as any).get('appReady') : undefined;

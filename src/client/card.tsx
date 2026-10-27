@@ -120,6 +120,7 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   persona: '',
   behavior: '',
   proactive_reply_enabled: false,
+  proactive_interval_mins: 3,
   proactive_only_text: false,
   proactive_random_enabled: false,
   proactive_random_probability: 0.05,
@@ -762,6 +763,19 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onChange={(checked) => handleFieldChange('proactive_reply_enabled', checked)}
           />
 
+          <ValueField
+            id="napcat-proactive-interval-mins"
+            label="主动回复轮询间隔 (proactive_interval_mins)"
+            hint="定期巡检群聊消息的窗口期时长 (单位: 分钟，默认 3)"
+            placeholder="3"
+            numeric
+            value={String(draft.proactive_interval_mins ?? 3)}
+            disabled={saving || !draft.proactive_reply_enabled}
+            overridden={model.isOverridden('proactive_interval_mins')}
+            onReset={() => handleResetField('proactive_interval_mins')}
+            onChange={(val) => handleFieldChange('proactive_interval_mins', parseInt(val, 10) || 3)}
+          />
+
           <SwitchField
             id="napcat-proactive-only-text"
             label="仅回复文本内容 (proactive_only_text)"
@@ -775,30 +789,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('proactive_only_text')}
             onReset={() => handleResetField('proactive_only_text')}
             onChange={(checked) => handleFieldChange('proactive_only_text', checked)}
-          />
-
-          <SwitchField
-            id="napcat-proactive-random-enabled"
-            label="普通消息概率插话 (proactive_random_enabled)"
-            hint={draft.proactive_reply_enabled ? '群聊收到普通消息时按设定几率随机唤醒 Agent 参与交流' : '需先开启上方的「启用群聊主动回复」总开关'}
-            checked={draft.proactive_random_enabled ?? false}
-            disabled={saving || !draft.proactive_reply_enabled}
-            overridden={model.isOverridden('proactive_random_enabled')}
-            onReset={() => handleResetField('proactive_random_enabled')}
-            onChange={(checked) => handleFieldChange('proactive_random_enabled', checked)}
-          />
-
-          <ValueField
-            id="napcat-proactive-random-probability"
-            label="随机插话概率 (proactive_random_probability)"
-            hint="普通消息触发概率 (0~1 之间的小数，如 0.05 代表 5%)"
-            placeholder="0.05"
-            numeric
-            value={String(draft.proactive_random_probability ?? 0.05)}
-            disabled={saving || !draft.proactive_reply_enabled || !draft.proactive_random_enabled}
-            overridden={model.isOverridden('proactive_random_probability')}
-            onReset={() => handleResetField('proactive_random_probability')}
-            onChange={(val) => handleFieldChange('proactive_random_probability', parseFloat(val) || 0.05)}
           />
 
           <SwitchField
@@ -823,19 +813,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('proactive_idle_timeout_mins')}
             onReset={() => handleResetField('proactive_idle_timeout_mins')}
             onChange={(val) => handleFieldChange('proactive_idle_timeout_mins', parseInt(val, 10) || 120)}
-          />
-
-          <ValueField
-            id="napcat-proactive-cooldown"
-            label="主动回复冷却时间 (proactive_cooldown_mins)"
-            hint="单群两次主动回复之间的最小冷却间隔，避免频繁插话打扰 (单位: 分钟，默认 10)"
-            placeholder="10"
-            numeric
-            value={String(draft.proactive_cooldown_mins ?? 10)}
-            disabled={saving || !draft.proactive_reply_enabled}
-            overridden={model.isOverridden('proactive_cooldown_mins')}
-            onReset={() => handleResetField('proactive_cooldown_mins')}
-            onChange={(val) => handleFieldChange('proactive_cooldown_mins', parseInt(val, 10) || 10)}
           />
 
           <SwitchField

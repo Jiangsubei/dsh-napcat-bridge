@@ -157,7 +157,15 @@ export interface WakeupPayload {
   msg_id?: number;
   trigger: WakeupTriggerType | 'direct';
   /** 主动回复触发子类型: random (普通消息概率插话) | idle (潜水超时冒泡) */
-  sub_trigger?: 'random' | 'idle';
+  sub_trigger?: 'polling' | 'idle' | 'random';
+  /** 聚合的主动关注消息列表 (当 sub_trigger === 'polling' 时提供) */
+  buffered_messages?: Array<{
+    timestamp: number;
+    from_user: string;
+    from_name: string;
+    content: string;
+    msg_id?: number;
+  }>;
   /** 定时任务 ID (当 trigger === 'scheduled' 时提供) */
   task_id?: string;
   /** 定时任务说明/规则描述 (当 trigger === 'scheduled' 时提供) */
@@ -687,10 +695,12 @@ export interface BridgePluginConfig {
   image_ttl_days?: number;
   persona?: string;
   behavior?: string;
-  /** 是否启用群聊主动回复能力 (总开关，关闭时概率唤醒与潜水唤醒全部禁用) */
+  /** 是否启用群聊主动回复能力 (总开关，关闭时主动轮询与潜水唤醒全部禁用) */
   proactive_reply_enabled?: boolean;
   /** 仅回复文本内容（纯文本模型专用）：开启后仅对纯文本消息触发主动回复，视频/图片/表情包等多模态消息一律不主动回复 */
   proactive_only_text?: boolean;
+  /** 主动回复轮询窗口期 (单位: 分钟，默认 3) */
+  proactive_interval_mins?: number;
   /** 是否启用群聊普通消息概率唤醒 */
   proactive_random_enabled?: boolean;
   /** 群聊普通消息概率唤醒几率 (0.01 ~ 1.0) */

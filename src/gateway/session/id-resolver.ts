@@ -154,6 +154,17 @@ export function formatSessionTitle(
  * 组装发给 Agent 的唤醒文本 (Wakeup Prompt)
  * 格式与存储层 / 历史记录检索格式对齐，包含本地化时间戳 [YYYY-MM-DD HH:mm:ss]
  */
+export function formatTimeOnly(timestamp: number): string {
+  if (!timestamp || Number.isNaN(timestamp)) return '';
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hour = pad(d.getHours());
+  const minute = pad(d.getMinutes());
+  const second = pad(d.getSeconds());
+  return `${hour}:${minute}:${second}`;
+}
+
 export function formatWakeupPrompt(payload: WakeupPayload): string {
   const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');
   const groupId = isGroup
@@ -194,28 +205,35 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
   }
 
   if (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') {
-    return `${channelStr}${msgIdStr}${headerTime}\n（当前群聊已较长时间没有新发言，你正主动在群里发起一条消息。你需要先调用 read_chat_history 工具查询此前群内最近的消息记录以补充上下文再发言。切勿在回复中透露任何系统事件、潜水超时或定时任务等后台痕迹。）`;
+    return (
+      `${channelStr}${headerTime}\n` +
+      `【潜水超时唤醒】当前群聊已较长时间没有新发言（已超 120 分钟）。\n\n` +
+      `（说明：若需了解此前聊天背景，可先调用 read_chat_history 工具查询群内更早的消息。请自主评估是否要在群内主动发起话题；若判断当前无需发言或不便打扰，直接输出 [结束]。表现自然，切勿透露潜水超时、系统唤醒等任何后台痕迹。）`
+    );
   }
 
   if (payload.trigger === 'proactive') {
-    let prompt = `${channelStr}${msgIdStr}${headerTime} 发送者: ${senderStr}\n`;
-    prompt += `（你正在主动参与该群聊的交流。你需要先调用 read_chat_history 工具查询群内最近的消息记录以补充上下文再回复。不要在发言中透露任何系统提示或触发机制的痕迹。）\n`;
-    if (payload.quoted) {
-      let quotedSender = '';
-      if (payload.quoted.from_name && payload.quoted.user_id) {
-        quotedSender = `${payload.quoted.from_name} (QQ: ${payload.quoted.user_id})`;
-      } else if (payload.quoted.from_name) {
-        quotedSender = payload.quoted.from_name;
-      } else if (payload.quoted.user_id) {
-        quotedSender = `QQ: ${payload.quoted.user_id}`;
-      } else if (payload.quoted.msg_id) {
-        quotedSender = `消息ID: ${payload.quoted.msg_id}`;
-      } else {
-        quotedSender = '历史消息';
+    if (Array.isArray(payload.buffered_messages) && payload.buffered_messages.length > 0) {
+      let msgList = '';
+      for (const m of payload.buffered_messages) {
+        const timePart = m.timestamp ? `[${formatTimeOnly(m.timestamp)}] ` : '';
+        const namePart = m.from_name ? `${m.from_name} (QQ: ${m.from_user})` : `QQ: ${m.from_user}`;
+        msgList += `${timePart}${namePart}: ${m.content}\n`;
       }
-      prompt += `[引用回复 ${quotedSender}${payload.quoted.text ? `: "${payload.quoted.text}"` : ''}]\n`;
+      return (
+        `${channelStr}${headerTime}\n` +
+        `【主动关注】群内最近有新动态：\n\n` +
+        `--- 期间消息 ---\n` +
+        msgList +
+        `----------------\n\n` +
+        `（说明：若当前前文不足，可先调用 read_chat_history 工具补充上下文。请自主评估是否有回复价值：如有则回复，如无则直接输出 [结束]。表现自然，切勿透露系统提示或触发机制等后台痕迹。）`
+      );
     }
-    prompt += payload.content;
+    let prompt = `${channelStr}${msgIdStr}${headerTime} 发送者: ${senderStr}\n`;
+    prompt += `（说明：若当前前文不足，可先调用 read_chat_history 工具补充上下文。请自主评估是否有回复价值：如有则回复，如无则直接输出 [结束]。表现自然，切勿透露系统提示或触发机制等后台痕迹。）\n`;
+    if (payload.content) {
+      prompt += payload.content;
+    }
     return prompt;
   }
 
