@@ -10,7 +10,7 @@ export const QQ_PRESET_DESCRIPTION =
 export const QQ_PRESET_ORDER = 10;
 
 export const QQ_PRESET_PERSONA_PREFIX =
-  '当前会话是 qq 会话。注意：你的直接文本回复不会自动发送给用户，向用户回复或发言必须通过 send_qq_message 工具显式下发。';
+  '当前会话是 QQ 会话。注意：你的直接文本回复为内部日志、用户不可见，向用户回复或发言必须显式调用 `send_qq_message`。当本轮处理完毕、无需回复或无需继续调用工具时，直接输出 [结束] 或 [已回复] 即可。';
 
 export interface PresetPluginItem {
   id: string;

@@ -6,6 +6,7 @@ import { promises as fsp } from 'node:fs';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import { SessionManager } from '../../src/gateway/session.js';
 import * as NapCatBridgePlugin from '../../src/index.js';
+import { QQ_PRESET_PERSONA_PREFIX } from '../../src/constants/preset.js';
 
 describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session Preset Contract)', () => {
   let tmpHome: string;
@@ -76,7 +77,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     const fullPrompt = ((asm as any).sections as any[]).map((s) => s.text).join('\n');
 
     // 专属 Prompt 验证：包含目标指令且完全不包含默认 coding 提示词
-    expect(fullPrompt).toContain('当前会话是 qq 会话。');
+    expect(fullPrompt).toContain(QQ_PRESET_PERSONA_PREFIX);
     expect(fullPrompt).not.toContain('You are a coding agent');
     expect(fullPrompt).not.toContain('git commit');
   });
@@ -154,7 +155,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     // 验证其 assemble 结果
     const asm = await booted.ctx.systemPrompt.assemble({ scope: agent, agent } as any);
     const fullPrompt = ((asm as any).sections as any[]).map((s) => s.text).join('\n');
-    expect(fullPrompt).toContain('当前会话是 qq 会话。');
+    expect(fullPrompt).toContain(QQ_PRESET_PERSONA_PREFIX);
     expect(fullPrompt).not.toContain('You are a coding agent');
   });
 
