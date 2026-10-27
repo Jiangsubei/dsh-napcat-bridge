@@ -1628,7 +1628,7 @@ export function registerAgentTools(
         defineTool({
           name: 'send_qq_message',
           description:
-            '向当前 QQ 会话发送文本消息。注意：你的直接文本回复不会自动显示给 QQ 用户，若要向用户发言、回答问题、同步进展或输出结论，必须调用本工具传入 text 参数，否则用户看不到任何内容。如需引用消息，请显式传入其数字 reply_to；如需艾特特定用户，请显式传入 at_user。发送图片或文件请使用 send_file，发送表情包请使用 send_face，向用户提问或抉择可使用 ask_user_question。',
+            '向当前 QQ 会话发送文本消息。注意：你的直接文本回复不会自动显示给 QQ 用户，若要向用户发言、回答问题、同步进展或输出结论，必须调用本工具传入 text 参数，否则用户看不到任何内容。若要发送的内容较长，或包含多个不同要点、转折与独立意思，可以拆分成多条简短消息，多次调用本工具分开发送。如需引用消息，请显式传入其数字 reply_to；如需艾特特定用户，请显式传入 at_user。发送图片或文件请使用 send_file，发送表情包请使用 send_face，向用户提问或抉择可使用 ask_user_question。',
           parameters: {
             text: {
               type: 'string',
