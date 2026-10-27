@@ -126,4 +126,61 @@ describe('契约测试: Gateway Action 接入点 (v2 预留 + 成员信息)', ()
     expect(sent.params).toMatchObject({ file_id: 'N_private_file_001' });
     expect(res.status).toBe('ok');
   });
+
+  it('契约: get_group_msg_history 动作参数契约 {group_id, count, message_seq?}', async () => {
+    const pendingAction = (server as any).getGroupMsgHistory(8000000002, 30, 429922);
+    const sent = await respondTo('get_group_msg_history');
+    const res = await pendingAction;
+    expect(sent.action).toBe('get_group_msg_history');
+    expect(sent.params).toMatchObject({
+      group_id: 8000000002,
+      count: 30,
+      message_seq: 429922,
+    });
+    expect(res.status).toBe('ok');
+  });
+
+  it('契约: get_friend_msg_history 动作参数契约 {user_id, count, message_seq?}', async () => {
+    const pendingAction = (server as any).getFriendMsgHistory(1000000001, 20);
+    const sent = await respondTo('get_friend_msg_history');
+    const res = await pendingAction;
+    expect(sent.action).toBe('get_friend_msg_history');
+    expect(sent.params).toMatchObject({
+      user_id: 1000000001,
+      count: 20,
+    });
+    expect(res.status).toBe('ok');
+  });
+
+  it('契约: get_recent_contact 动作参数契约 {count}', async () => {
+    const pendingAction = (server as any).getRecentContact(50);
+    const sent = await respondTo('get_recent_contact');
+    const res = await pendingAction;
+    expect(sent.action).toBe('get_recent_contact');
+    expect(sent.params).toMatchObject({
+      count: 50,
+    });
+    expect(res.status).toBe('ok');
+  });
+
+  it('契约: onConnect 监听连接就绪并暴露 isConnected 状态', async () => {
+    expect(server.isConnected).toBe(true);
+
+    let connectCalled = false;
+    server.onConnect(() => {
+      connectCalled = true;
+    });
+
+    // 模拟新连接
+    const addr: any = (server as any).wss.address();
+    const c2 = new WebSocket(`ws://127.0.0.1:${addr.port}`);
+    await new Promise<void>((resolve, reject) => {
+      c2.once('open', () => resolve());
+      c2.once('error', reject);
+    });
+    // 等待事件分发
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(connectCalled).toBe(true);
+    c2.terminate();
+  });
 });
