@@ -20,6 +20,15 @@
 
 已交付、验收完毕或历史阶段的文档归类存放于 `archive/`（按 `<主题>_<YYMMDD>` 组织）：
 
+- **`archive/群成员信息查询工具_261027/`**：
+  - `需求文档-群成员信息查询工具.md`：OneBot 11 `get_group_member_list` 动作对接、精确匹配/模糊搜索/特权角色筛选与 5 分钟 TTL 缓存池；
+  - `Checklist-群成员信息查询工具.md`：全阶段契约测试（8/8 通过）与运行时装配闭环验收记录（100% 验收通过）。
+- **`archive/黑话学习系统与Web设置管理_261027/`**：
+  - `需求文档-黑话学习系统与Web设置管理.md`：基于 Markdown 原子存储的群聊黑话词条库、`record_slang`/`manage_slang` Agent 工具集、`napcat:slang` 提示词注入及 Web 设置卡管理 Tab；
+  - `Checklist-黑话学习系统与Web设置管理.md`：全阶段契约测试（35/35 通过）与装配闭环验收记录（100% 验收通过）。
+- **`archive/Agent定时唤醒与周期任务调度系统_261027/`**：
+  - `需求文档-Agent定时唤醒与周期任务调度系统.md`：基于 SQLite 持久化的单次/周期定时任务调度引擎、夜间免打扰、`schedule_task`/`manage_scheduled_tasks` 工具集与定时唤醒 Prompt 注入；
+  - `Checklist-Agent定时唤醒与周期任务调度系统.md`：全阶段契约测试（21/21 通过）与运行时装配闭环验收记录（100% 验收通过）。
 - **`archive/QQ专属预设与工具胶水清理_261026/`**：
   - `spec_qq_session_preset_architecture.md`：任务规格说明书与 8 项实施验收 Checklist（100% 验收通过）；
   - `调研与方案-QQ会话专属预设系统_261026.md`：DSH 底层预设与提示词裁切调研、三种方案对比与决策。
