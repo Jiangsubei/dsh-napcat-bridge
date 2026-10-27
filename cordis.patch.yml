@@ -1,4 +1,5 @@
 # dsh-napcat-bridge bundle patch: inserts this plugin and the qq-session preset into the profile layer stack.
+# Generated automatically by scripts/sync-patch.ts - DO NOT EDIT MANUALLY.
 - insert:
     - id: dsh-napcat-bridge
       name: dsh-napcat-bridge
@@ -15,7 +16,7 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: 当前会话是 qq 会话。
+              prefix: "当前会话是 qq 会话。注意：你的直接文本回复不会自动发送给用户，向用户回复或发言必须通过 send_qq_message 工具显式下发。"
               complete: true
 
           # 2. 工作区指令扫描（扫描 AGENTS.md / CLAUDE.md 并注入模型上下文）
@@ -42,26 +43,30 @@
           # 6. 跨平台 Shell：Windows 激活 pwsh，macOS/Linux 激活 bash
           - id: tool-bash
             name: '@deepseek-ai/dsh-tool-bash'
-            disabled: !!js process.platform === 'win32'
+            disabled: !!js "process.platform === 'win32'"
 
           - id: tool-pwsh
             name: '@deepseek-ai/dsh-tool-pwsh'
-            disabled: !!js process.platform !== 'win32'
+            disabled: !!js "process.platform !== 'win32'"
 
-          # 7. 官方联网搜索 (web_search, web_fetch)
+          # 8. 官方联网搜索 (web_search, web_fetch)
           - id: tool-web
             name: '@deepseek-ai/dsh-tool-web'
             config:
               fetch: true
               searchTimeoutMs: 30000
 
-          # 8. 技能系统（本地与项目技能发现及技能加载工具）
+          # 9. 技能系统（本地与项目技能发现及技能加载工具）
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
 
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
 
-          # 9. NapCat 专属工具组 (标准 Cordis 插件导出)
+          # 11. 提问工具（允许主动向用户提问与选项确认）
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          # 12. NapCat 专属工具组 (标准 Cordis 插件导出)
           - id: napcat-tools
             name: 'dsh-napcat-bridge/tools'
