@@ -44,8 +44,9 @@
     "dsh": ">=0.2.0"
   },
   "scripts": {
-    "build": "tsc && npm run build:client",
+    "build": "tsx scripts/sync-patch.ts && tsc && npm run build:client",
     "build:client": "tsx scripts/build-client.ts",
+    "sync:patch": "tsx scripts/sync-patch.ts",
     "dev": "pnpm run build && tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "pnpm run build && vitest run",

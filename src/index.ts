@@ -35,6 +35,7 @@ import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
 import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
+import { getRuntimePresetDefinition, QQ_PRESET_ID } from './constants/preset.js';
 
 import { registerConfigRoute } from './server/routes.js';
 import { registerFacesRoutes } from './server/face-routes.js';
@@ -367,65 +368,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     } catch {}
   }
 
-  // 5.2 若当前环境提供了 agentPresets 且未注册 qq-session 预设，则动态补全注册
+  // 5.2 若当前环境提供了 agentPresets 且未注册 qq-session 预设，则动态补全注册 (消费 SSOT 规范定义)
   (ctx as any).inject?.(['agentPresets'], (presetCtx: Context) => {
     const agentPresetsSvc = (presetCtx as any).agentPresets;
     if (agentPresetsSvc && typeof agentPresetsSvc.register === 'function') {
       agentPresetsSvc.list?.().then((presetsList: any[]) => {
-        const exists = Array.isArray(presetsList) && presetsList.some((p: any) => p.id === 'qq-session');
+        const exists = Array.isArray(presetsList) && presetsList.some((p: any) => p.id === QQ_PRESET_ID);
         if (!exists) {
-          agentPresetsSvc.register({
-            id: 'qq-session',
-            name: 'QQ 智能助手',
-            description: 'QQ 会话专属预设，包含工作区文件与跨平台 Shell、官方 Web 搜索与 NapCat QQ 交互能力',
-            order: 10,
-            plugins: [
-              {
-                id: 'persona',
-                name: '@deepseek-ai/dsh-persona',
-                config: {
-                  prefix: '当前会话是 qq 会话。注意：你的直接文本回复不会自动发送给用户，向用户回复或发言必须通过 send_qq_message 工具显式下发。',
-                  complete: true,
-                },
-              },
-              {
-                id: 'agent-instructions',
-                name: '@deepseek-ai/dsh-agent-instructions',
-                config: {
-                  maxBytes: 65536,
-                },
-              },
-              { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
-              { id: 'tool-working-directory', name: '@deepseek-ai/dsh-tool-working-directory' },
-              {
-                id: 'tool-workspace-dependencies',
-                name: '@deepseek-ai/dsh-tool-workspace-dependencies',
-                disabled: !(process.env.DSH_PRIMARY_RUNTIME || process.env.DSH_BUNDLED_PRIMARY_RUNTIME),
-                config: {
-                  source: process.env.DSH_PRIMARY_RUNTIME || process.env.DSH_BUNDLED_PRIMARY_RUNTIME || '',
-                },
-              },
-              {
-                id: 'tool-bash',
-                name: '@deepseek-ai/dsh-tool-bash',
-                disabled: process.platform === 'win32',
-              },
-              {
-                id: 'tool-pwsh',
-                name: '@deepseek-ai/dsh-tool-pwsh',
-                disabled: process.platform !== 'win32',
-              },
-              {
-                id: 'tool-web',
-                name: '@deepseek-ai/dsh-tool-web',
-                config: { fetch: true, searchTimeoutMs: 30000 },
-              },
-              { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
-              { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
-              { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
-              { id: 'napcat-tools', name: 'dsh-napcat-bridge/tools' },
-            ],
-          }).catch((err: any) => {
+          agentPresetsSvc.register(getRuntimePresetDefinition()).catch((err: any) => {
             logger.debug?.('[Plugin] 动态注册 qq-session 预设已跳过或失败:', err?.message);
           });
         }
