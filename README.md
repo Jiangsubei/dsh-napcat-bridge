@@ -14,7 +14,7 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **表情包管理体系**：受 `face_enabled` 配置门控，提供查表情（`list_faces`）、发表情（`send_face`）、收录好图（`collect_face`）与库容维护/LRU 淘汰（`manage_faces`）闭环工具链；另有群聊 `react_message` 贴表情轻量表态。
 - **串行发送与多媒体交互**：单对端串行出站队列，避免并发乱序；支持私聊文件入站自动落盘、群共享文件索引查询（`list_group_files`）、动态资源拉取（`fetch_chat_resource`）与合并转发展开（`expand_forward_message`）。
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
-- **群聊主动回复策略**：普通消息随机概率唤醒 + 潜水超时冒泡 + 夜间免打扰，另有「仅回复文本内容」开关（纯文本模型专用）。
+- **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
 - **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，5 大 Tab 分组（连接身份、人格与准则、主动回复、记忆、表情包），全部 24 项参数支持 volatile 动态热更新。
 
@@ -89,12 +89,10 @@ dsh plugin --profile web add link:.
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `proactive_reply_enabled` | `boolean` | `false` | 启用群聊主动回复功能总开关 |
+| `proactive_interval_mins` | `number` | `3` | 主动回复轮询窗口期（分钟，期间有新消息才唤醒） |
 | `proactive_only_text` | `boolean` | `false` | 仅回复纯文本内容（多模态媒体消息不主动触发） |
-| `proactive_random_enabled` | `boolean` | `false` | 启用普通消息随机概率唤醒 |
-| `proactive_random_probability` | `number` | `0.05` | 随机唤醒概率 (0~1，0.05 即 5%) |
-| `proactive_idle_enabled` | `boolean` | `false` | 启用潜水超时主动唤醒（冷场冒泡） |
+| `proactive_idle_enabled` | `boolean` | `false` | 启用潜水超时主动唤醒（冷场破冰冒泡） |
 | `proactive_idle_timeout_mins` | `number` | `120` | 潜水超时阈值（分钟） |
-| `proactive_cooldown_mins` | `number` | `10` | 主动回复冷却时间（分钟，防止刷屏打扰） |
 | `proactive_night_dnd` | `boolean` | `true` | 夜间免打扰 (每日 23:00~08:00 暂停主动回复) |
 
 ### 4. 记忆 (Memory)
