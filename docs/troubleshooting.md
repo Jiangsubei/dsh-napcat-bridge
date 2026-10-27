@@ -100,3 +100,18 @@
   1. 检查文件绝对路径是否存在且具有读取权限；
   2. NapCat 在容器环境（Docker）中运行时，宿主机路径与容器内路径不一致，需挂载共享数据卷；
   3. 确认文件类型是否受 QQ 协议端限制（部分可执行文件可能被 QQ 服务端拦截）。
+
+---
+
+## 10. DSH 桌面端启动弹窗报错 `desktop welcome: Web authentication failed`
+
+- **现象**：启动 DeepSeek Harness 桌面端时弹出错误弹窗，提示 `DeepSeek Harness is unavailable` / `The application could not start or stopped unexpectedly.`，日志显示 `Error: desktop welcome: Web authentication failed at connectDesktopWelcome`。
+- **原因**：**DSH 宿主临时端口鉴权 Cookie 堆积导致 HTTP 431 请求头溢出**。
+  - DSH 宿主服务每次启动都会在随机临时端口监听，并通过 `@deepseek-ai/dsh-client-connection` 签发有效期 30 天的 `dsh-auth-<hash>` 认证 Cookie；
+  - 根据 RFC 6265 规范，`127.0.0.1` 域名下的 Cookie 不区分端口，因此历次调试与重启遗留在 Electron 数据库中的 Cookie 不会被自动销毁；
+  - 当累计重启达到 70 次左右时，`Cookie` 请求头尺寸将超过 **16,384 字节**（Node.js `http` 服务端的默认 `maxHeaderSize` 限制），导致 Host 直接向 Electron 返回 `431 Request Header Fields Too Large`，触发认证失败弹窗。
+- **恢复步骤**：
+  清理当前用户目录下的 Chromium Cookies 数据库（清理已废弃的历史端口认证 Cookie）：
+  - 路径：`%APPDATA%\@deepseek-ai\dsh-desktop\Network\Cookies`
+  - 使用 SQLite 工具执行 `DELETE FROM cookies WHERE name LIKE 'dsh-auth-%';` 或直接删除该文件（重新打开 DSH 会自动重新初始化）。
+
