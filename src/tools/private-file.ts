@@ -129,11 +129,15 @@ export async function downloadPrivateFile(
     } else {
       let wslPath: string | null = napcatPath;
       if (!napcatPath.startsWith('/')) {
+        if (process.platform === 'win32' && fs.existsSync(napcatPath)) {
+          wslPath = napcatPath;
+        } else {
         // Windows 盘符路径（C:\… / C:/…）→ /mnt/<drive>/…；非盘符绝对路径直接判为无法翻译
         wslPath = windowsPathToWsl(napcatPath);
         if (!wslPath) {
           localErr = `get_file 本地路径无法翻译为 WSL 路径: ${napcatPath}`;
         }
+      }
       }
       if (wslPath) {
         if (!fs.existsSync(wslPath)) {

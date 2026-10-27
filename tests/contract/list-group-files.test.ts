@@ -269,6 +269,10 @@ describe('契约测试: EN-001 list_group_files 群文件列表工具', () => {
     });
 
     try {
+      const provider = (booted.ctx.get('napcatBridgeTools') || (booted.ctx as any).napcatBridgeTools) as any;
+      expect(provider).toBeDefined();
+      provider.registerTools(booted.ctx);
+
       const tools = booted.ctx.get('tools') || (booted.ctx as any).tools;
       expect(tools).toBeDefined();
       expect(typeof tools.get).toBe('function');

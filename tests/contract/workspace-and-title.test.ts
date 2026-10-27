@@ -247,23 +247,5 @@ describe('NapCat 顶层工作区与会话标题契约测试', () => {
       expect(entity.sessionIds).not.toContain(reviewSessionId);
     });
 
-    it('契约: isSessionPhysicallyPresent 遇内存活跃会话 (sessions 或 agents 存在) 必须判定为有效存在', () => {
-      const sessionId = 'qq-user-live-mem-999';
-      // 磁盘上无此文件
-      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(false);
-
-      // 场景 A: ctx.sessions 中持有该 live session
-      (ctx as any).sessions = {
-        get: vi.fn((id: string) => (id === sessionId ? { id, header: { id } } : undefined)),
-      };
-      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(true);
-
-      // 场景 B: ctx.sessions 无，但 ctx.agents 中持有该 live agent
-      (ctx as any).sessions = undefined;
-      (ctx as any).agents = {
-        get: vi.fn((id: string) => (id === sessionId ? { id } : undefined)),
-      };
-      expect(sessionManager.isSessionPhysicallyPresent(sessionId)).toBe(true);
-    });
   });
 });

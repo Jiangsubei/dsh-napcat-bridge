@@ -299,9 +299,18 @@ describe('契约测试: 两字中文斜杠命令与白名单门控 (Two-Characte
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
     const admins = ['2000000001'];
 
-    const s1 = booted.ctx.sessions.create('qq-group-1003' as any);
-    const s2 = booted.ctx.sessions.create('qq-group-1003-2' as any);
-    const s3 = booted.ctx.sessions.create('qq-group-1003-3' as any);
+    const peer = 'group_1003';
+    const a1 = await sessionManager.getOrCreateAgent(peer);
+    await booted.ctx.sessions.flush(a1.session);
+    sessionManager.markSessionCleared(peer);
+    const a2 = await sessionManager.getOrCreateAgent(peer);
+    await booted.ctx.sessions.flush(a2.session);
+    sessionManager.markSessionCleared(peer);
+    const a3 = await sessionManager.getOrCreateAgent(peer);
+    await booted.ctx.sessions.flush(a3.session);
+    const s1 = a1.session;
+    const s2 = a2.session;
+    const s3 = a3.session;
 
     sessionManager.setPeerName('group_1003', '摸鱼交流群');
 
