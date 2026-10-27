@@ -492,9 +492,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     const fromUser = isSelfMsg
       ? String(event.self_id || botQQ || event.sender?.user_id || event.user_id || '')
       : String(event.sender?.user_id ?? event.user_id ?? '');
+    const targetUser = isSelfMsg
+      ? String(event.target_id || (event.user_id && String(event.user_id) !== String(botQQ) ? event.user_id : '') || '')
+      : fromUser;
     const peer = isGroup
       ? `group_${event.group_id}`
-      : `user_${isSelfMsg ? event.user_id || event.target_id || fromUser : fromUser}`;
+      : `user_${targetUser || fromUser}`;
     let senderName = isSelfMsg
       ? (currentConfig().aliases?.[0] || '智能助手')
       : event.sender?.card || event.sender?.nickname || '';

@@ -81,18 +81,18 @@ export function parseTimeValue(val: number | string | undefined | null, isEnd = 
     }
   }
 
-  // 3. 相对时间表达式（如 "30m", "2h", "1d", "7d", "2小时", "3天"）
-  const relativeMatch = str.match(/^(\d+)\s*(s|m|h|d|w|y|秒|分|小时|天|周|年)$/i);
+  // 3. 相对时间表达式（支持简写、中文与英文全称复数，如 "30m", "2h", "1 hour", "2 hrs", "30 mins", "1 day", "2 weeks"）
+  const relativeMatch = str.match(/^(\d+)\s*(s|sec|secs|second|seconds|秒|m|min|mins|minute|minutes|分|h|hr|hrs|hour|hours|小时|d|day|days|天|w|week|weeks|周|y|yr|yrs|year|years|年)$/i);
   if (relativeMatch) {
     const count = Number(relativeMatch[1]);
     const unit = relativeMatch[2].toLowerCase();
     let unitMs = 1000;
-    if (unit === 's' || unit === '秒') unitMs = 1000;
-    else if (unit === 'm' || unit === '分') unitMs = 60 * 1000;
-    else if (unit === 'h' || unit === '小时') unitMs = 3600 * 1000;
-    else if (unit === 'd' || unit === '天') unitMs = 86400 * 1000;
-    else if (unit === 'w' || unit === '周') unitMs = 7 * 86400 * 1000;
-    else if (unit === 'y' || unit === '年') unitMs = 365 * 86400 * 1000;
+    if (unit === 's' || unit === 'sec' || unit === 'secs' || unit === 'second' || unit === 'seconds' || unit === '秒') unitMs = 1000;
+    else if (unit === 'm' || unit === 'min' || unit === 'mins' || unit === 'minute' || unit === 'minutes' || unit === '分') unitMs = 60 * 1000;
+    else if (unit === 'h' || unit === 'hr' || unit === 'hrs' || unit === 'hour' || unit === 'hours' || unit === '小时') unitMs = 3600 * 1000;
+    else if (unit === 'd' || unit === 'day' || unit === 'days' || unit === '天') unitMs = 86400 * 1000;
+    else if (unit === 'w' || unit === 'week' || unit === 'weeks' || unit === '周') unitMs = 7 * 86400 * 1000;
+    else if (unit === 'y' || unit === 'yr' || unit === 'yrs' || unit === 'year' || unit === 'years' || unit === '年') unitMs = 365 * 86400 * 1000;
 
     return Date.now() - count * unitMs;
   }
@@ -344,10 +344,10 @@ export class MessageDatabase {
     const conditions: string[] = ['peer = ?'];
     const sqlParams: any[] = [peer];
 
-    // 1. 发送者 QQ 精确匹配
-    if (params.user_id !== undefined && params.user_id !== '') {
+    // 1. 发送者 QQ 精确匹配 (带 trim 容错)
+    if (params.user_id !== undefined && String(params.user_id).trim() !== '') {
       conditions.push('user_id = ?');
-      sqlParams.push(String(params.user_id));
+      sqlParams.push(String(params.user_id).trim());
     }
 
     // 2. 发送者昵称/群名片模糊搜索
@@ -362,20 +362,30 @@ export class MessageDatabase {
       sqlParams.push(`%${params.keyword.trim()}%`);
     }
 
-    // 4. 消息类型筛选 (支持单类型或类型数组)
+    // 4. 消息类型筛选 (支持单类型或类型数组，且查询 text 时兼顾带引用的回复文本 reply)
     if (params.type !== undefined) {
       if (Array.isArray(params.type)) {
         const types = params.type.filter((t) => typeof t === 'string' && t.trim() !== '');
-        if (types.length === 1) {
+        const expandedTypes = new Set(types);
+        if (expandedTypes.has('text')) {
+          expandedTypes.add('reply');
+        }
+        const finalTypes = Array.from(expandedTypes);
+        if (finalTypes.length === 1) {
           conditions.push('type = ?');
-          sqlParams.push(types[0]);
-        } else if (types.length > 1) {
-          conditions.push(`type IN (${types.map(() => '?').join(', ')})`);
-          sqlParams.push(...types);
+          sqlParams.push(finalTypes[0]);
+        } else if (finalTypes.length > 1) {
+          conditions.push(`type IN (${finalTypes.map(() => '?').join(', ')})`);
+          sqlParams.push(...finalTypes);
         }
       } else if (typeof params.type === 'string' && params.type.trim() !== '') {
-        conditions.push('type = ?');
-        sqlParams.push(params.type.trim());
+        const t = params.type.trim();
+        if (t === 'text') {
+          conditions.push("type IN ('text', 'reply')");
+        } else {
+          conditions.push('type = ?');
+          sqlParams.push(t);
+        }
       }
     }
 

@@ -291,6 +291,65 @@ describe('契约测试: SQLite 消息存储与读记录多条件查询 (Storage 
     expect(res.messages).toHaveLength(1);
     expect(res.messages[0].msg_id).toBe(1001);
   });
+
+  it('契约 14: parseTimeValue 支持英文自然相对时间 ("1 hour", "2 hrs", "30 mins", "1 day", "2 weeks")', async () => {
+    const { parseTimeValue } = await import('../../src/storage/database.js');
+    const now = Date.now();
+
+    const oneHour = parseTimeValue('1 hour');
+    expect(oneHour).toBeDefined();
+    expect(Math.abs(now - 3600000 - oneHour!)).toBeLessThan(1000);
+
+    const twoHours = parseTimeValue('2 hours');
+    expect(twoHours).toBeDefined();
+    expect(Math.abs(now - 7200000 - twoHours!)).toBeLessThan(1000);
+
+    const thirtyMins = parseTimeValue('30 mins');
+    expect(thirtyMins).toBeDefined();
+    expect(Math.abs(now - 1800000 - thirtyMins!)).toBeLessThan(1000);
+
+    const oneDay = parseTimeValue('1 day');
+    expect(oneDay).toBeDefined();
+    expect(Math.abs(now - 86400000 - oneDay!)).toBeLessThan(1000);
+
+    const twoWeeks = parseTimeValue('2 weeks');
+    expect(twoWeeks).toBeDefined();
+    expect(Math.abs(now - 14 * 86400000 - twoWeeks!)).toBeLessThan(1000);
+  });
+
+  it('契约 15: readHistory 按 type="text" 查询时兼顾包含带引用的回复文本 (type="reply")', () => {
+    db.saveMessage({
+      msg_id: 3001, peer: 'user_A', user_id: 'u1', sender_name: 'Alice', time: 1000,
+      type: 'text', content: '普通纯文本', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+    db.saveMessage({
+      msg_id: 3002, peer: 'user_A', user_id: 'bot', sender_name: 'Bot', time: 2000,
+      type: 'reply', content: '带引用的回复文本', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 1, reply_to: 3001,
+    });
+    db.saveMessage({
+      msg_id: 3003, peer: 'user_A', user_id: 'u1', sender_name: 'Alice', time: 3000,
+      type: 'image', content: '[图片:/a.png]', raw: '{}', file_id: null, busid: null, local_path: '/a.png', fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+
+    // 查 text 时，应当同时包含普通纯文本 (3001) 与带引用的回复文本 (3002)，排除图片 (3003)
+    const resText = db.readHistory('user_A', { type: 'text' });
+    expect(resText.messages.map(m => m.msg_id)).toEqual([3002, 3001]);
+
+    // 显式查 reply 时，只返回带引用的回复文本 (3002)
+    const resReply = db.readHistory('user_A', { type: 'reply' });
+    expect(resReply.messages.map(m => m.msg_id)).toEqual([3002]);
+  });
+
+  it('契约 16: readHistory 对 user_id 自动去除首尾空格 (trim 容错)', () => {
+    db.saveMessage({
+      msg_id: 4001, peer: 'user_A', user_id: '1000000001', sender_name: 'Alice', time: 1000,
+      type: 'text', content: '空格容错测试', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+
+    const res = db.readHistory('user_A', { user_id: ' 1000000001 ' as any });
+    expect(res.messages).toHaveLength(1);
+    expect(res.messages[0].msg_id).toBe(4001);
+  });
 });
 
 describe('契约测试: MediaStorageManager 媒体落盘与魔数推断 (Media Storage Contract)', () => {

@@ -39,12 +39,11 @@ export interface OfflineSyncResult {
  */
 export function convertOneBotToRecord(
   event: any,
-  botQQ?: string
+  botQQ?: string,
+  targetPeer?: string
 ): MessageRecord | null {
   if (!event || typeof event !== 'object') return null;
 
-  const isGroup = event.message_type === 'group' || Boolean(event.group_id);
-  const peer = isGroup ? `group_${event.group_id}` : `user_${event.user_id}`;
   const fromUser = String(event.user_id ?? '');
   const sender = event.sender || {};
   const senderName = sender.card || sender.nickname || fromUser;
@@ -54,6 +53,19 @@ export function convertOneBotToRecord(
     event.message_sent_type === 'self'
       ? 1
       : 0;
+
+  const isGroup = event.message_type === 'group' || Boolean(event.group_id);
+  let peer = '';
+  if (targetPeer) {
+    peer = targetPeer;
+  } else if (isGroup) {
+    peer = `group_${event.group_id}`;
+  } else {
+    const targetUser = isSelf && event.target_id
+      ? String(event.target_id)
+      : fromUser;
+    peer = `user_${targetUser}`;
+  }
 
   // NapCat 的 time 字段为秒级时间戳，转为本地毫秒级
   const timestamp = event.time ? Number(event.time) * 1000 : Date.now();
@@ -243,7 +255,7 @@ export class OfflineMessageSyncer {
               break;
             }
 
-            const record = convertOneBotToRecord(msg, this.botQQ);
+            const record = convertOneBotToRecord(msg, this.botQQ, peer);
             if (record) {
               const inserted = this.db.saveMessageIfNotExists(record);
               if (inserted) {
