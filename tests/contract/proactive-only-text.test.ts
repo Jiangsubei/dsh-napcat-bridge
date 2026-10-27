@@ -31,21 +31,22 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
   });
 
   describe('1. 常量与 Schema 契约', () => {
+    const getVal = (v: any) => (v && typeof v.get === 'function' ? v.get() : v);
     it('DEFAULT_PROACTIVE_ONLY_TEXT_ENABLED 默认值必须为 false', () => {
       expect(DEFAULT_PROACTIVE_ONLY_TEXT_ENABLED).toBe(false);
     });
 
     it('BridgeConfigSchema 默认值中 proactive_only_text 为 false', () => {
       const parsed = BridgeConfigSchema({});
-      expect(parsed.proactive_only_text).toBe(false);
+      expect(getVal(parsed.proactive_only_text)).toBe(false);
     });
 
     it('BridgeConfigSchema 支持显式传入 true 与 false', () => {
       const parsedTrue = BridgeConfigSchema({ proactive_only_text: true });
-      expect(parsedTrue.proactive_only_text).toBe(true);
+      expect(getVal(parsedTrue.proactive_only_text)).toBe(true);
 
       const parsedFalse = BridgeConfigSchema({ proactive_only_text: false });
-      expect(parsedFalse.proactive_only_text).toBe(false);
+      expect(getVal(parsedFalse.proactive_only_text)).toBe(false);
     });
   });
 

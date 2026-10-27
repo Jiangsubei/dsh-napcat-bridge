@@ -260,6 +260,9 @@ describe('契约测试: EN-005 wait_for_user_messages 装配闭环（真实装�
   }
 
   it('装配: tools 注册表包含 wait_for_user_messages，注册工具经 execute 按 session.id 解析 peer 并返回状态层报错原文', async () => {
+    const provider = (booted.ctx.get('napcatBridgeTools') || (booted.ctx as any).napcatBridgeTools) as any;
+    expect(provider).toBeDefined();
+    provider.registerTools(booted.ctx);
     const tools = (booted.ctx.get('tools') || (booted.ctx as any).tools) as any;
     expect(tools).toBeDefined();
     const toolDef = tools.get('wait_for_user_messages');

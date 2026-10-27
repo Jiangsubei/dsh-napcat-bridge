@@ -417,7 +417,7 @@ export async function sendFile(
 
   try {
     // 移除 file_type 参数，直接按扩展名自动推导
-    const fileKind = detectSendFileType(undefined, src.value);
+    const fileKind = detectSendFileType(params.file_type, src.value);
 
     let msgPayload: any;
     if (fileKind === 'image') {

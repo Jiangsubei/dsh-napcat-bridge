@@ -379,6 +379,7 @@ export interface ExpandForwardMessageResult {
 
 export interface SendFileParams {
   file_path: string;
+  file_type?: 'image' | 'file';
 }
 
 export interface SendFileResult {

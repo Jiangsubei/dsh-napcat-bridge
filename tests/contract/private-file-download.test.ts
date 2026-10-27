@@ -271,7 +271,8 @@ describe('契约测试: 私聊文件两级退化下载助手 (PF-001)', () => {
       const missRes = await run(fakeFile, fakeFile);
       expect(missRes.ok).toBe(false);
       expect(missRes.error).toContain('本地文件不存在');
-      expect(missRes.error).toContain(fakeFile);
+      const expectedPath = windowsPathToWsl(fakeFile) ?? fakeFile;
+      expect(missRes.error).toContain(expectedPath);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

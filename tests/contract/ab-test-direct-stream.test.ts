@@ -230,7 +230,7 @@ describe('契约测试: All-in-One 架构 send_qq_message 回归与出站静默�
     let registeredToolDef: any;
     const toolsMock = {
       register: (def: any) => {
-        registeredToolDef = def;
+        if (def?.name === 'send_qq_message') registeredToolDef = def;
         return () => {};
       },
     };
