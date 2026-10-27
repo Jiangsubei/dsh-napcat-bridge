@@ -400,7 +400,7 @@ export interface SendFileResult {
 export interface SendQqMessageParams {
   text: string;
   reply_to?: number | string;
-  at_user?: string;
+  at_user?: string | number;
 }
 
 export interface SendQqMessageResult {

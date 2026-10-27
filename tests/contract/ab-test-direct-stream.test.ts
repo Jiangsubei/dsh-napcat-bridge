@@ -211,7 +211,7 @@ describe('契约测试: All-in-One 架构 send_qq_message 回归与出站静默�
     expect(Array.isArray(msgPayload)).toBe(true);
     expect(msgPayload[0]).toEqual({ type: 'reply', data: { id: 12345 } });
     expect(msgPayload[1]).toEqual({ type: 'at', data: { qq: '1000000001' } });
-    expect(msgPayload[2]).toEqual({ type: 'text', data: { text: '收到，马上处理！' } });
+    expect(msgPayload[2]).toEqual({ type: 'text', data: { text: ' 收到，马上处理！' } });
   });
 
   it('契约 5: 非终结解耦设计：调用 send_qq_message 不调用 concludeTurn，回合保持开放', async () => {
