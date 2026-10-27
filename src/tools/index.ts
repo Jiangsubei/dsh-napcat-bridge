@@ -1093,7 +1093,10 @@ export async function sendQqMessage(
   if (!params || typeof params.text !== 'string') {
     return { success: false, error: '发送内容不能为空。' };
   }
-  const plainText = stripMarkdown(params.text).trim();
+  const rawStripped = stripMarkdown(params.text);
+  const plainText = rawStripped.trim();
+  const leadingNewline = /^\r?\n/.test(params.text.replace(/^[ \t]+/, ''));
+  const processedText = leadingNewline ? `\n${plainText}` : plainText;
   if (!plainText) {
     return { success: false, error: '发送内容不能为空。' };
   }
@@ -1113,7 +1116,7 @@ export async function sendQqMessage(
   }
 
   // 3. 超长文本自动分段（默认 1500 字符）
-  const chunks = splitMessageText(plainText, 1500);
+  const chunks = splitMessageText(processedText, 1500);
   let lastMessageId: number | undefined;
 
   for (let i = 0; i < chunks.length; i++) {
@@ -1130,10 +1133,13 @@ export async function sendQqMessage(
           replyId = num;
         }
       }
-      const atQQ =
-        isGroup && typeof params.at_user === 'string' && params.at_user.trim().length > 0
-          ? params.at_user.trim()
-          : undefined;
+      let atQQ: string | undefined;
+      if (isGroup && params.at_user !== undefined && params.at_user !== null) {
+        const rawAt = String(params.at_user).trim().replace(/^@/, '');
+        if (rawAt.length > 0) {
+          atQQ = rawAt;
+        }
+      }
 
       if (replyId !== undefined) {
         segments.push({ type: 'reply', data: { id: replyId } });
@@ -1143,7 +1149,12 @@ export async function sendQqMessage(
       }
 
       if (segments.length > 0) {
-        segments.push({ type: 'text', data: { text: chunk } });
+        // 当存在有效 at 消息段时，若正文开头非空白字符（空格/制表符/换行），自动补一个空格，防止在 QQ 端与 @昵称 紧贴
+        const textContent =
+          atQQ && chunk.length > 0 && !/^\s/.test(chunk)
+            ? ` ${chunk}`
+            : chunk;
+        segments.push({ type: 'text', data: { text: textContent } });
         payload = segments;
       }
     }
@@ -1663,7 +1674,7 @@ export function registerAgentTools(
             },
             at_user: {
               type: 'string',
-              description: '需要艾特的目标用户 QQ 号（仅群聊有效）。',
+              description: '需要艾特的目标用户 QQ 号（仅群聊有效，支持数字或字符串，支持自动剔除 @ 前缀）。',
             },
           },
           output: {

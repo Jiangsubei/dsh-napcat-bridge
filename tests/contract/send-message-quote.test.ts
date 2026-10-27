@@ -50,7 +50,7 @@ describe('契约 1 ~ 6: send_qq_message 显式引用与艾特规则契约', () =
     expect(Array.isArray(msg)).toBe(true);
     expect(msg[0]).toEqual({ type: 'reply', data: { id: 8888 } });
     expect(msg[1]).toEqual({ type: 'at', data: { qq: '1000000001' } });
-    expect(msg[2]).toEqual({ type: 'text', data: { text: '这是带引用和艾特的消息' } });
+    expect(msg[2]).toEqual({ type: 'text', data: { text: ' 这是带引用和艾特的消息' } });
   });
 
   it('契约 2: 仅艾特不引用：省略 reply_to，仅传 at_user 时，仅组装 at 段与文本，不生成 reply 段', async () => {
@@ -74,7 +74,7 @@ describe('契约 1 ~ 6: send_qq_message 显式引用与艾特规则契约', () =
     expect(Array.isArray(msg)).toBe(true);
     expect(msg.find((s) => s.type === 'reply')).toBeUndefined();
     expect(msg[0]).toEqual({ type: 'at', data: { qq: '1000000001' } });
-    expect(msg[1]).toEqual({ type: 'text', data: { text: '这是仅艾特的消息' } });
+    expect(msg[1]).toEqual({ type: 'text', data: { text: ' 这是仅艾特的消息' } });
   });
 
   it('契约 3: 仅引用不艾特：传入 reply_to，省略 at_user 时，仅组装 reply 段与文本，不生成 at 段', async () => {
@@ -187,5 +187,53 @@ describe('契约 1 ~ 6: send_qq_message 显式引用与艾特规则契约', () =
       { gateway: gateway as any, peer: 'user_1000000001' }
     );
     expect(sent[1].msg).toBe('私聊纯文本');
+  });
+
+  it('契约 7: at_user 容错性契约：支持数字与带 @ 前缀传参，自动清洗并前置空格', async () => {
+    const { gateway, sent } = setupMockGateway();
+
+    // 7.1 数字类型 at_user
+    await sendQqMessage(
+      { text: '数字QQ', at_user: 1000000001 as any },
+      { gateway: gateway as any, peer: 'group_10001' }
+    );
+    expect(sent[0].msg).toEqual([
+      { type: 'at', data: { qq: '1000000001' } },
+      { type: 'text', data: { text: ' 数字QQ' } },
+    ]);
+
+    // 7.2 带 @ 前缀 at_user
+    await sendQqMessage(
+      { text: '带艾特前缀', at_user: '@1000000001' },
+      { gateway: gateway as any, peer: 'group_10001' }
+    );
+    expect(sent[1].msg).toEqual([
+      { type: 'at', data: { qq: '1000000001' } },
+      { type: 'text', data: { text: ' 带艾特前缀' } },
+    ]);
+  });
+
+  it('契约 8: 艾特空格幂等契约：正文已带空格或换行时，不重复补空格', async () => {
+    const { gateway, sent } = setupMockGateway();
+
+    // 8.1 正文已有前导空格
+    await sendQqMessage(
+      { text: ' 已经有空格', at_user: '1000000001' },
+      { gateway: gateway as any, peer: 'group_10001' }
+    );
+    expect(sent[0].msg).toEqual([
+      { type: 'at', data: { qq: '1000000001' } },
+      { type: 'text', data: { text: ' 已经有空格' } },
+    ]);
+
+    // 8.2 正文为换行开头
+    await sendQqMessage(
+      { text: '\n换行开头消息', at_user: '1000000001' },
+      { gateway: gateway as any, peer: 'group_10001' }
+    );
+    expect(sent[1].msg).toEqual([
+      { type: 'at', data: { qq: '1000000001' } },
+      { type: 'text', data: { text: '\n换行开头消息' } },
+    ]);
   });
 });

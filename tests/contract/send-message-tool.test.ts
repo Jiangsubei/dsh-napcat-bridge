@@ -145,7 +145,7 @@ describe('契约 1: send_qq_message 工具回归与会话隔离契约', () => {
     expect(capturedPayload).toEqual([
       { type: 'reply', data: { id: 12345 } },
       { type: 'at', data: { qq: '20001' } },
-      { type: 'text', data: { text: '测试回复消息' } },
+      { type: 'text', data: { text: ' 测试回复消息' } },
     ]);
   });
 
