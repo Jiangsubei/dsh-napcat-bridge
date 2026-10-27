@@ -32,6 +32,9 @@ import {
   DEFAULT_FACE_STORE_DIR,
   DEFAULT_FACE_SUB_TYPE,
   DEFAULT_FACE_EVICT_POLICY,
+  DEFAULT_SLANG_ENABLED,
+  DEFAULT_SLANG_BUDGET_CHARS,
+  DEFAULT_SLANG_STORAGE_PATH,
   SETTINGS_NAMESPACE,
 } from '../constants/index.js';
 
@@ -62,6 +65,9 @@ export const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   face_store_dir: DEFAULT_FACE_STORE_DIR,
   face_sub_type: DEFAULT_FACE_SUB_TYPE,
   face_evict_policy: DEFAULT_FACE_EVICT_POLICY,
+  slang_enabled: DEFAULT_SLANG_ENABLED,
+  slang_budget_chars: DEFAULT_SLANG_BUDGET_CHARS,
+  slang_storage_path: DEFAULT_SLANG_STORAGE_PATH,
 };
 
 export function sendJson(res: ServerResponse, status: number, data: unknown): void {
