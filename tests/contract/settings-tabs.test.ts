@@ -44,14 +44,14 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
   }
 
   describe('1. Tab 分区渲染与工具权限排他契约', () => {
-    it('卡片展开后必须渲染且仅渲染 5 个官方 Tab，绝不渲染工具权限 Tab (Checklist E8)', () => {
+    it('卡片展开后必须渲染且仅渲染 6 个官方 Tab，绝不渲染工具权限 Tab (Checklist E8)', () => {
       const html = renderCard();
 
       // 1. 验证存在 Tab 栏容器
       expect(html).toContain('role="tablist"');
       expect(html).toContain('aria-label="设置分区"');
 
-      // 2. 验证 5 个 Tab 按钮全部渲染
+      // 2. 验证 6 个 Tab 按钮全部渲染
       expect(html).toContain('id="napcat-tab-connection"');
       expect(html).toContain('连接身份');
 
@@ -66,6 +66,8 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
 
       expect(html).toContain('id="napcat-tab-face"');
       expect(html).toContain('表情包');
+      expect(html).toContain('id="napcat-tab-slang"');
+      expect(html).toContain('黑话学习');
 
       // 3. 验证 SETTINGS_TABS 常量定义严格匹配 (已下线 reply 回复行为)
       expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
@@ -74,8 +76,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
         'proactive',
         'memory',
         'face',
+        'slang',
       ]);
-      expect(SETTINGS_TABS).toHaveLength(5);
+      expect(SETTINGS_TABS).toHaveLength(6);
       expect(html).not.toContain('id="napcat-tab-reply"');
       expect(html).not.toContain('napcat-tabpanel-reply');
 
@@ -107,6 +110,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toMatch(/id="napcat-tab-proactive"[^>]*aria-selected="false"/);
       expect(html).toMatch(/id="napcat-tab-memory"[^>]*aria-selected="false"/);
       expect(html).toMatch(/id="napcat-tab-face"[^>]*aria-selected="false"/);
+      expect(html).toMatch(/id="napcat-tab-slang"[^>]*aria-selected="false"/);
 
       // connection panel 为显示状态 (没有 hidden 属性)
       expect(html).toMatch(/id="napcat-tabpanel-connection"[^>]*role="tabpanel"/);
@@ -117,6 +121,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toMatch(/id="napcat-tabpanel-proactive"[^>]*hidden/);
       expect(html).toMatch(/id="napcat-tabpanel-memory"[^>]*hidden/);
       expect(html).toMatch(/id="napcat-tabpanel-face"[^>]*hidden/);
+      expect(html).toMatch(/id="napcat-tabpanel-slang"[^>]*hidden/);
     });
 
     it('Tab 1 (连接身份) 包含全部 6 个预定义配置项', () => {
