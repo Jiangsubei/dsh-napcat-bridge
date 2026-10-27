@@ -289,6 +289,29 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledWith('888888888', false);
       expect(result.members[0].role).toContain('群主');
     });
+
+    it('契约 2.8: tool.execute 输出严格符合 DSH Lossless JSON 规范 (不含任何 undefined 字段)', async () => {
+      const tool = createGetGroupMemberInfoTool(() => ({
+        gateway: mockGateway,
+      }));
+
+      const execMock = {
+        agent: {
+          session: {
+            id: 'qq-group-888888888',
+          },
+        },
+      };
+
+      const result = await (tool as any).execute({ user_id: '10001' }, execMock);
+      // 检查顶层属性绝无 undefined
+      for (const [_key, value] of Object.entries(result)) {
+        expect(value).not.toBeUndefined();
+      }
+      // message/error 若未赋值，经过 toLosslessJson 清洗后绝不保留为 undefined 属性
+      expect(result.hasOwnProperty('message')).toBe(false);
+      expect(result.hasOwnProperty('error')).toBe(false);
+    });
   });
 
   describe('3. 真实装配闭环', () => {

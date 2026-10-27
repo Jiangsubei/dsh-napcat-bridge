@@ -274,6 +274,15 @@ export async function queryGroupMemberInfo(
 }
 
 /**
+ * 清洗对象以确保严格符合 DSH Lossless JSON 约束 (递归剥离所有 undefined 字段)
+ * 彻底避免 DSH snapshotJsonValue 抛出 "value is not lossless JSON" 错误
+ */
+export function toLosslessJson<T>(val: T): T {
+  if (val === undefined || val === null) return val;
+  return JSON.parse(JSON.stringify(val));
+}
+
+/**
  * 创建 get_group_member_info 工具定义
  */
 export function createGetGroupMemberInfoTool(
@@ -326,7 +335,8 @@ export function createGetGroupMemberInfoTool(
     },
     async execute(args, exec) {
       const ctx = contextGetter();
-      return (await queryGroupMemberInfo(args as QueryGroupMemberParams, ctx, exec)) as any;
+      const res = await queryGroupMemberInfo(args as QueryGroupMemberParams, ctx, exec);
+      return toLosslessJson(res) as any;
     },
   });
 }
