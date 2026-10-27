@@ -31,7 +31,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     });
 
     await booted.ctx.plugin(NapCatBridgePlugin, {
-      ws_port: 29995,
+      ws_port: 29998,
       face_enabled: true,
       memory_enabled: true,
     });
