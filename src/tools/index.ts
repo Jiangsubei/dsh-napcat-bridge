@@ -55,6 +55,9 @@ import { classifySendFileSource, detectSendFileType } from './file-source.js';
 import { downloadPrivateFile } from './private-file.js';
 import { resolveDshPath } from '../utils/path.js';
 import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
+import type { TaskScheduler } from '../scheduler/index.js';
+import { createScheduleTaskTool, createManageScheduledTasksTool } from './scheduler.js';
+export { createScheduleTaskTool, createManageScheduledTasksTool };
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -79,6 +82,8 @@ export interface ToolExecutionContext {
   faceStoreMax?: number;
   /** 表情包淘汰策略 */
   faceEvictPolicy?: 'reject' | 'evict_lru';
+  /** 定时任务与周期调度引擎 */
+  scheduler?: TaskScheduler | null;
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -1183,6 +1188,7 @@ export interface AgentToolsOptions {
   dshHome?: string;
   waitRegistry?: MessageWaitRegistry;
   inboundMsgIdGetter?: (peer: string) => number | undefined;
+  scheduler?: TaskScheduler;
   config?: (() => BridgePluginConfig) | BridgePluginConfig;
 }
 
@@ -1217,6 +1223,7 @@ export function registerAgentTools(
     faceSubType: currentCfg.face_sub_type,
     faceStoreMax: currentCfg.face_store_max,
     faceEvictPolicy: currentCfg.face_evict_policy,
+    scheduler: options.scheduler,
   });
 
   const unregisters: Array<() => void> = [];
@@ -1898,6 +1905,32 @@ export function registerAgentTools(
         )
       );
     }
+
+    // 10. schedule_task
+    unregisters.push(
+      tools.register(
+        createScheduleTaskTool(() => {
+          const g = getGlobalToolContext();
+          return {
+            scheduler: options.scheduler || g.scheduler,
+            peer: g.peer,
+          };
+        })
+      )
+    );
+
+    // 11. manage_scheduled_tasks
+    unregisters.push(
+      tools.register(
+        createManageScheduledTasksTool(() => {
+          const g = getGlobalToolContext();
+          return {
+            scheduler: options.scheduler || g.scheduler,
+            peer: g.peer,
+          };
+        })
+      )
+    );
   };
 
   const initialTools =

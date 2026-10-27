@@ -151,13 +151,19 @@ export interface OneBotActionResponse<T = any> {
 
 // ==================== 2. 唤醒包契约 ====================
 
-export type WakeupTriggerType = 'at' | 'mention' | 'quote' | 'poke' | 'proactive';
+export type WakeupTriggerType = 'at' | 'mention' | 'quote' | 'poke' | 'proactive' | 'scheduled';
 
 export interface WakeupPayload {
   msg_id?: number;
   trigger: WakeupTriggerType | 'direct';
   /** 主动回复触发子类型: random (普通消息概率插话) | idle (潜水超时冒泡) */
   sub_trigger?: 'random' | 'idle';
+  /** 定时任务 ID (当 trigger === 'scheduled' 时提供) */
+  task_id?: string;
+  /** 定时任务说明/规则描述 (当 trigger === 'scheduled' 时提供) */
+  task_rule?: string;
+  /** 定时任务类型 (当 trigger === 'scheduled' 时提供) */
+  task_type?: 'once' | 'recurring';
   peer: string;
   from_user: string;
   from_name: string;
@@ -489,6 +495,80 @@ export interface ManageFacesResult {
   total_bytes?: number;
   evicted_count?: number;
   message?: string;
+  error?: string;
+}
+
+// ==================== 4.1 定时任务与周期调度 Schema ====================
+
+export type ScheduledTaskStatus = 'pending' | 'completed' | 'cancelled';
+export type ScheduledTaskType = 'once' | 'recurring';
+export type RecurringFrequency = 'daily' | 'weekdays' | 'weekends' | 'custom';
+
+export interface RecurringRule {
+  frequency: RecurringFrequency;
+  /** 每日触发时间点，格式 HH:mm，如 '09:30' */
+  time_of_day?: string;
+  /** 自定义星期几：1=周一, 7=周日 */
+  days_of_week?: number[];
+}
+
+export interface ScheduledTaskRecord {
+  id: string;
+  peer: string;
+  creator: string;
+  prompt: string;
+  type: ScheduledTaskType;
+  recurring_rule?: RecurringRule | null;
+  next_run_at: number; // 毫秒时间戳
+  status: ScheduledTaskStatus;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ScheduleTaskParams {
+  prompt: string;
+  delay_seconds?: number;
+  execute_at?: string;
+  recurring?: RecurringRule;
+}
+
+export interface ScheduleTaskResult {
+  [key: string]: any;
+  success: boolean;
+  task_id?: string;
+  next_run_at?: number;
+  formatted_next_run?: string;
+  rule_description?: string;
+  error?: string;
+}
+
+export interface ManageScheduledTasksParams {
+  action: 'list' | 'cancel' | 'update';
+  task_id?: string;
+  prompt?: string;
+  delay_seconds?: number;
+  execute_at?: string;
+  recurring?: RecurringRule;
+}
+
+export interface ScheduledTaskSummary {
+  id: string;
+  peer: string;
+  creator: string;
+  prompt: string;
+  type: ScheduledTaskType;
+  next_run_at: number;
+  formatted_next_run: string;
+  rule_description: string;
+  status: ScheduledTaskStatus;
+}
+
+export interface ManageScheduledTasksResult {
+  [key: string]: any;
+  success: boolean;
+  action: 'list' | 'cancel' | 'update';
+  tasks?: ScheduledTaskSummary[];
+  task?: ScheduledTaskSummary;
   error?: string;
 }
 

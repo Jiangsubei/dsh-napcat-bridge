@@ -493,6 +493,7 @@ export class SessionAgentRunner {
   ): Promise<any> {
     const isNoMessageWakeup =
       payload.trigger === 'poke' ||
+      payload.trigger === 'scheduled' ||
       (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') ||
       (!(payload as any).msg_id && !payload.from_user);
 
@@ -502,7 +503,7 @@ export class SessionAgentRunner {
         msg_id: undefined,
         from_user: '',
         is_group: isGroup,
-        trigger: payload.trigger === 'poke' ? 'poke' : 'idle',
+        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : 'idle',
       });
     }
 
@@ -529,7 +530,7 @@ export class SessionAgentRunner {
         msg_id: undefined,
         from_user: '',
         is_group: isGroup,
-        trigger: payload.trigger === 'poke' ? 'poke' : 'idle',
+        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : 'idle',
       });
     }
 

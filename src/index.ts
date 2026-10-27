@@ -43,6 +43,7 @@ import { registerFacesRoutes } from './server/face-routes.js';
 import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
 import { healProfileConfigFile, sanitizeConfigPayload } from './config/heal.js';
 import { migrateFaceStoragePaths } from './storage/face-migration.js';
+import { TaskScheduler } from './scheduler/index.js';
 
 export * from './memory/index.js';
 
@@ -282,6 +283,17 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger.warn?.('[Plugin] 初始化注册 NapCat 顶级工作区失败:', wsErr);
   });
 
+  // 3.1 初始化定时任务与周期调度引擎
+  const taskScheduler = new TaskScheduler({
+    db,
+    dispatchWakeup: async (payload) => {
+      await sessionManager.dispatchWakeup(payload);
+    },
+    configGetter: currentConfig,
+    logger,
+  });
+  taskScheduler.start();
+
   let outboundBridge: OutboundStreamBridge | null = null;
 
   // 4. 注册 Agent 工具集与 7 天 TTL 定时清理任务
@@ -292,6 +304,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     sender: serialSender,
     dshHome,
     waitRegistry,
+    scheduler: taskScheduler,
     config: currentConfig,
     inboundMsgIdGetter: (peer: string) => {
       if (!outboundBridge) return undefined;
@@ -1194,6 +1207,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     waitRegistry.clear();
     memoryService.dispose();
     proactiveManager.dispose();
+    taskScheduler.dispose();
     if (typeof stopOutboundBridge === 'function') {
       stopOutboundBridge();
     }
