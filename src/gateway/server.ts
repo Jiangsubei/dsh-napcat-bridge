@@ -374,6 +374,21 @@ export class NapCatGatewayServer {
   }
 
   /**
+   * OneBot 11 get_group_member_list: 获取群全量成员列表
+   * @param groupId 群号
+   * @param noCache 是否强制穿透 NapCat 缓存 (默认 false)
+   */
+  async getGroupMemberList(
+    groupId: number | string,
+    noCache = false
+  ): Promise<OneBotActionResponse<any[]>> {
+    return this.sendAction('get_group_member_list', {
+      group_id: Number(groupId),
+      no_cache: Boolean(noCache),
+    });
+  }
+
+  /**
    * OneBot 11 get_group_info: 获取群基础信息（群名称等）
    */
   async getGroupInfo(groupId: number | string): Promise<OneBotActionResponse> {
