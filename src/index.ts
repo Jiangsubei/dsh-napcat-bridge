@@ -46,6 +46,10 @@ import { migrateFaceStoragePaths } from './storage/face-migration.js';
 import { TaskScheduler } from './scheduler/index.js';
 
 export * from './memory/index.js';
+import { setupSlangService } from './slang/index.js';
+import { registerSlangRoutes } from './server/slang-routes.js';
+import { DEFAULT_SLANG_STORAGE_PATH, DEFAULT_SLANG_BUDGET_CHARS } from './constants/index.js';
+export * from './slang/index.js';
 
 
 export const name = PLUGIN_NAME;
@@ -136,6 +140,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
   let memoryService: any = null;
   let unregisterFacesRoutes: (() => void) | undefined;
+  let slangService: any = null;
+  let unregisterSlangRoutes: (() => void) | undefined;
   let isDisposed = false;
 
   // C2: Notice 事件 (group_upload / poke) 无真实 message_id 时的稳定正数主键策略
@@ -272,6 +278,20 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   // 挂载表情包管理 REST 路由 (列表、上传、大图预览、编辑、删除)
   unregisterFacesRoutes = registerFacesRoutes({ ctx, db, getConfig: currentConfig, dshHome });
 
+  // 挂载黑话学习服务与 REST 路由
+  const rawSlangPath = currentConfig().slang_storage_path;
+  const normalizedSlangPath = resolveDshPath(dshHome, rawSlangPath, DEFAULT_SLANG_STORAGE_PATH);
+  slangService = setupSlangService(ctx, {
+    storagePath: normalizedSlangPath,
+    dshHome,
+    registerGlobalTools: false,
+    budgetChars: currentConfig().slang_budget_chars,
+    getBudgetChars: () => currentConfig().slang_budget_chars ?? DEFAULT_SLANG_BUDGET_CHARS,
+    enabled: currentConfig().slang_enabled,
+    getEnabled: () => currentConfig().slang_enabled ?? true,
+  });
+  unregisterSlangRoutes = registerSlangRoutes({ ctx, storage: slangService.storage });
+
   const mediaManager = new MediaStorageManager({
     dshHome,
     db,
@@ -305,6 +325,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     dshHome,
     waitRegistry,
     scheduler: taskScheduler,
+    slangStorage: slangService.storage,
     config: currentConfig,
     inboundMsgIdGetter: (peer: string) => {
       if (!outboundBridge) return undefined;
@@ -1195,6 +1216,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     try {
       unregisterConfigRoute();
       if (typeof unregisterFacesRoutes === 'function') unregisterFacesRoutes();
+      if (typeof unregisterSlangRoutes === 'function') unregisterSlangRoutes();
     } catch {
       // ignore
     }
@@ -1206,6 +1228,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     unregisterTools();
     waitRegistry.clear();
     memoryService.dispose();
+    slangService?.dispose?.();
     proactiveManager.dispose();
     taskScheduler.dispose();
     if (typeof stopOutboundBridge === 'function') {
