@@ -900,6 +900,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
         if (decision.trigger === 'proactive') {
           proactiveManager.recordProactiveReply(decision.payload.peer, timestamp);
+        } else if (isGroup) {
+          // 即时直接唤醒：重置群主动回复观测计时，并将直接唤醒消息记录至滑动窗口 (replied: true)
+          proactiveManager.recordDirectWakeup(decision.payload.peer, timestamp, {
+            from_user: String(event.user_id),
+            from_name: event.sender?.card || event.sender?.nickname || '',
+            content: content || (event.raw_message ?? ''),
+            msg_id: Number(event.message_id) || undefined,
+          });
         }
 
         // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供入站唤醒与上下文跟踪 (Spec §7.1 决策 A)

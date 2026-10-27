@@ -177,7 +177,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(personaHtml).toContain('行为准则 (behavior)');
     });
 
-    it('切换到 Tab 4 (主动回复) 时展示对应 6 个主动回复核心配置项', () => {
+    it('切换到 Tab 4 (主动回复) 时展示对应 7 个主动回复核心配置项', () => {
       const html = renderCard({ initialTab: 'proactive' });
 
       expect(html).toMatch(/id="napcat-tab-proactive"[^>]*aria-selected="true"/);
@@ -188,12 +188,15 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       );
       const proactiveHtml = panelMatch![0];
 
-      // 6 个核心字段逐一核对
+      // 7 个核心字段逐一核对
       expect(proactiveHtml).toContain('id="napcat-proactive-reply-enabled"');
       expect(proactiveHtml).toContain('启用群聊主动回复 (proactive_reply_enabled)');
 
       expect(proactiveHtml).toContain('id="napcat-proactive-interval-mins"');
       expect(proactiveHtml).toContain('主动回复轮询间隔 (proactive_interval_mins)');
+
+      expect(proactiveHtml).toContain('id="napcat-proactive-buffer-size"');
+      expect(proactiveHtml).toContain('滑动窗口保留条数 (proactive_buffer_size)');
 
       expect(proactiveHtml).toContain('id="napcat-proactive-only-text"');
       expect(proactiveHtml).toContain('仅回复文本内容 (proactive_only_text)');
