@@ -5,12 +5,13 @@
  *
  * 覆盖场景:
  * 1. Gateway 动作契约: getGroupMemberList 发送 get_group_member_list 动作与参数
- * 2. 工具逻辑精确匹配: 按 user_id 查询目标成员，正确返回身份、头衔与加入时间
+ * 2. 工具逻辑精确匹配: 按 user_id 查询目标成员，识破自称群主但实为普通成员
  * 3. 工具逻辑模糊搜索: 按 query 模糊匹配群名片或昵称
  * 4. 工具逻辑角色筛选: 按 role ('owner' | 'admin' | 'member') 筛选特定群体
- * 5. 会话门控防御: 私聊会话调用时防御性拦截并返回友好提示
+ * 5. 会话门控拦截: 私聊会话调用时防御性拦截并返回友好提示
  * 6. 缓存与穿透策略: 默认命中内存缓存，no_cache: true 触发强制穿透拉新
- * 7. 真实装配闭环: bootDshNapcatBridge 挂载后 tools 包含 get_group_member_info
+ * 7. 纯隐式会话继承: Agent 无感知也无需传入群号，直接从运行时 exec.agent.session.id 自动继承
+ * 8. 真实装配闭环: bootDshNapcatBridge 挂载后 tools 包含 get_group_member_info
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -19,9 +20,9 @@ import { NapCatGatewayServer } from '../../src/gateway/server.js';
 import {
   queryGroupMemberInfo,
   formatMemberInfo,
+  createGetGroupMemberInfoTool,
   groupMemberCache,
   type GroupMemberRawItem,
-  type QueryGroupMemberParams,
 } from '../../src/tools/member-info.js';
 import { bootDshNapcatBridge } from '../../src/boot.js';
 
@@ -63,13 +64,13 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     });
 
     it('契约 1.1: getGroupMemberList 正确发送 get_group_member_list 动作与参数', async () => {
-      const waitPromise = server.getGroupMemberList(8000000001, true);
+      const waitPromise = server.getGroupMemberList(888888888, true);
 
       await new Promise((resolve) => setTimeout(resolve, 30));
       const req = received.find((r) => r.action === 'get_group_member_list');
       expect(req).toBeDefined();
       expect(req?.params).toEqual({
-        group_id: 8000000001,
+        group_id: 888888888,
         no_cache: true,
       });
 
@@ -81,7 +82,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
           retcode: 0,
           data: [
             {
-              group_id: 8000000001,
+              group_id: 888888888,
               user_id: 10001,
               nickname: 'RealOwner',
               card: '真正的群主',
@@ -107,7 +108,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
   describe('2. 工具执行与过滤语义化', () => {
     const mockMembers: GroupMemberRawItem[] = [
       {
-        group_id: 88888,
+        group_id: 888888888,
         user_id: 10001,
         nickname: 'Alice',
         card: '老群主',
@@ -120,7 +121,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 88888,
+        group_id: 888888888,
         user_id: 10002,
         nickname: 'Bob',
         card: '管理-小鲍',
@@ -133,7 +134,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 88888,
+        group_id: 888888888,
         user_id: 10003,
         nickname: 'Charlie',
         card: '',
@@ -146,7 +147,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 88888,
+        group_id: 888888888,
         user_id: 10004,
         nickname: 'David',
         card: '冒牌群主', // 故意取名叫冒牌群主，用来测试防伪
@@ -176,7 +177,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.1: 按 user_id 精确查询目标成员，识破自称群主但实为普通成员', async () => {
       const res = await queryGroupMemberInfo(
         { user_id: '10004' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
 
       expect(res.success).toBe(true);
@@ -193,7 +194,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.2: 按 query 模糊匹配群名片与昵称', async () => {
       const res = await queryGroupMemberInfo(
         { query: '老群主' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
 
       expect(res.success).toBe(true);
@@ -206,7 +207,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.3: 按 role 筛选特权成员 (owner / admin)', async () => {
       const ownerRes = await queryGroupMemberInfo(
         { role: 'owner' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
       expect(ownerRes.success).toBe(true);
       expect(ownerRes.total).toBe(1);
@@ -214,7 +215,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
 
       const adminRes = await queryGroupMemberInfo(
         { role: 'admin' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
       expect(adminRes.success).toBe(true);
       expect(adminRes.total).toBe(1);
@@ -236,21 +237,21 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       // 第一次调用，触发 API
       await queryGroupMemberInfo(
         { role: 'owner' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(1);
 
       // 第二次调用无 no_cache，命中缓存，API 调用次数依然为 1
       await queryGroupMemberInfo(
         { role: 'admin' },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(1);
 
       // 第三次调用带 no_cache: true，强制穿透，API 调用次数变为 2
       await queryGroupMemberInfo(
         { role: 'owner', no_cache: true },
-        { gateway: mockGateway, peer: 'group_88888', groupId: 88888 }
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(2);
     });
@@ -266,6 +267,27 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(formatted.join_time).toMatch(/\d{4}-\d{2}-\d{2}/);
       expect(formatted.last_sent_time).toMatch(/\d{4}-\d{2}-\d{2}/);
       expect(formatted.status).toBe('正常');
+    });
+
+    it('契约 2.7: 真实 Agent execute 场景下，从 exec.agent.session.id (qq-group-888888888) 纯隐式自动继承群聊会话', async () => {
+      const tool = createGetGroupMemberInfoTool(() => ({
+        gateway: mockGateway,
+      }));
+
+      const execMock = {
+        agent: {
+          session: {
+            id: 'qq-group-888888888',
+          },
+        },
+      };
+
+      // 模型入参中无群号，纯传 role
+      const result = await (tool as any).execute({ role: 'owner' }, execMock);
+      expect(result.success).toBe(true);
+      expect(result.group_id).toBe('888888888');
+      expect(mockGateway.getGroupMemberList).toHaveBeenCalledWith('888888888', false);
+      expect(result.members[0].role).toContain('群主');
     });
   });
 
@@ -289,6 +311,8 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         expect(toolDef.name).toBe('get_group_member_info');
         expect(toolDef.description).toContain('查询当前群聊中的成员资料');
         expect(toolDef.description).toContain('身份角色（群主/管理员/普通成员）');
+        // 参数列表中严禁暴露 group_id，模型无需指定
+        expect(toolDef.parameters.group_id).toBeUndefined();
       } finally {
         await booted.dispose();
       }
