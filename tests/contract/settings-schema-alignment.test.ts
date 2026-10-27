@@ -26,10 +26,10 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
       .map((line) => line.split(':')[0].trim())
       .sort();
 
-    // 断言 1: 三方键数量均为 26
-    expect(schemaKeys.length).toBe(26);
-    expect(serverKeys.length).toBe(26);
-    expect(clientKeys.length).toBe(26);
+    // 断言 1: 三方键数量均为 24
+    expect(schemaKeys.length).toBe(24);
+    expect(serverKeys.length).toBe(24);
+    expect(clientKeys.length).toBe(24);
 
     // 断言 2: 三方键集合完全恒等
     expect(schemaKeys).toEqual(serverKeys);
@@ -45,6 +45,8 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
       'face_auto_curate',
       'face_curate_cron',
       'face_curate_interval_mins',
+      'at_questioner',
+      'quote_original',
     ];
     for (const deadKey of deadKeys) {
       expect(schemaKeys.includes(deadKey)).toBe(false);
@@ -57,8 +59,8 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     const schemaShape = (BridgeConfigSchema as any).dict || (BridgeConfigSchema as any).shape || {};
     const schemaKeys = Object.keys(schemaShape);
 
-    // 验证全量 26 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
-    expect(schemaKeys.length).toBe(26);
+    // 验证全量 24 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
+    expect(schemaKeys.length).toBe(24);
     expect(schemaShape.bot_qq?.meta?.volatile).toBe(true);
 
     for (const field of schemaKeys) {
