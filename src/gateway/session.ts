@@ -324,6 +324,11 @@ export class SessionManager {
     return this.agentRunner.isSessionBusy(sessionId);
   }
 
+  public isBusy(peerOrSessionId: string): boolean {
+    const sessionId = this.peerToSessionId(peerOrSessionId);
+    return this.agentRunner.isSessionBusy(sessionId) || this.agentRunner.isSessionBusy(peerOrSessionId);
+  }
+
   public setPeerName(peer: string, name: string): void {
     this.agentRunner.setPeerName(peer, name);
   }

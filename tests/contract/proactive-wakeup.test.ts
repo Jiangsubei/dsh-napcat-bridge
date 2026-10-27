@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import { shouldWakeup, type WakeupOptions } from '../../src/gateway/wakeup.js';
+import { shouldWakeup } from '../../src/gateway/wakeup.js';
 import { formatWakeupPrompt } from '../../src/gateway/session.js';
 import { ProactiveManager } from '../../src/gateway/proactive.js';
 import type { OneBotMessageEvent, WakeupPayload } from '../../src/types/index.js';
 
-
-describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概率唤醒)', () => {
+describe('契约测试: 群聊主动回复 (窗口期新消息聚合轮询 & 潜水超时唤醒)', () => {
   const BOT_QQ = '1000000001';
   const BOT_NICKNAME = '智能小助手';
   const GROUP_ID = 3000000001;
@@ -53,273 +52,282 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
     vi.restoreAllMocks();
   });
 
-  it('契约 1: 主动回复总开关为 false 时，即使概率为 1.0 也绝不触发主动唤醒', async () => {
+  it('契约 1: 普通群消息不再即时触发概率唤醒，而是由主动轮询集中调度', async () => {
     const manager = new ProactiveManager();
     const event = createGroupMessageEvent('大家中午吃什么');
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.01);
-
     const decision = await shouldWakeup(event, {
       bot_qq: BOT_QQ,
       bot_nickname: BOT_NICKNAME,
       proactive: {
-        proactive_reply_enabled: false,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
+        proactive_reply_enabled: true,
       },
       proactiveManager: manager,
     });
 
+    // shouldWakeup 不再即时返回 proactive 唤醒
     expect(decision.wakeup).toBe(false);
   });
 
-  it('契约 2: 总开关为 true，概率开关开启且命中概率时，普通群消息触发主动唤醒 (trigger: proactive)', async () => {
+  it('契约 2: 主动回复总开关为 false 时，收到普通群消息不缓冲至待读池', () => {
     const manager = new ProactiveManager();
-    const event = createGroupMessageEvent('今天天气真好');
-
-    // Mock 命中 0.05 概率
-    vi.spyOn(Math, 'random').mockReturnValue(0.02);
-
-    const decision = await shouldWakeup(event, {
-      bot_qq: BOT_QQ,
-      bot_nickname: BOT_NICKNAME,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 0.05,
-        proactive_cooldown_mins: 10,
-        proactive_night_dnd: false,
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: Date.now(),
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '大家中午好',
+        msg_id: 1001,
       },
-      proactiveManager: manager,
-    });
+      { proactive_reply_enabled: false }
+    );
 
-    expect(decision.wakeup).toBe(true);
-    expect(decision.trigger).toBe('proactive');
-    expect(decision.payload?.sub_trigger).toBe('random');
-    expect(decision.payload?.peer).toBe(PEER);
-    expect(decision.payload?.from_user).toBe('2000000001');
-    expect(decision.payload?.content).toBe('今天天气真好');
+    expect(manager.getBufferedMessages(PEER).length).toBe(0);
   });
 
-  it('契约 3: 总开关为 true 但概率开关为 false 时，普通群消息不触发唤醒', async () => {
+  it('契约 3: 主动回复总开关为 true 时，普通群消息成功存入待读缓冲池', () => {
     const manager = new ProactiveManager();
-    const event = createGroupMessageEvent('今天天气真好');
-
-    vi.spyOn(Math, 'random').mockReturnValue(0.01);
-
-    const decision = await shouldWakeup(event, {
-      bot_qq: BOT_QQ,
-      bot_nickname: BOT_NICKNAME,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: false,
-        proactive_random_probability: 1.0,
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: Date.now(),
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '周末去哪玩？',
+        msg_id: 1001,
       },
-      proactiveManager: manager,
-    });
+      { proactive_reply_enabled: true }
+    );
 
-    expect(decision.wakeup).toBe(false);
+    const buffered = manager.getBufferedMessages(PEER);
+    expect(buffered.length).toBe(1);
+    expect(buffered[0].content).toBe('周末去哪玩？');
+    expect(buffered[0].from_user).toBe('2000000001');
   });
 
-  it('契约 4: 概率未命中时，普通群消息不触发唤醒', async () => {
+  it('契约 4: 轮询巡检 Tick：缓冲池有消息时触发聚合唤醒 (sub_trigger: polling) 并清空待读池', async () => {
     const manager = new ProactiveManager();
-    const event = createGroupMessageEvent('今天天气真好');
+    const now = Date.now();
 
-    // 0.08 >= 0.05，未命中
-    vi.spyOn(Math, 'random').mockReturnValue(0.08);
-
-    const decision = await shouldWakeup(event, {
-      bot_qq: BOT_QQ,
-      bot_nickname: BOT_NICKNAME,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 0.05,
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: now - 30000,
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '第一条消息',
+        msg_id: 1001,
       },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(false);
-  });
-
-  it('契约 5: 冷却期拦截：单群触发主动回复后，冷却期内再次收到普通消息即使概率命中也被拦截', async () => {
-    const manager = new ProactiveManager();
-    const event1 = createGroupMessageEvent('消息 1', 1001, 1788045500);
-    const event2 = createGroupMessageEvent('消息 2', 1002, 1788045600); // 100秒后
-
-    vi.spyOn(Math, 'random').mockReturnValue(0.01);
-
-    const options: WakeupOptions = {
-      bot_qq: BOT_QQ,
-      bot_nickname: BOT_NICKNAME,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 0.5,
-        proactive_cooldown_mins: 10, // 10 分钟冷却
-        proactive_night_dnd: false,
+      { proactive_reply_enabled: true }
+    );
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: now - 10000,
+        from_user: '2000000002',
+        from_name: '李四',
+        content: '第二条消息',
+        msg_id: 1002,
       },
-      proactiveManager: manager,
+      { proactive_reply_enabled: true }
+    );
+
+    let dispatchedPayload: WakeupPayload | undefined;
+    const dispatchWakeup = async (payload: WakeupPayload) => {
+      dispatchedPayload = payload;
     };
 
-    // 第 1 次命中
-    const decision1 = await shouldWakeup(event1, options);
-    expect(decision1.wakeup).toBe(true);
-    expect(decision1.trigger).toBe('proactive');
+    await manager.checkProactiveGroups({
+      config: {
+        proactive_reply_enabled: true,
+        proactive_interval_mins: 3,
+        proactive_night_dnd: false,
+      },
+      dispatchWakeup,
+      now,
+    });
 
-    // 记录主动回复已触发并进入冷却
-    manager.recordProactiveReply(PEER, 1788045500 * 1000);
+    expect(dispatchedPayload).toBeDefined();
+    expect(dispatchedPayload?.trigger).toBe('proactive');
+    expect(dispatchedPayload?.sub_trigger).toBe('polling');
+    expect(dispatchedPayload?.peer).toBe(PEER);
+    expect(dispatchedPayload?.buffered_messages?.length).toBe(2);
+    expect(dispatchedPayload?.buffered_messages?.[0].content).toBe('第一条消息');
+    expect(dispatchedPayload?.buffered_messages?.[1].content).toBe('第二条消息');
 
-    // 第 2 次由于在 10 分钟冷却期内，必须被拦截
-    const decision2 = await shouldWakeup(event2, options);
-    expect(decision2.wakeup).toBe(false);
+    // 唤醒后待读池必须被清空
+    expect(manager.getBufferedMessages(PEER).length).toBe(0);
   });
 
-  it('契约 6: 夜间免打扰拦截：23:00~08:00 期间拦截主动回复', async () => {
+  it('契约 5: 轮询巡检 Tick：缓冲池无新消息且未潜水超时，不触发唤醒', async () => {
     const manager = new ProactiveManager();
-    const event = createGroupMessageEvent('深夜聊天');
+    const now = Date.now();
+    // 刚发言不久（非潜水超时），且缓冲池为空
+    manager.recordHumanMessage(PEER, now - 5000);
 
-    vi.spyOn(Math, 'random').mockReturnValue(0.01);
-
-    // Mock 当前时间为深夜 02:30 (处于 23:00 ~ 08:00)
-    const nightDate = new Date(2026, 7, 31, 2, 30, 0);
-    vi.spyOn(Date, 'now').mockReturnValue(nightDate.getTime());
-
-    const decision = await shouldWakeup(event, {
-      bot_qq: BOT_QQ,
-      bot_nickname: BOT_NICKNAME,
-      proactive: {
+    let called = false;
+    await manager.checkProactiveGroups({
+      config: {
         proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
+        proactive_interval_mins: 3,
+        proactive_idle_enabled: true,
+        proactive_idle_timeout_mins: 120,
+        proactive_night_dnd: false,
+      },
+      dispatchWakeup: async () => {
+        called = true;
+      },
+      now,
+    });
+
+    expect(called).toBe(false);
+  });
+
+  it('契约 6: 轮询巡检 Tick：若 Agent 处于 Busy 状态，直接丢弃本轮唤醒并清空待读池', async () => {
+    const manager = new ProactiveManager();
+    const now = Date.now();
+
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: now - 10000,
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '忙碌测试消息',
+        msg_id: 1001,
+      },
+      { proactive_reply_enabled: true }
+    );
+
+    let called = false;
+    await manager.checkProactiveGroups({
+      config: {
+        proactive_reply_enabled: true,
+        proactive_interval_mins: 3,
+        proactive_night_dnd: false,
+      },
+      dispatchWakeup: async () => {
+        called = true;
+      },
+      isSessionBusy: (_peer) => true, // 模拟 Agent 处于 Busy 态
+      now,
+    });
+
+    // 忙碌状态下丢弃唤醒
+    expect(called).toBe(false);
+    // 待读池被丢弃/清空，避免后续冲突
+    expect(manager.getBufferedMessages(PEER).length).toBe(0);
+  });
+
+  it('契约 7: 夜间免打扰：23:00~08:00 期间跳过主动唤醒', async () => {
+    const manager = new ProactiveManager();
+    const nightDate = new Date(2026, 7, 31, 2, 30, 0); // 深夜 02:30
+    const now = nightDate.getTime();
+
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: now - 5000,
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '深夜有人吗',
+        msg_id: 1001,
+      },
+      { proactive_reply_enabled: true }
+    );
+
+    let called = false;
+    await manager.checkProactiveGroups({
+      config: {
+        proactive_reply_enabled: true,
         proactive_night_dnd: true,
       },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(false);
-  });
-
-  it('契约 7: 潜水巡检器：群聊连续超时无人类消息时，主动触发潜水唤醒', async () => {
-    const manager = new ProactiveManager();
-    const now = Date.now();
-    const twoHoursAgo = now - 121 * 60 * 1000; // 121 分钟前
-
-    manager.recordHumanMessage(PEER, twoHoursAgo);
-
-    const wokenPeers: string[] = [];
-    const dispatchWakeup = async (payload: WakeupPayload) => {
-      wokenPeers.push(payload.peer);
-    };
-
-    // 巡检
-    await manager.checkIdleGroups({
-      config: {
-        proactive_reply_enabled: true,
-        proactive_idle_enabled: true,
-        proactive_idle_timeout_mins: 120,
-        proactive_cooldown_mins: 10,
-        proactive_night_dnd: false,
+      dispatchWakeup: async () => {
+        called = true;
       },
-      dispatchWakeup,
       now,
     });
 
-    expect(wokenPeers).toContain(PEER);
+    expect(called).toBe(false);
   });
 
-  it('契约 8: 潜水单周期单次冒泡防死循环：触发一次潜水后，无新人类消息绝不重复冒泡', async () => {
+  it('契约 8: 潜水超时唤醒在轮询周期对齐触发 (sub_trigger: idle)，单周期单次冒泡防死循环', async () => {
     const manager = new ProactiveManager();
     const now = Date.now();
-    const twoHoursAgo = now - 121 * 60 * 1000;
+    const twoHoursAgo = now - 121 * 60 * 1000; // 121 分钟前有人发言
 
     manager.recordHumanMessage(PEER, twoHoursAgo);
 
-    let wakeCount = 0;
-    const dispatchWakeup = async () => {
-      wakeCount++;
-    };
-
+    const wokenPayloads: WakeupPayload[] = [];
     const options = {
       config: {
         proactive_reply_enabled: true,
         proactive_idle_enabled: true,
         proactive_idle_timeout_mins: 120,
-        proactive_cooldown_mins: 0, // 设为 0 排除 cooldown 干扰，专注验证 idle_triggered 防死循环标记
         proactive_night_dnd: false,
       },
-      dispatchWakeup,
+      dispatchWakeup: async (payload: WakeupPayload) => {
+        wokenPayloads.push(payload);
+      },
       now,
     };
 
-    // 第 1 次巡检触发
-    await manager.checkIdleGroups(options);
-    expect(wakeCount).toBe(1);
+    // 第 1 次巡检触发潜水唤醒
+    await manager.checkProactiveGroups(options);
+    expect(wokenPayloads.length).toBe(1);
+    expect(wokenPayloads[0].sub_trigger).toBe('idle');
+    expect(wokenPayloads[0].peer).toBe(PEER);
 
-    // 第 2 次巡检（10 分钟后，仍无人类发言）绝不重复触发
-    await manager.checkIdleGroups({ ...options, now: now + 10 * 60 * 1000 });
-    expect(wakeCount).toBe(1);
+    // 第 2 次巡检（10 分钟后无新人类发言）防死循环生效，绝不重复触发
+    await manager.checkProactiveGroups({ ...options, now: now + 10 * 60 * 1000 });
+    expect(wokenPayloads.length).toBe(1);
+
+    // 收到新人类消息后重置防死循环
+    manager.recordHumanMessage(PEER, now + 15 * 60 * 1000);
+    const laterTime = now + (15 + 121) * 60 * 1000;
+    await manager.checkProactiveGroups({ ...options, now: laterTime });
+    expect(wokenPayloads.length).toBe(2);
   });
 
-  it('契约 9: 群内收到新人类消息后，重置潜水计时与冒泡标记', async () => {
-    const manager = new ProactiveManager();
-    const now = Date.now();
-    const twoHoursAgo = now - 121 * 60 * 1000;
-
-    manager.recordHumanMessage(PEER, twoHoursAgo);
-
-    let wakeCount = 0;
-    const dispatchWakeup = async () => {
-      wakeCount++;
-    };
-
-    const options = {
-      config: {
-        proactive_reply_enabled: true,
-        proactive_idle_enabled: true,
-        proactive_idle_timeout_mins: 120,
-        proactive_cooldown_mins: 0,
-        proactive_night_dnd: false,
-      },
-      dispatchWakeup,
-      now,
-    };
-
-    // 第 1 次触发
-    await manager.checkIdleGroups(options);
-    expect(wakeCount).toBe(1);
-
-    // 收到新人类消息
-    const newMsgTime = now + 1000;
-    manager.recordHumanMessage(PEER, newMsgTime);
-
-    // 再过 121 分钟
-    const laterTime = newMsgTime + 121 * 60 * 1000;
-    await manager.checkIdleGroups({ ...options, now: laterTime });
-    expect(wakeCount).toBe(2);
-  });
-
-  it('契约 10: 提示词工程 Prompt 格式精确契约', () => {
-    // 1. 概率插话 Prompt
-    const randomPayload: WakeupPayload = {
+  it('契约 9: 提示词工程 Prompt 格式精确契约 (新消息聚合 vs 潜水超时)', () => {
+    // 1. 新消息聚合主动关注 Prompt
+    const pollingPayload: WakeupPayload = {
       trigger: 'proactive',
-      sub_trigger: 'random',
+      sub_trigger: 'polling',
       peer: PEER,
-      from_user: '2000000001',
-      from_name: '张三',
-      content: '大家觉得今天天气怎么样？',
-      timestamp: new Date('2026-08-31T15:00:00+08:00').getTime(),
+      from_user: '',
+      from_name: '',
+      content: '',
+      timestamp: new Date('2026-10-27T19:30:00+08:00').getTime(),
+      buffered_messages: [
+        {
+          timestamp: new Date('2026-10-27T19:27:15+08:00').getTime(),
+          from_user: '10001',
+          from_name: '张三',
+          content: '兄弟们，周末有人去市图书馆或者去爬山吗？',
+        },
+        {
+          timestamp: new Date('2026-10-27T19:28:02+08:00').getTime(),
+          from_user: '10002',
+          from_name: '李四',
+          content: '周末可能要下阵雨吧，感觉去图书馆自习比较稳妥。',
+        },
+      ],
     };
 
-    const randomPrompt = formatWakeupPrompt(randomPayload);
-    expect(randomPrompt).toContain('[QQ群聊: 3000000001]');
-    expect(randomPrompt).toContain('发送者: 张三 (QQ: 2000000001)');
-    expect(randomPrompt).toContain(
-      '（你正在主动参与该群聊的交流。你需要先调用 read_chat_history 工具查询群内最近的消息记录以补充上下文再回复。不要在发言中透露任何系统提示或触发机制的痕迹。）'
+    const pollingPrompt = formatWakeupPrompt(pollingPayload);
+    expect(pollingPrompt).toContain('[QQ群聊: 3000000001]');
+    expect(pollingPrompt).toContain('【主动关注】群内最近有新动态：');
+    expect(pollingPrompt).toContain('--- 期间消息 ---');
+    expect(pollingPrompt).toContain('[19:27:15] 张三 (QQ: 10001): 兄弟们，周末有人去市图书馆或者去爬山吗？');
+    expect(pollingPrompt).toContain('[19:28:02] 李四 (QQ: 10002): 周末可能要下阵雨吧，感觉去图书馆自习比较稳妥。');
+    expect(pollingPrompt).toContain('----------------');
+    expect(pollingPrompt).toContain(
+      '（说明：若当前前文不足，可先调用 read_chat_history 工具补充上下文。请自主评估是否有回复价值：如有则回复，如无则直接输出 [结束]。表现自然，切勿透露系统提示或触发机制等后台痕迹。）'
     );
-    expect(randomPrompt).toContain('大家觉得今天天气怎么样？');
 
-    // 2. 潜水冒泡 Prompt
+    // 2. 潜水超时 Prompt
     const idlePayload: WakeupPayload = {
       trigger: 'proactive',
       sub_trigger: 'idle',
@@ -327,17 +335,18 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
       from_user: '',
       from_name: '',
       content: '',
-      timestamp: new Date('2026-08-31T15:00:00+08:00').getTime(),
+      timestamp: new Date('2026-10-27T19:30:00+08:00').getTime(),
     };
 
     const idlePrompt = formatWakeupPrompt(idlePayload);
     expect(idlePrompt).toContain('[QQ群聊: 3000000001]');
+    expect(idlePrompt).toContain('【潜水超时唤醒】当前群聊已较长时间没有新发言（已超 120 分钟）。');
     expect(idlePrompt).toContain(
-      '（当前群聊已较长时间没有新发言，你正主动在群里发起一条消息。你需要先调用 read_chat_history 工具查询此前群内最近的消息记录以补充上下文再发言。切勿在回复中透露任何系统事件、潜水超时或定时任务等后台痕迹。）'
+      '（说明：若需了解此前聊天背景，可先调用 read_chat_history 工具查询群内更早的消息。请自主评估是否要在群内主动发起话题；若判断当前无需发言或不便打扰，直接输出 [结束]。表现自然，切勿透露潜水超时、系统唤醒等任何后台痕迹。）'
     );
   });
 
-  it('契约 11: 私聊消息绝不触发概率插话或潜水主动唤醒', async () => {
+  it('契约 10: 私聊消息绝不触发主动回复缓冲或潜水主动唤醒', async () => {
     const manager = new ProactiveManager();
     const event = createPrivateMessageEvent('私聊消息');
 
@@ -346,8 +355,6 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
       bot_nickname: BOT_NICKNAME,
       proactive: {
         proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
       },
       proactiveManager: manager,
     });
@@ -357,288 +364,36 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
     expect(decision.trigger).toBe('direct');
   });
 
-  it('契约 13: 纯单个 QQ 黄豆表情消息 (face) 排除主动概率唤醒', async () => {
+  it('契约 11: 仅回复文本模式下非纯文本消息不缓冲进待读池', () => {
     const manager = new ProactiveManager();
-    const event: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1101,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'face', data: { id: '14' } }],
-      raw_message: '[CQ:face,id=14]',
-    };
-
-    const decision = await shouldWakeup(event, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
+    // 纯表情消息
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: Date.now(),
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '[动画表情]',
+        isTextOnly: false,
       },
-      proactiveManager: manager,
-    });
+      { proactive_reply_enabled: true, proactive_only_text: true }
+    );
+    expect(manager.getBufferedMessages(PEER).length).toBe(0);
 
-    expect(decision.wakeup).toBe(false);
+    // 纯文本消息正常缓冲
+    manager.recordGroupMessage(
+      PEER,
+      {
+        timestamp: Date.now(),
+        from_user: '2000000001',
+        from_name: '张三',
+        content: '这是纯文本消息',
+        isTextOnly: true,
+      },
+      { proactive_reply_enabled: true, proactive_only_text: true }
+    );
+    expect(manager.getBufferedMessages(PEER).length).toBe(1);
   });
-
-  it('契约 14: 纯单个商城表情 (mface) 与纯单个表情包图片 (sticker) 排除主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-
-    // 1. 商城表情
-    const mfaceEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1102,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'mface', data: { id: '999' } }],
-      raw_message: '[CQ:mface,id=999]',
-    };
-    const decision1 = await shouldWakeup(mfaceEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-    expect(decision1.wakeup).toBe(false);
-
-    // 2. 纯单个表情包图片
-    const stickerEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1103,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'image', data: { file: 'sticker.gif', sub_type: 1 } }],
-      raw_message: '[CQ:image,file=sticker.gif,subType=1]',
-    };
-    const decision2 = await shouldWakeup(stickerEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-    expect(decision2.wakeup).toBe(false);
-  });
-
-  it('契约 15: 文字 + 表情混排消息含有实质文字，允许正常参与概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const mixedEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1104,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [
-        { type: 'text', data: { text: '这太搞笑了' } },
-        { type: 'face', data: { id: '14' } },
-      ],
-      raw_message: '这太搞笑了[CQ:face,id=14]',
-    };
-
-    const decision = await shouldWakeup(mixedEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(true);
-    expect(decision.trigger).toBe('proactive');
-    expect(decision.payload?.content).toContain('这太搞笑了');
-  });
-
-  it('契约 16: 包含视频 (video) 的消息排除主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const videoEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1105,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [
-        { type: 'text', data: { text: '看这个视频' } },
-        { type: 'video', data: { file: 'v.mp4' } },
-      ],
-      raw_message: '看这个视频[CQ:video,file=v.mp4]',
-    };
-
-    const decision = await shouldWakeup(videoEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(false);
-  });
-
-  it('契约 17: 包含语音 (record) 的消息排除主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const recordEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1106,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'record', data: { file: 'voice.amr' } }],
-      raw_message: '[CQ:record,file=voice.amr]',
-    };
-
-    const decision = await shouldWakeup(recordEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(false);
-  });
-
-  it('契约 18: 合并转发聊天记录 (forward) 允许参与主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const forwardEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1107,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'forward', data: { id: 'fwd_12345' } }],
-      raw_message: '[CQ:forward,id=fwd_12345]',
-    };
-
-    const decision = await shouldWakeup(forwardEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(true);
-    expect(decision.trigger).toBe('proactive');
-    expect(decision.payload?.content).toContain('[合并转发 (ID:fwd_12345)]');
-  });
-
-  it('契约 19: 普通多模态图片与图文混排消息允许参与主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const imgEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1108,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [
-        { type: 'text', data: { text: '大家看这张图' } },
-        { type: 'image', data: { file: 'photo.jpg', local_path: '/mnt/c/photo.jpg' } },
-      ],
-      raw_message: '大家看这张图[CQ:image,file=photo.jpg]',
-    };
-
-    const decision = await shouldWakeup(imgEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(true);
-    expect(decision.trigger).toBe('proactive');
-    expect(decision.payload?.images).toContain('/mnt/c/photo.jpg');
-  });
-
-  it('契约 20: 结构化卡片与小组件 (json, xml, rps, dice, share) 排除主动概率唤醒', async () => {
-    const manager = new ProactiveManager();
-    const rpsEvent: OneBotMessageEvent = {
-      post_type: 'message',
-      message_type: 'group',
-      sub_type: 'normal',
-      message_id: 1109,
-      group_id: GROUP_ID,
-      user_id: 2000000001,
-      time: 1788045525,
-      self_id: BOT_QQ,
-      sender: { user_id: 2000000001, nickname: '张三' },
-      message: [{ type: 'rps', data: {} }],
-      raw_message: '[CQ:rps]',
-    };
-
-    const decision = await shouldWakeup(rpsEvent, {
-      bot_qq: BOT_QQ,
-      proactive: {
-        proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0,
-        proactive_night_dnd: false,
-      },
-      proactiveManager: manager,
-    });
-
-    expect(decision.wakeup).toBe(false);
-  });
-
-
 
   describe('真实装配闭环测试 (Proactive Assembly Contract)', () => {
     let tmpHome: string;
@@ -659,9 +414,7 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
         bot_qq: BOT_QQ,
         ws_port: ASYNC_PORT,
         proactive_reply_enabled: true,
-        proactive_random_enabled: true,
-        proactive_random_probability: 1.0, // 必中
-        proactive_cooldown_mins: 0,
+        proactive_interval_mins: 3,
         proactive_night_dnd: false,
       });
 
@@ -699,7 +452,7 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
       }
     });
 
-    it('契约 12: 真实生产装配闭环：普通群消息经真实 WS 网关进入并成功触发主动插话 Agent 唤醒', async () => {
+    it('契约 12: 真实生产装配闭环：普通群消息缓冲并在轮询巡检触发时由 Agent.followup 接收聚合 Prompt', async () => {
       const event: OneBotMessageEvent = {
         post_type: 'message',
         message_type: 'group',
@@ -716,7 +469,29 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
 
       client.send(JSON.stringify(event));
 
-      // 等待消息在真实事件管线中流转与 Agent.followup 捕获
+      // 等待消息进入真实网关管道并被缓冲
+      const proactiveManager = (booted.ctx as any).get('napcat-proactive');
+      await vi.waitFor(
+        () => {
+          expect(proactiveManager?.getBufferedMessages(PEER)?.length).toBeGreaterThan(0);
+        },
+        { timeout: 3000, interval: 50 }
+      );
+
+      // 手动触发一次当前时钟的巡检
+      await proactiveManager.checkProactiveGroups({
+        config: {
+          proactive_reply_enabled: true,
+          proactive_night_dnd: false,
+        },
+        dispatchWakeup: async (payload: WakeupPayload) => {
+          const sessionManager = (booted.ctx as any).get('napcat-session');
+          await sessionManager.dispatchWakeup(payload);
+        },
+        now: Date.now(),
+      });
+
+      // 验证 Agent followup 收到聚合 Prompt
       await vi.waitFor(
         () => {
           expect(capturedFollowups.length).toBeGreaterThan(0);
@@ -726,12 +501,11 @@ describe('契约测试: 群聊主动回复 (潜水超时唤醒 & 普通消息概
 
       const prompt = capturedFollowups[0].content;
       expect(prompt).toContain('[QQ群聊: 3000000001]');
-      expect(prompt).toContain('发送者: 张三 (QQ: 2000000001)');
-      expect(prompt).toContain(
-        '（你正在主动参与该群聊的交流。你需要先调用 read_chat_history 工具查询群内最近的消息记录以补充上下文再回复。不要在发言中透露任何系统提示或触发机制的痕迹。）'
-      );
+      expect(prompt).toContain('【主动关注】群内最近有新动态：');
       expect(prompt).toContain('大家今天过得怎么样？');
+      expect(prompt).toContain(
+        '（说明：若当前前文不足，可先调用 read_chat_history 工具补充上下文。请自主评估是否有回复价值：如有则回复，如无则直接输出 [结束]。表现自然，切勿透露系统提示或触发机制等后台痕迹。）'
+      );
     });
   });
 });
-

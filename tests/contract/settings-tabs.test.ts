@@ -177,7 +177,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(personaHtml).toContain('行为准则 (behavior)');
     });
 
-    it('切换到 Tab 4 (主动回复) 时展示对应 8 个主动回复配置项', () => {
+    it('切换到 Tab 4 (主动回复) 时展示对应 6 个主动回复核心配置项', () => {
       const html = renderCard({ initialTab: 'proactive' });
 
       expect(html).toMatch(/id="napcat-tab-proactive"[^>]*aria-selected="true"/);
@@ -188,27 +188,21 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       );
       const proactiveHtml = panelMatch![0];
 
-      // 8 个字段逐一核对
+      // 6 个核心字段逐一核对
       expect(proactiveHtml).toContain('id="napcat-proactive-reply-enabled"');
       expect(proactiveHtml).toContain('启用群聊主动回复 (proactive_reply_enabled)');
 
+      expect(proactiveHtml).toContain('id="napcat-proactive-interval-mins"');
+      expect(proactiveHtml).toContain('主动回复轮询间隔 (proactive_interval_mins)');
+
       expect(proactiveHtml).toContain('id="napcat-proactive-only-text"');
       expect(proactiveHtml).toContain('仅回复文本内容 (proactive_only_text)');
-
-      expect(proactiveHtml).toContain('id="napcat-proactive-random-enabled"');
-      expect(proactiveHtml).toContain('普通消息概率插话 (proactive_random_enabled)');
-
-      expect(proactiveHtml).toContain('id="napcat-proactive-random-probability"');
-      expect(proactiveHtml).toContain('随机插话概率 (proactive_random_probability)');
 
       expect(proactiveHtml).toContain('id="napcat-proactive-idle-enabled"');
       expect(proactiveHtml).toContain('潜水超时主动唤醒 (proactive_idle_enabled)');
 
       expect(proactiveHtml).toContain('id="napcat-proactive-idle-timeout"');
       expect(proactiveHtml).toContain('潜水时长阈值 (proactive_idle_timeout_mins)');
-
-      expect(proactiveHtml).toContain('id="napcat-proactive-cooldown"');
-      expect(proactiveHtml).toContain('主动回复冷却时间 (proactive_cooldown_mins)');
 
       expect(proactiveHtml).toContain('id="napcat-proactive-night-dnd"');
       expect(proactiveHtml).toContain('夜间免打扰模式 (proactive_night_dnd)');

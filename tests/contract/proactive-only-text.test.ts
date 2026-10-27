@@ -18,6 +18,7 @@ import {
   shouldWakeup,
   type WakeupOptions,
 } from '../../src/gateway/wakeup.js';
+import { ProactiveManager } from '../../src/gateway/proactive.js';
 import { NapCatFormModel } from '../../src/client/model.js';
 import { NapCatSettingsCard } from '../../src/client/card.js';
 import type { OneBotMessageEvent } from '../../src/types/index.js';
@@ -218,8 +219,39 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
     });
   });
 
-  describe('3. shouldWakeup 装配闭环契约', () => {
-    it('proactive_only_text = true 时，图文混合消息即使命中概率也不唤醒', async () => {
+  describe('3. shouldWakeup 与 ProactiveManager 缓冲契约', () => {
+    it('普通群消息不再走 shouldWakeup 即时概率唤醒，而是保持 false 由轮询统一调度', async () => {
+      const textEvent: OneBotMessageEvent = {
+        post_type: 'message',
+        message_type: 'group',
+        sub_type: 'normal',
+        message_id: 1109,
+        group_id: GROUP_ID,
+        user_id: 2000000001,
+        time: 1788045525,
+        self_id: BOT_QQ,
+        sender: { user_id: 2000000001, nickname: '张三' },
+        message: [{ type: 'text', data: { text: '今天大家过得怎么样' } }],
+        raw_message: '今天大家过得怎么样',
+      };
+
+      const decision = await shouldWakeup(textEvent, {
+        bot_qq: BOT_QQ,
+        proactive: {
+          proactive_reply_enabled: true,
+          proactive_only_text: true,
+          proactive_night_dnd: false,
+        },
+      });
+
+      expect(decision.wakeup).toBe(false);
+    });
+
+    it('proactive_only_text = true 时，图文混合消息被排除不缓冲至待读池，纯文本消息正常缓冲', () => {
+      const manager = new ProactiveManager();
+      const PEER = `group_${GROUP_ID}`;
+
+      // 图文混合消息
       const mixedImgEvent: OneBotMessageEvent = {
         post_type: 'message',
         message_type: 'group',
@@ -237,23 +269,23 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
         raw_message: '大家看这张图[CQ:image,file=photo.jpg]',
       };
 
-      vi.spyOn(Math, 'random').mockReturnValue(0.01);
+      const isMixedExcluded = isExcludedFromProactive(mixedImgEvent, true);
+      expect(isMixedExcluded).toBe(true);
 
-      const decision = await shouldWakeup(mixedImgEvent, {
-        bot_qq: BOT_QQ,
-        proactive: {
-          proactive_reply_enabled: true,
-          proactive_random_enabled: true,
-          proactive_random_probability: 1.0,
-          proactive_only_text: true,
-          proactive_night_dnd: false,
+      manager.recordGroupMessage(
+        PEER,
+        {
+          timestamp: Date.now(),
+          from_user: '2000000001',
+          from_name: '张三',
+          content: '大家看这张图',
+          isTextOnly: !isMixedExcluded,
         },
-      });
+        { proactive_reply_enabled: true, proactive_only_text: true }
+      );
+      expect(manager.getBufferedMessages(PEER).length).toBe(0);
 
-      expect(decision.wakeup).toBe(false);
-    });
-
-    it('proactive_only_text = true 时，纯文本消息命中概率正常主动唤醒', async () => {
+      // 纯文本消息
       const textEvent: OneBotMessageEvent = {
         post_type: 'message',
         message_type: 'group',
@@ -264,30 +296,30 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
         time: 1788045525,
         self_id: BOT_QQ,
         sender: { user_id: 2000000001, nickname: '张三' },
-        message: [
-          { type: 'text', data: { text: '今天大家过得怎么样' } },
-        ],
-        raw_message: '今天大家过得怎么样',
+        message: [{ type: 'text', data: { text: '纯文本消息' } }],
+        raw_message: '纯文本消息',
       };
+      const isTextExcluded = isExcludedFromProactive(textEvent, true);
+      expect(isTextExcluded).toBe(false);
 
-      vi.spyOn(Math, 'random').mockReturnValue(0.01);
-
-      const decision = await shouldWakeup(textEvent, {
-        bot_qq: BOT_QQ,
-        proactive: {
-          proactive_reply_enabled: true,
-          proactive_random_enabled: true,
-          proactive_random_probability: 1.0,
-          proactive_only_text: true,
-          proactive_night_dnd: false,
+      manager.recordGroupMessage(
+        PEER,
+        {
+          timestamp: Date.now(),
+          from_user: '2000000001',
+          from_name: '张三',
+          content: '纯文本消息',
+          isTextOnly: !isTextExcluded,
         },
-      });
-
-      expect(decision.wakeup).toBe(true);
-      expect(decision.trigger).toBe('proactive');
+        { proactive_reply_enabled: true, proactive_only_text: true }
+      );
+      expect(manager.getBufferedMessages(PEER).length).toBe(1);
     });
 
-    it('proactive_only_text = false (默认) 时，图文混合消息命中概率依然正常主动唤醒', async () => {
+    it('proactive_only_text = false (默认) 时，图文混合消息允许正常缓冲至待读池', () => {
+      const manager = new ProactiveManager();
+      const PEER = `group_${GROUP_ID}`;
+
       const mixedImgEvent: OneBotMessageEvent = {
         post_type: 'message',
         message_type: 'group',
@@ -305,21 +337,22 @@ describe('契约测试: 仅回复文本内容开关 (proactive_only_text)', () =
         raw_message: '大家看这张图[CQ:image,file=photo.jpg]',
       };
 
-      vi.spyOn(Math, 'random').mockReturnValue(0.01);
+      const isExcluded = isExcludedFromProactive(mixedImgEvent, false);
+      expect(isExcluded).toBe(false);
 
-      const decision = await shouldWakeup(mixedImgEvent, {
-        bot_qq: BOT_QQ,
-        proactive: {
-          proactive_reply_enabled: true,
-          proactive_random_enabled: true,
-          proactive_random_probability: 1.0,
-          proactive_only_text: false,
-          proactive_night_dnd: false,
+      manager.recordGroupMessage(
+        PEER,
+        {
+          timestamp: Date.now(),
+          from_user: '2000000001',
+          from_name: '张三',
+          content: '大家看这张图',
+          isTextOnly: !isExcluded,
         },
-      });
+        { proactive_reply_enabled: true, proactive_only_text: false }
+      );
 
-      expect(decision.wakeup).toBe(true);
-      expect(decision.trigger).toBe('proactive');
+      expect(manager.getBufferedMessages(PEER).length).toBe(1);
     });
   });
 
