@@ -57,8 +57,7 @@ export interface OutboundStreamBridgeOptions {
  * 出站事件流桥接器
  * 监听 Cordis session/event 事件，将模型正式回复经 Markdown Strip 纯文本排版后
  * 串行分段发送至对应 QQ Peer。
- * 群聊回复按配置 at_questioner / quote_original (Spec §7.1，决策 A) 在首段组装
- * CQ:reply (引用唤醒原消息) 与 CQ:at (@提问者) 前缀；私聊不 @ 不引用。
+ * （历史推流模式已废除，出站统一由 send_qq_message 工具显式参数控制）。
  */
 export type InboundReplyContextInput =
   | InboundReplyContext

@@ -500,8 +500,6 @@ export interface BridgePluginConfig {
   bot_qq?: string;
   admins?: string[];
   aliases?: string[];
-  at_questioner?: boolean;
-  quote_original?: boolean;
   image_ttl_days?: number;
   persona?: string;
   behavior?: string;
@@ -543,7 +541,7 @@ export interface BridgePluginConfig {
 
 /**
  * 触发一次唤醒的入站消息上下文 (Spec §7.1 / 决策 A)
- * 供出方向按 at_questioner / quote_original 组装 @提问者 与 引用原消息 前缀。
+ * 供出方向透传 @提问者 与 引用原消息 原始凭据。
  */
 export interface InboundReplyContext {
   /** 唤醒源消息的 message_id (用于 CQ:reply 引用) */

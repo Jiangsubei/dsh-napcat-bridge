@@ -17,7 +17,7 @@ import { MessageDatabase } from '../../src/storage/database.js';
  * 2. 潜水超时 (idle) 触发的主动冒泡唤醒 Prompt 严禁拼接 [消息ID: <id>]，且 assistant/message 坚决保持静默；
  * 3. 连续多次戳一戳 (poke) 唤醒均不包含消息 ID，assistant/message 保持绝对静默，杜绝引用陈旧消息；
  * 4. poke/idle 之后下一条真实入站消息精准透传当前真实 [消息ID: <id>]，绝不串扰陈旧 ID；
- * 5. 真实消息按 quote_original / at_questioner 配置正常生效 (sendSerialized 保底逻辑)；
+ * 5. 真实消息出站按 send_qq_message 工具显式参数精准引用；
  * 6. assistant/message 坚决执行用户侧静默原则，未通过 send_qq_message 发送时绝不下发任何文本；
  * 7. 真实生产装配闭环：bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用隔离与静默闭环。
  */
@@ -45,10 +45,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     }
   });
 
-  function makeBridgeFixture(options?: {
-    quote_original?: boolean;
-    at_questioner?: boolean;
-  }) {
+  function makeBridgeFixture() {
     const sent: Array<{ peer: string; msg: any }> = [];
     const gateway = {
       sendMsg: async (peer: string, msg: any) => {
@@ -60,10 +57,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     const bridge = new OutboundStreamBridge(booted.ctx, {
       gateway: gateway as any,
       sessionManager,
-      getConfig: () => ({
-        quote_original: options?.quote_original ?? true,
-        at_questioner: options?.at_questioner ?? true,
-      }),
+      getConfig: () => ({}),
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
     });
     bridge.start();
@@ -366,8 +360,6 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     await fullBooted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
       ws_port: WS_PORT,
-      quote_original: true,
-      at_questioner: true,
     });
 
     // 预创建群聊 Agent 并捕获 followup 产生的 userMsg

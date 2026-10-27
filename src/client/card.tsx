@@ -58,7 +58,7 @@ const SafeIconChevronDown: React.ComponentType<{ className?: string }> = resolve
 
 export { DEFAULT_BASE_CONFIG };
 
-export type SettingsTabId = 'connection' | 'reply' | 'persona' | 'proactive' | 'memory' | 'face';
+export type SettingsTabId = 'connection' | 'persona' | 'proactive' | 'memory' | 'face';
 
 export interface TabItem {
   id: SettingsTabId;
@@ -67,7 +67,6 @@ export interface TabItem {
 
 export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'connection', label: '连接身份' },
-  { id: 'reply', label: '回复行为' },
   { id: 'persona', label: '人格与准则' },
   { id: 'proactive', label: '主动回复' },
   { id: 'memory', label: '记忆' },
@@ -116,8 +115,6 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   bot_qq: '',
   admins: [],
   aliases: [],
-  at_questioner: false,
-  quote_original: true,
   image_ttl_days: 7,
   persona: '',
   behavior: '',
@@ -631,41 +628,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('image_ttl_days')}
             onReset={() => handleResetField('image_ttl_days')}
             onChange={(val) => handleFieldChange('image_ttl_days', parseInt(val, 10) || 7)}
-          />
-          </div>
-
-          <div
-            id="napcat-tabpanel-reply"
-            data-testid="napcat-tabpanel-reply"
-            role="tabpanel"
-            aria-labelledby="napcat-tab-reply"
-            hidden={activeTab !== 'reply'}
-            className={[
-              cardStyle.tabPanel,
-              activeTab !== 'reply' ? cardStyle.tabPanelHidden : '',
-            ].filter(Boolean).join(' ')}
-            style={activeTab !== 'reply' ? { display: 'none' } : undefined}
-          >
-          <SwitchField
-            id="napcat-quote-original"
-            label="群聊回复引用原消息 (quote_original)"
-            hint="在群聊中回复时是否引用提问者的原消息"
-            checked={draft.quote_original ?? true}
-            disabled={saving}
-            overridden={model.isOverridden('quote_original')}
-            onReset={() => handleResetField('quote_original')}
-            onChange={(checked) => handleFieldChange('quote_original', checked)}
-          />
-
-          <SwitchField
-            id="napcat-at-questioner"
-            label="群聊回复 @ 提问者 (at_questioner)"
-            hint="在群聊回复的首段消息中是否 @ 提问用户"
-            checked={draft.at_questioner ?? false}
-            disabled={saving}
-            overridden={model.isOverridden('at_questioner')}
-            onReset={() => handleResetField('at_questioner')}
-            onChange={(checked) => handleFieldChange('at_questioner', checked)}
           />
           </div>
 

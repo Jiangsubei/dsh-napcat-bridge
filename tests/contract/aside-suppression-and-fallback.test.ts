@@ -39,7 +39,7 @@ describe('契约 1 ~ 4: OutboundStreamBridge 用户侧静默原则单元契约',
     const bridge = new OutboundStreamBridge(ctx, {
       gateway: gateway as any,
       sessionManager: sessionManager as any,
-      getConfig: () => ({ quote_original: true, at_questioner: false, ...config }),
+      getConfig: () => ({ ...config }),
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
     });
     return { bridge, ctx };

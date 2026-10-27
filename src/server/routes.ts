@@ -42,8 +42,6 @@ export const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   bot_qq: '',
   admins: [],
   aliases: [],
-  at_questioner: false,
-  quote_original: true,
   image_ttl_days: DEFAULT_IMAGE_TTL_DAYS,
   persona: DEFAULT_PERSONA,
   behavior: DEFAULT_BEHAVIOR,

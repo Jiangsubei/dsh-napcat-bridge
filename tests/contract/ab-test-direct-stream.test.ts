@@ -129,7 +129,7 @@ describe('契约测试: All-in-One 架构 send_qq_message 回归与出站静默�
     const bridge = new OutboundStreamBridge(ctx, {
       gateway: gateway as any,
       sessionManager: sessionManager as any,
-      getConfig: () => ({ quote_original: true, at_questioner: true }),
+      getConfig: () => ({}),
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
     });
 

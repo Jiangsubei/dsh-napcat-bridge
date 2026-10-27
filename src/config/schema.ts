@@ -34,8 +34,6 @@ export const BridgeConfigSchema = z.object({
   bot_qq: z.string().default('').volatile().description('机器人自身 QQ 号 (用于自循环防护与识别锚点，留空则自动降级并在启动时告警)'),
   admins: z.array(z.string()).default([]).volatile().description('管理员 QQ 号白名单 (斜杠命令授权)'),
   aliases: z.array(z.string()).default([]).volatile().description('助手点名别名列表 (群聊点名唤醒)'),
-  at_questioner: z.boolean().default(false).volatile().description('群聊回复是否 @提问者'),
-  quote_original: z.boolean().default(true).volatile().description('群聊回复是否引用原消息'),
   image_ttl_days: z.number().default(DEFAULT_IMAGE_TTL_DAYS).volatile().description('外来图片/资源本地缓存保留天数'),
   persona: z.string().default(DEFAULT_PERSONA).volatile().description('助手人格设定 (注入 SystemPrompt 动态段)'),
   behavior: z.string().default(DEFAULT_BEHAVIOR).volatile().description('行为约束准则 (注入 SystemPrompt 动态段)'),
