@@ -45,13 +45,11 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 24 项有效运行时配置
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `proactive_reply_enabled` | `boolean` | `false` | 群聊主动回复的总开关。 |
-| `proactive_only_text` | `boolean` | `false` | 仅对纯文本消息判定主动回复。开启后，对于包含图片、视频、表情包等多模态消息不触发主动回复。 |
-| `proactive_random_enabled` | `boolean` | `false` | 是否启用群聊普通消息的随机概率唤醒。 |
-| `proactive_random_probability` | `number` | `0.05` | 普通消息随机唤醒概率（取值范围 0~1，0.05 即 5%）。 |
+| `proactive_interval_mins` | `number` | `3` | 主动回复巡检窗口期（单位：分钟）。定时检查群聊期间新消息，有新消息才聚合唤醒 Agent 研读并决策是否回复。 |
+| `proactive_only_text` | `boolean` | `false` | 仅对纯文本消息判定主动回复。开启后，包含图片、视频、表情包等多模态消息不缓冲入待读池。 |
 | `proactive_idle_enabled` | `boolean` | `false` | 是否启用群聊长时间冷场后的潜水超时唤醒。 |
-| `proactive_idle_timeout_mins` | `number` | `120` | 潜水判定阈值（单位：分钟）。群聊静默超过此时长后触发主动发言。 |
-| `proactive_cooldown_mins` | `number` | `10` | 主动回复后的冷却时间（单位：分钟）。冷却期内不重复主动触发。 |
-| `proactive_night_dnd` | `boolean` | `true` | 夜间免打扰开关。每日 23:00 至次日 08:00 期间暂停所有主动回复判定。 |
+| `proactive_idle_timeout_mins` | `number` | `120` | 潜水判定阈值（单位：分钟）。群聊静默超过此时长后由轮询周期对齐触发主动破冰。 |
+| `proactive_night_dnd` | `boolean` | `true` | 夜间免打扰开关。每日 23:00 至次日 08:00 期间暂停主动回复与潜水冒泡。 |
 
 ---
 
@@ -88,3 +86,7 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 24 项有效运行时配置
    - **下线原因**：模型回复完全由 `send_qq_message` 工具调用驱动，不再依赖 assistant 文本推流降级。
 3. **独立后台 Agent 配置 (`bg_agent_*`, `face_organizer_*`)**：
    - **下线原因**：全面下线独立后台 Agent，改为单主 Agent 会话内顺手提炼记忆与维护表情，杜绝并发竞争与无谓 Token 损耗。
+
+4. **群聊普通消息概率插话与固定冷却配置 (`proactive_random_enabled`, `proactive_random_probability`, `proactive_cooldown_mins`)**：
+   - **下线原因**：旧版单条消息即时概率插话缺乏完整话题上下文，易造成断章取义、突兀插话；
+   - **现状与迁移**：升级为窗口期新消息聚合轮询（由 `proactive_interval_mins` 窗口期统一调度）。普通消息自动存入缓冲池并在周期到达时打包输入，同时赋予 Agent 自主回复或输出 `[结束]` 保持静默的决策权，不再需要死板的概率插话与冷却时间配置。
