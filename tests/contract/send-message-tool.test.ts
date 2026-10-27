@@ -148,6 +148,33 @@ describe('契约 1: send_qq_message 工具回归与会话隔离契约', () => {
       { type: 'text', data: { text: '测试回复消息' } },
     ]);
   });
+
+  it('1.6 send_qq_message 工具描述包含多要点分条分段发送的软性引导', async () => {
+    const ctx = booted.ctx;
+    const presetsSvc: any = (ctx as any).agentPresets || ctx.get?.('agentPresets');
+    const qqWs = path.join(tmpHome, 'qq-ws-desc');
+    await fsp.mkdir(qqWs, { recursive: true });
+
+    const qqGroupHandle = await ctx.agents.create({
+      sessionId: 'qq-group-8888',
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        if (presetsSvc?.mount) {
+          await presetsSvc.mount(agentCtx, 'qq-session');
+        } else {
+          (ctx as any).napcatBridgeTools?.registerTools?.(agentCtx);
+        }
+      },
+    });
+    const qqGroupAgent = qqGroupHandle.agent || qqGroupHandle;
+    const asmGroup = await ctx.systemPrompt.assemble({ scope: qqGroupAgent, agent: qqGroupAgent } as any);
+    const sendTool = (asmGroup.tools as any[]).find((t) => t.name === 'send_qq_message');
+    expect(sendTool).toBeDefined();
+    expect(sendTool.description).toContain(
+      '若要发送的内容较长，或包含多个不同要点、转折与独立意思，可以拆分成多条简短消息，多次调用本工具分开发送。'
+    );
+  });
 });
 
 describe('契约 2: 文本分段工具函数 (splitMessageText)', () => {
