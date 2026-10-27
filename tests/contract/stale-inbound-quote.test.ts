@@ -127,10 +127,8 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     // 静默原则：assistant/message 事件绝不自动下发
     expect(sent).toHaveLength(0);
 
-    // 模型未传 reply_to 时，主动通过出站网关下发为纯文本
-    await bridge.sendSerialized(peer, '戳我干嘛？', { withPrefix: false });
-    expect(sent).toHaveLength(1);
-    expect(sent[0].msg).toBe('戳我干嘛？');
+    // 静默原则：无 send_qq_message 时绝不自动下发
+    expect(sent).toHaveLength(0);
   });
 
   it('契约 2: 潜水超时 (idle) 触发的主动冒泡回复为纯文本，且 assistant/message 坚决保持静默', async () => {
@@ -187,10 +185,6 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     } as any);
 
     expect(sent).toHaveLength(0);
-
-    await bridge.sendSerialized(peer, '大家怎么都不说话了呀~', { withPrefix: false });
-    expect(sent).toHaveLength(1);
-    expect(sent[0].msg).toBe('大家怎么都不说话了呀~');
   });
 
   it('契约 3: 连续多次戳一戳 (poke) 回复均不引用不艾特，修复"永远引用消息 A"缺陷', async () => {
@@ -361,71 +355,6 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     } as any);
 
     expect(sent).toHaveLength(0);
-  });
-
-  it('契约 5: 真实消息按 quote_original / at_questioner 配置正常生效 (不误伤配置)', async () => {
-    // 仅 quote_original = true, at_questioner = false
-    const fix1 = makeBridgeFixture({ quote_original: true, at_questioner: false });
-    fix1.bridge.trackInboundContext('group_123', {
-      msg_id: 3001,
-      from_user: 'user_C',
-      is_group: true,
-    });
-    await fix1.bridge.sendSerialized('group_123', '仅引用测试', { withPrefix: true });
-    const segs1 = fix1.sent[0].msg as Array<Record<string, any>>;
-    expect(segs1[0]).toEqual({ type: 'reply', data: { id: 3001 } });
-    expect(segs1.some((s) => s.type === 'at')).toBe(false);
-
-    // 仅 quote_original = false, at_questioner = true
-    const fix2 = makeBridgeFixture({ quote_original: false, at_questioner: true });
-    fix2.bridge.trackInboundContext('group_123', {
-      msg_id: 3002,
-      from_user: 'user_D',
-      is_group: true,
-    });
-    await fix2.bridge.sendSerialized('group_123', '仅艾特测试', { withPrefix: true });
-    const segs2 = fix2.sent[0].msg as Array<Record<string, any>>;
-    expect(segs2.some((s) => s.type === 'reply')).toBe(false);
-    expect(segs2[0]).toEqual({ type: 'at', data: { qq: 'user_D' } });
-  });
-
-  it('契约 6: buildMessagePayload 兜底加固 - 跨轮次未绑定上下文时回退为纯文本，绝不复用陈旧 inbound', async () => {
-    const { bridge, sent } = makeBridgeFixture();
-    const peer = 'group_123';
-    const session = { id: 'qq-group-123' };
-
-    // 1. 模拟遗留了一个旧 inboundContext (例如旧消息 A)
-    bridge.trackInboundContext(peer, {
-      msg_id: 9999,
-      from_user: 'stale_user',
-      is_group: true,
-    });
-
-    // 2. 发生了一个未绑定 inboundContext 的轮次 (例如主动唤醒但未传 inbound)
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/start',
-      data: { turn: 10 },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'assistant/message',
-      data: {
-        turn: 10,
-        step: 1,
-        message: { content: [{ type: 'text', text: '无绑定轮次的输出' }] },
-      },
-    } as any);
-    await bridge.handleSessionEvent(session as any, {
-      type: 'turn/end',
-      data: { turn: 10 },
-    } as any);
-
-    // 静默原则：没有 send_qq_message 时绝不自动下发
-    expect(sent).toHaveLength(0);
-
-    // 当显式调用 sendSerialized 且指定无前缀时，纯文本下发
-    await bridge.sendSerialized(peer, '无绑定轮次的输出', { withPrefix: false });
-    expect(sent).toHaveLength(1);
-    expect(sent[0].msg).toBe('无绑定轮次的输出');
   });
 
   it('契约 7: 真实生产装配闭环 - bootDshNapcatBridge + WS 网关验证 真实消息 -> poke -> 真实消息 引用闭环与静默', async () => {

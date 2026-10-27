@@ -22,10 +22,12 @@ export const DEFAULT_MEMORY_GUIDANCE =
   '记忆工具规则：日常对话切勿随意调用记忆工具（create_memory、edit_memory），仅在用户明确要求记住/修改设定，或交流中顺手提炼出长期稳定事实与偏好时调用，严禁记录琐碎流水账；若上下文快照提示画像未完全展示，可按需使用 read_memory 查询。';
 
 export const DEFAULT_BEHAVIOR =
-  '重要约束：QQ 消息不支持复杂的 Markdown 格式，请严格使用清晰的纯文本结构排版，避免输出多余的 Markdown 标记语法。' +
-  '消息下发：向 QQ 用户发送消息的唯一途径是调用 send_qq_message 工具，请将正文完整传入 text 参数，并根据需要显式传入 reply_to（引用目标消息 ID）与 at_user（艾特目标 QQ）。未调用 send_qq_message 时系统保持绝对静默，绝不在外界暴露内部思考或维护过程。' +
-  '文件发送：生成并需要发送给用户的文件或图片，必须保存到 NapCat 能够访问的本地持久化路径或共享目录，并在调用 send_file 时传递有效的文件绝对路径或 file:// URI。若处于跨系统或容器映射环境，请确保路径已正确映射至 NapCat 可读取位置。' +
-  DEFAULT_MEMORY_GUIDANCE;
+  '## 交互与输出规范\n' +
+  '- 消息排版：QQ 不支持复杂的 Markdown 格式，请严格使用清晰的纯文本结构排版，避免输出多余的 Markdown 标记语法。\n' +
+  '- 消息下发：QQ 网关不会自动向用户转发你的直接文本回复，你在思考或回合结束时直接输出的内容对用户完全不可见。向用户回复消息、告知结论或同步长任务进展时，必须调用 send_qq_message 工具，否则用户端将处于静默状态（看不到任何回答）。请将正文完整传入 text 参数，并根据需要显式传入 reply_to（引用目标消息 ID）与 at_user（艾特目标 QQ）。\n' +
+  '- 用户提问与抉择：若需要用户澄清需求、提供缺失信息或在多选项中进行抉择确认，可调用官方 ask_user_question 工具发起结构化交互。\n' +
+  '- 文件与表情：生成或需发送给用户的文件/图片必须保存到本地持久化路径或共享目录，并调用 send_file 下发；发送表情包请调用 send_face。\n' +
+  '- ' + DEFAULT_MEMORY_GUIDANCE;
 
 export const DEFAULT_PROACTIVE_REPLY_ENABLED = false;
 export const DEFAULT_PROACTIVE_ONLY_TEXT_ENABLED = false;

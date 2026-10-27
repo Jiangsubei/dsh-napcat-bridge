@@ -339,10 +339,10 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
     const editTool = toolDefs.find((t) => t.name === 'edit_memory')!;
 
-    // 模拟来自 review-default-xxx 或无 peer 的上下文
+    // 模拟来自无 peer 的上下文
     const execDefault = {
       agent: {
-        session: { id: 'review-default-1788595929622' },
+        session: { id: 'default' },
       },
     };
 
@@ -435,11 +435,11 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(snapshotHeaded).not.toContain('### Session 记忆');
   });
 
-  it('契约 9: resolveContextPeerAndQQ 支持 review 会话映射回源 peer 与 QQ', () => {
+  it('契约 9: resolveContextPeerAndQQ 支持标准 QQ 会话格式解析与未知会话回退 default', () => {
     // 1. review 私聊会话 -> 映射回 user_<qq> 与 qq
     const resUser = resolveContextPeerAndQQ({
       agent: {
-        session: { id: 'review-user_1000000001-1725600000000' },
+        session: { id: 'qq-user-1000000001' },
       },
     });
     expect(resUser.peer).toBe('user_1000000001');
@@ -448,7 +448,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     // 2. review 群聊会话 -> 映射回 group_<gid>，qq 保持 default
     const resGroup = resolveContextPeerAndQQ({
       agent: {
-        session: { id: 'review-group_8000000001-1725600000000' },
+        session: { id: 'qq-group-8000000001-1' },
       },
     });
     expect(resGroup.peer).toBe('group_8000000001');
@@ -457,17 +457,11 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     // 3. 无法解析的 review id -> 回退 default
     const resDefault = resolveContextPeerAndQQ({
       agent: {
-        session: { id: 'review-default-1788595929622' },
+        session: { id: 'default' },
       },
     });
     expect(resDefault.peer).toBe('default');
     expect(resDefault.qq).toBe('default');
-
-    const resInvalid = resolveContextPeerAndQQ({
-      sessionId: 'review-invalid-session-format',
-    });
-    expect(resInvalid.peer).toBe('default');
-    expect(resInvalid.qq).toBe('default');
   });
 
   it('契约 10: 写入端容量硬上限门禁 (user <= 1500, session <= 2200 超限拒绝并提示精简)', async () => {

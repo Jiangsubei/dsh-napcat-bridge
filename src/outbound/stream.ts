@@ -7,7 +7,6 @@
 
 import type { Context } from '@deepseek-ai/cordis';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { NapCatGatewayServer } from '../gateway/server.js';
 import type { SessionManager } from '../gateway/session.js';
 import type { BridgePluginConfig, InboundReplyContext } from '../types/index.js';
@@ -43,7 +42,7 @@ export function filterAndExtractOutboundBlocks(
 }
 
 export interface OutboundStreamBridgeOptions {
-  gateway: NapCatGatewayServer;
+  gateway?: NapCatGatewayServer;
   sessionManager: SessionManager;
   getConfig?: () => BridgePluginConfig;
   logger?: {
@@ -79,7 +78,7 @@ export class OutboundStreamBridge {
   private unlisten: (() => void) | null = null;
 
   constructor(
-    private readonly ctx: Context,
+    _ctx: Context,
     private readonly options: OutboundStreamBridgeOptions
   ) {
     this.sender = new PerPeerSerialSender();
@@ -151,133 +150,20 @@ export class OutboundStreamBridge {
 
   /**
    * 启动出站事件流监听
+   * 贯彻用户侧静默原则与 send_qq_message 唯一通道规范：
+   * 不监听 session/event 进行文本自动直发，系统仅通过工具显式出站。
    */
   start(): () => void {
-    if (this.unlisten) {
-      return this.unlisten;
-    }
-
-    const handler = async (session: Session, event: SessionEvent) => {
-      try {
-        await this.handleSessionEvent(session, event);
-      } catch (err) {
-        this.options.logger?.error?.('[OutboundStreamBridge] 处理 session/event 异常:', err);
-      }
-    };
-
-    const disposer = (this.ctx as any).on('session/event', handler);
-    this.unlisten = () => {
-      if (typeof disposer === 'function') {
-        disposer();
-      }
-      this.unlisten = null;
-    };
-
-    return this.unlisten;
+    return () => {};
   }
 
   /**
    * 处理单条 session/event
    * 贯彻“用户侧静默原则”与“send_qq_message 唯一通道原则”：
-   * 废除 assistant/message 纯文本自动直发，绝不搞任何 turn/end 自动补发终答兜底。
-   * 若模型在本轮未调用 send_qq_message，无论包含何种思考、正文或工具调用，网关均保持绝对静默。
+   * 不监听 assistant/message 直发出站，也不在 turn/end 兜底发信，保持绝对静默。
    */
-  async handleSessionEvent(session: Session, event: SessionEvent): Promise<void> {
-    if (!session || !event) return;
-
-    // 仅处理 QQ 会话
-    if (!this.options.sessionManager.isQQSession(session.id)) {
-      return;
-    }
-
-    // 用户侧静默原则：不监听 assistant/message 直发出站，也不在 turn/end 兜底发信。
-    // 整个系统向 QQ 下发文本的唯一途径就是显式调用 send_qq_message 工具。
+  async handleSessionEvent(_session?: any, _event?: any): Promise<void> {
     return;
-  }
-
-  /**
-   * 按 at_questioner / quote_original 组装群聊出站消息 (Spec §7.1 / 决策 A)：
-   * - quote_original=true 且存在唤醒源消息 id → 前置 CQ:reply 段；
-   * - at_questioner=true 且存在提问者 QQ → 前置 CQ:at 段；
-   * - 私聊 (user_*) 不 @ 不引用，保持纯文本原样；
-   * - 无唤醒上下文时按纯文本原样下发。
-   */
-  buildMessagePayload(
-    peer: string,
-    text: string,
-    options?: { withPrefix?: boolean; inbound?: InboundReplyContextInput }
-  ): string | Array<Record<string, any>> {
-    const isGroup = peer.startsWith('group_') || peer.startsWith('qq-group-');
-    if (!isGroup) {
-      return text;
-    }
-
-    const withPrefix = options?.withPrefix !== false;
-    if (!withPrefix) {
-      return text;
-    }
-
-    // 跨触发隔离加固：若显式指定了 options（含 options.inbound），以本次 inbound 为准；
-    // 仅在未指定 options.inbound 时回退到当前活跃 Turn 锚点或 peer 保底。
-    const inbound = (options && 'inbound' in options)
-      ? options.inbound
-      : this.getActiveTurnContext(peer) ?? this.inboundContexts.get(peer);
-    if (!inbound) {
-      return text;
-    }
-
-    // 防御保护：若 inbound 被标记为合成/notice，严禁生成 reply 段，出站自动降级为纯文本
-    const isSynthetic =
-      Boolean((inbound as any).is_synthetic) ||
-      Boolean((inbound as any).synthetic) ||
-      (inbound as any).trigger === 'poke' ||
-      (inbound as any).trigger === 'idle' ||
-      (inbound as any).trigger === 'notice' ||
-      (inbound as any).notice_type !== undefined;
-
-    if (isSynthetic) {
-      return text;
-    }
-
-    if (!inbound.msg_id && !inbound.from_user) {
-      return text;
-    }
-
-    const config = (this.options.getConfig ? this.options.getConfig() : {}) || {};
-    const quoteOriginal = config.quote_original !== false;
-    const atQuestioner = config.at_questioner === true;
-
-    // 校验 msg_id 是否为合法的真实入站消息 ID (正整数且非合成)
-    const isValidReplyMsgId =
-      typeof inbound.msg_id === 'number' &&
-      Number.isSafeInteger(inbound.msg_id) &&
-      inbound.msg_id > 0;
-
-    const segments: Array<Record<string, any>> = [];
-    if (quoteOriginal && isValidReplyMsgId) {
-      segments.push({ type: 'reply', data: { id: inbound.msg_id } });
-    }
-    if (atQuestioner && inbound.from_user) {
-      segments.push({ type: 'at', data: { qq: inbound.from_user } });
-    }
-    segments.push({ type: 'text', data: { text } });
-
-    return segments.length === 1 ? text : segments;
-  }
-
-  /**
-   * 串行有序向 QQ Peer 发送消息 (解决时序乱序竞态, Spec §7.3)
-   * 经共享 per-peer 串行发送器下发，与提问/审批/发文件同队列。
-   */
-  async sendSerialized(
-    peer: string,
-    text: string,
-    options?: { withPrefix?: boolean; inbound?: InboundReplyContextInput }
-  ): Promise<void> {
-    const message = this.buildMessagePayload(peer, text, options);
-    await this.sender.enqueue(peer, async () => {
-      await this.options.gateway.sendMsg(peer, message);
-    });
   }
 
   /**

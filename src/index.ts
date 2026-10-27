@@ -384,7 +384,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
                 id: 'persona',
                 name: '@deepseek-ai/dsh-persona',
                 config: {
-                  prefix: '当前会话是 qq 会话。',
+                  prefix: '当前会话是 qq 会话。注意：你的直接文本回复不会自动发送给用户，向用户回复或发言必须通过 send_qq_message 工具显式下发。',
                   complete: true,
                 },
               },
@@ -422,6 +422,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
               },
               { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
               { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+              { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
               { id: 'napcat-tools', name: 'dsh-napcat-bridge/tools' },
             ],
           }).catch((err: any) => {

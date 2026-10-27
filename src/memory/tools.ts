@@ -65,15 +65,6 @@ export function resolveContextPeerAndQQ(
       if (userMatch) {
         peer = `user_${userMatch[1]}`;
         qq = userMatch[1];
-      } else if (trimmed.startsWith('review-')) {
-        const inner = trimmed.slice('review-'.length);
-        const m = inner.match(/^(user_|group_)(\d+)(?:-|$)/);
-        if (m) {
-          peer = m[1] === 'user_' ? `user_${m[2]}` : `group_${m[2]}`;
-          if (m[1] === 'user_') qq = m[2];
-        } else {
-          peer = 'default';
-        }
       } else {
         peer = trimmed;
       }
