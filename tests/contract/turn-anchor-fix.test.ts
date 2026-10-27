@@ -69,8 +69,6 @@ describe('契约测试: 回合锚定锁定与合成 ID 隔离防御修复 (Turn 
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
       ws_port: WS_PORT,
-      quote_original: true,
-      at_questioner: false,
     });
 
     const agents: any = booted.ctx.get('agents');

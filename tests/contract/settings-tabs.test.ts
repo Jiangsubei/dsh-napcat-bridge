@@ -55,9 +55,6 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toContain('id="napcat-tab-connection"');
       expect(html).toContain('连接身份');
 
-      expect(html).toContain('id="napcat-tab-reply"');
-      expect(html).toContain('回复行为');
-
       expect(html).toContain('id="napcat-tab-persona"');
       expect(html).toContain('人格与准则');
 
@@ -70,16 +67,17 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toContain('id="napcat-tab-face"');
       expect(html).toContain('表情包');
 
-      // 3. 验证 SETTINGS_TABS 常量定义严格匹配
+      // 3. 验证 SETTINGS_TABS 常量定义严格匹配 (已下线 reply 回复行为)
       expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
         'connection',
-        'reply',
         'persona',
         'proactive',
         'memory',
         'face',
       ]);
-      expect(SETTINGS_TABS).toHaveLength(6);
+      expect(SETTINGS_TABS).toHaveLength(5);
+      expect(html).not.toContain('id="napcat-tab-reply"');
+      expect(html).not.toContain('napcat-tabpanel-reply');
 
       // 4. 严禁渲染工具权限 Tab (E8 明确约定)
       expect(html).not.toContain('工具权限');
@@ -105,20 +103,20 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toMatch(/id="napcat-tab-connection"[^>]*napcat_tabActive/);
 
       // 其他 4 个 Tab 未选中
-      expect(html).toMatch(/id="napcat-tab-reply"[^>]*aria-selected="false"/);
       expect(html).toMatch(/id="napcat-tab-persona"[^>]*aria-selected="false"/);
       expect(html).toMatch(/id="napcat-tab-proactive"[^>]*aria-selected="false"/);
       expect(html).toMatch(/id="napcat-tab-memory"[^>]*aria-selected="false"/);
+      expect(html).toMatch(/id="napcat-tab-face"[^>]*aria-selected="false"/);
 
       // connection panel 为显示状态 (没有 hidden 属性)
       expect(html).toMatch(/id="napcat-tabpanel-connection"[^>]*role="tabpanel"/);
       expect(html).not.toMatch(/id="napcat-tabpanel-connection"[^>]*hidden/);
 
       // 其他 4 个 panel 具有 hidden 属性与 display:none
-      expect(html).toMatch(/id="napcat-tabpanel-reply"[^>]*hidden/);
       expect(html).toMatch(/id="napcat-tabpanel-persona"[^>]*hidden/);
       expect(html).toMatch(/id="napcat-tabpanel-proactive"[^>]*hidden/);
       expect(html).toMatch(/id="napcat-tabpanel-memory"[^>]*hidden/);
+      expect(html).toMatch(/id="napcat-tabpanel-face"[^>]*hidden/);
     });
 
     it('Tab 1 (连接身份) 包含全部 6 个预定义配置项', () => {
@@ -126,7 +124,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
 
       // 提取 connection panel 内容
       const connectionPanelMatch = html.match(
-        /id="napcat-tabpanel-connection"[\s\S]*?(?=<div[^>]*id="napcat-tabpanel-reply")/
+        /id="napcat-tabpanel-connection"[\s\S]*?(?=<div[^>]*id="napcat-tabpanel-persona")/
       );
       expect(connectionPanelMatch).not.toBeNull();
       const connectionHtml = connectionPanelMatch![0];
@@ -158,27 +156,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
   });
 
   describe('3. Tab 切换与各 Tab 控件完整性契约', () => {
-    it('切换到 Tab 2 (回复行为) 时展示对应 2 个字段，其他 panel 隐藏', () => {
-      const onTabChange = vi.fn();
-      const html = renderCard({ initialTab: 'reply', onTabChange });
-
-      // reply panel 显示
-      expect(html).toMatch(/id="napcat-tab-reply"[^>]*aria-selected="true"/);
-      expect(html).not.toMatch(/id="napcat-tabpanel-reply"[^>]*hidden/);
-      expect(html).toMatch(/id="napcat-tabpanel-connection"[^>]*hidden/);
-
-      // 验证 2 个字段
-      const panelMatch = html.match(
-        /id="napcat-tabpanel-reply"[\s\S]*?(?=<div[^>]*id="napcat-tabpanel-persona")/
-      );
-      const replyHtml = panelMatch![0];
-      expect(replyHtml).toContain('id="napcat-quote-original"');
-      expect(replyHtml).toContain('群聊回复引用原消息 (quote_original)');
-      expect(replyHtml).toContain('id="napcat-at-questioner"');
-      expect(replyHtml).toContain('群聊回复 @ 提问者 (at_questioner)');
-    });
-
-    it('切换到 Tab 3 (人格与准则) 时展示对应 2 个 TextArea 字段', () => {
+    it('切换到 Tab 2 (人格与准则) 时展示对应 2 个 TextArea 字段', () => {
       const html = renderCard({ initialTab: 'persona' });
 
       expect(html).toMatch(/id="napcat-tab-persona"[^>]*aria-selected="true"/);
@@ -266,8 +244,8 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       controller.setActiveTab('memory');
       expect(onTabChange).toHaveBeenCalledWith('memory');
 
-      controller.setActiveTab('reply');
-      expect(onTabChange).toHaveBeenCalledWith('reply');
+      controller.setActiveTab('persona');
+      expect(onTabChange).toHaveBeenCalledWith('persona');
     });
   });
 
@@ -276,7 +254,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       renderCard({
         initialConfig: {
           ws_port: 8080,
-          quote_original: true,
+          image_ttl_days: 7,
           persona: '默认人格',
         },
       });
@@ -289,28 +267,28 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(controller.isDirty).toBe(true);
       expect(controller.model.getDraft().ws_port).toBe(9000);
 
-      // 2. 切换到 Tab 2 (reply)
-      controller.setActiveTab('reply');
+      // 2. 切换到 Tab 2 (persona)
+      controller.setActiveTab('persona');
       expect(controller.isDirty).toBe(true);
       // 检查 Tab 1 的修改未丢失
       expect(controller.model.getDraft().ws_port).toBe(9000);
 
-      // 3. 在 Tab 2 修改 quote_original
-      controller.handleFieldChange('quote_original', false);
-      expect(controller.isDirty).toBe(true);
-      expect(controller.model.getDraft().quote_original).toBe(false);
-
-      // 4. 切换到 Tab 3 (persona) 并修改 persona
-      controller.setActiveTab('persona');
+      // 3. 在 Tab 2 修改 persona
       controller.handleFieldChange('persona', '猫娘程序员');
+      expect(controller.isDirty).toBe(true);
       expect(controller.model.getDraft().persona).toBe('猫娘程序员');
+
+      // 4. 切换到 Tab 3 (proactive) 并修改 proactive_reply_enabled
+      controller.setActiveTab('proactive');
+      controller.handleFieldChange('proactive_reply_enabled', true);
+      expect(controller.model.getDraft().proactive_reply_enabled).toBe(true);
 
       // 5. 切回 Tab 1，所有 Tab 的修改依然完好保留在 draft
       controller.setActiveTab('connection');
       const finalDraft = controller.model.getDraft();
       expect(finalDraft.ws_port).toBe(9000);
-      expect(finalDraft.quote_original).toBe(false);
       expect(finalDraft.persona).toBe('猫娘程序员');
+      expect(finalDraft.proactive_reply_enabled).toBe(true);
       expect(controller.isDirty).toBe(true);
     });
 
@@ -331,7 +309,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(controller.isDirty).toBe(true);
 
       // 切换 Tab 后草稿保持
-      controller.setActiveTab('reply');
+      controller.setActiveTab('persona');
       expect(controller.model.getDraft().admins).toEqual(['10001', '10002', '10003']);
       expect(controller.model.getDraft().aliases).toEqual(['bot', '小助手', '机器猫']);
     });
@@ -343,7 +321,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
         revision: 5,
         initialConfig: {
           ws_port: 8080,
-          quote_original: true,
+          persona: '旧人设',
           proactive_reply_enabled: false,
           memory_budget_chars: 2200,
         },
@@ -353,8 +331,8 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       // Tab 1:
       controller.handleFieldChange('ws_port', 9876);
       // Tab 2:
-      controller.handleFieldChange('quote_original', false);
-      // Tab 4:
+      controller.handleFieldChange('persona', '新人设');
+      // Tab 3:
       controller.handleFieldChange('proactive_reply_enabled', true);
       // Tab 5:
       controller.handleFieldChange('group_memory_budget_chars', 4000);
@@ -372,7 +350,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       const [savedDraft, options] = mockSaveSettings.mock.calls[0];
       expect(options).toEqual({ expectedRevision: 5 });
       expect(savedDraft.ws_port).toBe(9876);
-      expect(savedDraft.quote_original).toBe(false);
+      expect(savedDraft.persona).toBe('新人设');
       expect(savedDraft.proactive_reply_enabled).toBe(true);
       expect(savedDraft.group_memory_budget_chars).toBe(4000);
       expect(savedDraft.private_memory_budget_chars).toBe(1800);
@@ -403,7 +381,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       renderCard({
         initialConfig: {
           ws_port: 8080,
-          quote_original: true,
+          image_ttl_days: 7,
           admins: ['10001'],
           persona: '原始人格',
         },
@@ -411,7 +389,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
 
       // 跨 Tab 修改
       controller.handleFieldChange('ws_port', 9999);
-      controller.handleFieldChange('quote_original', false);
+      controller.handleFieldChange('image_ttl_days', 30);
       controller.handleAdminsChange('99999');
       controller.handleFieldChange('persona', '修改后的人格');
 
@@ -423,7 +401,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       // 断言修改被全部撤销
       const draft = controller.model.getDraft();
       expect(draft.ws_port).toBe(8080);
-      expect(draft.quote_original).toBe(true);
+      expect(draft.image_ttl_days).toBe(7);
       expect(draft.admins).toEqual(['10001']);
       expect(draft.persona).toBe('原始人格');
       expect(controller.isDirty).toBe(false);
@@ -433,20 +411,20 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       renderCard({
         baseDefaults: {
           ws_port: DEFAULT_WS_PORT,
-          quote_original: true,
+          image_ttl_days: 7,
         },
         initialConfig: {
           ws_port: DEFAULT_WS_PORT,
-          quote_original: true,
+          image_ttl_days: 7,
         },
       });
 
       // 自定义两个字段
       controller.handleFieldChange('ws_port', 3000);
-      controller.handleFieldChange('quote_original', false);
+      controller.handleFieldChange('image_ttl_days', 30);
 
       expect(controller.model.isOverridden('ws_port')).toBe(true);
-      expect(controller.model.isOverridden('quote_original')).toBe(true);
+      expect(controller.model.isOverridden('image_ttl_days')).toBe(true);
 
       // 仅重置 ws_port
       controller.handleResetField('ws_port');
@@ -454,9 +432,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(controller.model.getDraft().ws_port).toBe(DEFAULT_WS_PORT);
       expect(controller.model.isOverridden('ws_port')).toBe(false);
 
-      // quote_original 依然处于修改状态
-      expect(controller.model.getDraft().quote_original).toBe(false);
-      expect(controller.model.isOverridden('quote_original')).toBe(true);
+      // image_ttl_days 依然处于修改状态
+      expect(controller.model.getDraft().image_ttl_days).toBe(30);
+      expect(controller.model.isOverridden('image_ttl_days')).toBe(true);
       expect(controller.isDirty).toBe(true);
     });
   });

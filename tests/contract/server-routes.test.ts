@@ -170,8 +170,6 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
         bot_qq: '12345678',
         admins: ['10001', '10002'],
         aliases: ['小助手'],
-        at_questioner: true,
-        quote_original: true,
         image_ttl_days: 7,
         persona: '测试人格设定',
         proactive_reply_enabled: true,
@@ -192,7 +190,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       expect(result.body.config.ws_token).toBe(''); // 绝对脱敏保护，绝不向前端泄露明文
       expect(result.body.config.bot_qq).toBe('12345678');
       expect(result.body.config.admins).toEqual(['10001', '10002']);
-      expect(result.body.config.at_questioner).toBe(true);
+      expect(result.body.config.image_ttl_days).toBe(7);
       expect(result.body.baseDefaults).toEqual(DEFAULT_BASE_CONFIG);
       expect(result.body.baseDefaults.ws_port).toBe(8080);
     });

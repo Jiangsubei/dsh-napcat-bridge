@@ -849,9 +849,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           proactiveManager.recordProactiveReply(decision.payload.peer, timestamp);
         }
 
-        // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供出方向按
-
-        // at_questioner / quote_original 组装 @提问者 / 引用原消息 前缀 (Spec §7.1 决策 A)
+        // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供入站唤醒与上下文跟踪 (Spec §7.1 决策 A)
         const payloadPeer = decision.payload.peer;
         const msgIdFromEvent = Number(event.message_id);
         if (msgIdFromEvent) {

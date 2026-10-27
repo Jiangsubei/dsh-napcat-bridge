@@ -66,8 +66,6 @@ dsh --profile web
 | `bot_qq` | 机器人自身 QQ 号（自循环防护） | `''` |
 | `admins` | 管理员 QQ 号白名单（斜杠命令授权） | `[]` |
 | `aliases` | 助手点名别名（群聊点名唤醒） | `[]` |
-| `at_questioner` | 群聊回复是否 @提问者 | `false` |
-| `quote_original` | 群聊回复是否引用原消息 | `true` |
 | `persona` | 助手人格设定 | 见源码 |
 | `behavior` | 行为约束准则 | 见源码 |
 | `proactive_reply_enabled` | 启用群聊主动回复 | `false` |
