@@ -262,6 +262,64 @@ export class MessageDatabase {
     });
   }
 
+  /**
+   * 检查指定消息 ID 是否已存在
+   */
+  hasMessage(msgId: number): boolean {
+    const db = this.ensureDb();
+    const row = db.prepare('SELECT 1 FROM messages WHERE msg_id = ? LIMIT 1').get(msgId);
+    return Boolean(row);
+  }
+
+  /**
+   * 获取指定会话 peer 在本地数据库中的最新一条消息时间戳（毫秒）
+   * 若该 peer 尚无任何历史消息，返回 null
+   */
+  getLatestMessageTime(peer: string): number | null {
+    const db = this.ensureDb();
+    const row = db.prepare('SELECT MAX(time) AS max_time FROM messages WHERE peer = ?').get(peer) as
+      | { max_time: number | null }
+      | undefined;
+    return row && row.max_time !== null && !Number.isNaN(row.max_time) ? row.max_time : null;
+  }
+
+  /**
+   * 离线补全安全入库：仅在消息不存在时插入，已存在时幂等忽略且绝不覆盖已有记录（保护已有 local_path 等）
+   * @returns true 表示成功插入新记录，false 表示已存在而忽略
+   */
+  saveMessageIfNotExists(record: MessageRecord): boolean {
+    const db = this.ensureDb();
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO messages (
+        msg_id, peer, user_id, sender_name, time, type, content, raw,
+        file_id, busid, local_path, fingerprint, recalled, self, reply_to
+      ) VALUES (
+        @msg_id, @peer, @user_id, @sender_name, @time, @type, @content, @raw,
+        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to
+      )
+    `);
+
+    const result = stmt.run({
+      msg_id: record.msg_id,
+      peer: record.peer,
+      user_id: String(record.user_id),
+      sender_name: record.sender_name || '',
+      time: record.time,
+      type: record.type,
+      content: record.content,
+      raw: typeof record.raw === 'string' ? record.raw : JSON.stringify(record.raw),
+      file_id: record.file_id ?? null,
+      busid: record.busid ?? null,
+      local_path: record.local_path ?? null,
+      fingerprint: record.fingerprint ?? null,
+      recalled: record.recalled ? 1 : 0,
+      self: record.self ? 1 : 0,
+      reply_to: record.reply_to ?? null,
+    });
+
+    return result.changes > 0;
+  }
+
   readHistory(peer: string, params: ReadChatHistoryParams = {}): ReadChatHistoryResult {
     const db = this.ensureDb();
     const conditions: string[] = ['peer = ?'];

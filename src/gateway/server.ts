@@ -42,8 +42,20 @@ export class NapCatGatewayServer {
   private messageHandlers: MessageHandler[] = [];
   private noticeHandlers: NoticeHandler[] = [];
   private metaHandlers: MetaHandler[] = [];
+  private connectHandlers: Array<() => void | Promise<void>> = [];
 
   constructor(public readonly options: GatewayServerOptions) {}
+
+  get isConnected(): boolean {
+    return Boolean(this.activeSocket && this.activeSocket.readyState === WebSocket.OPEN);
+  }
+
+  onConnect(handler: () => void | Promise<void>): () => void {
+    this.connectHandlers.push(handler);
+    return () => {
+      this.connectHandlers = this.connectHandlers.filter((h) => h !== handler);
+    };
+  }
 
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.push(handler);
@@ -125,6 +137,19 @@ export class NapCatGatewayServer {
         this.wss.on('connection', (ws, req) => {
           this.options.logger?.info?.(`[GatewayServer] NapCat 客户端已连接 (${req.socket.remoteAddress})`);
           this.activeSocket = ws;
+
+          for (const h of this.connectHandlers) {
+            try {
+              const res = h();
+              if (res && typeof (res as Promise<any>).catch === 'function') {
+                (res as Promise<any>).catch((e) => {
+                  this.options.logger?.error?.('[GatewayServer] 异步连接处理器异常:', e);
+                });
+              }
+            } catch (e) {
+              this.options.logger?.error?.('[GatewayServer] 连接处理器异常:', e);
+            }
+          }
 
           ws.on('message', (data) => {
             this.handleIncomingRaw(data.toString());
@@ -363,6 +388,51 @@ export class NapCatGatewayServer {
   async getStrangerInfo(userId: number | string): Promise<OneBotActionResponse> {
     return this.sendAction('get_stranger_info', {
       user_id: Number(userId),
+    });
+  }
+
+  /**
+   * OneBot 11 / NapCat: 获取群历史消息记录 (get_group_msg_history)
+   */
+  async getGroupMsgHistory(
+    groupId: number | string,
+    count = 20,
+    messageSeq?: number | string
+  ): Promise<OneBotActionResponse<{ messages?: any[] }>> {
+    const params: Record<string, any> = {
+      group_id: Number(groupId),
+      count: Number(count),
+    };
+    if (messageSeq !== undefined && messageSeq !== null && messageSeq !== '') {
+      params.message_seq = Number(messageSeq);
+    }
+    return this.sendAction('get_group_msg_history', params);
+  }
+
+  /**
+   * OneBot 11 / NapCat: 获取好友历史消息记录 (get_friend_msg_history)
+   */
+  async getFriendMsgHistory(
+    userId: number | string,
+    count = 20,
+    messageSeq?: number | string
+  ): Promise<OneBotActionResponse<{ messages?: any[] }>> {
+    const params: Record<string, any> = {
+      user_id: Number(userId),
+      count: Number(count),
+    };
+    if (messageSeq !== undefined && messageSeq !== null && messageSeq !== '') {
+      params.message_seq = Number(messageSeq);
+    }
+    return this.sendAction('get_friend_msg_history', params);
+  }
+
+  /**
+   * NapCat 扩展 API: 获取最近活跃会话列表 (get_recent_contact)
+   */
+  async getRecentContact(count = 20): Promise<OneBotActionResponse<any[]>> {
+    return this.sendAction('get_recent_contact', {
+      count: Number(count),
     });
   }
 

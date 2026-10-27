@@ -21,6 +21,7 @@ import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/
 import { MessageDatabase } from './storage/database.js';
 import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';
 import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
+import { OfflineMessageSyncer } from './gateway/sync.js';
 import { SessionManager } from './gateway/session.js';
 import { shouldWakeup, parseNormalizedContent, resolveAtNicknames } from './gateway/wakeup.js';
 import { CachedGroupMemberResolver } from './gateway/members.js';
@@ -1090,6 +1091,23 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
   });
 
+  // 8. 离线历史消息同步与去重引擎 (OfflineMessageSyncer)
+  const offlineSyncer = new OfflineMessageSyncer({
+    gateway: server,
+    db,
+    botQQ: currentConfig().bot_qq,
+    logger,
+  });
+
+  server.onConnect(() => {
+    // 延迟 500ms 等待 NapCat 内部完成状态就绪后执行离线增量同步
+    setTimeout(() => {
+      offlineSyncer.sync().catch((err) => {
+        logger.error?.('[Plugin] 离线消息增量同步异常:', err);
+      });
+    }, 500);
+  });
+
   // 9. 生命周期接线
   const startServer = async () => {
     logger.info?.(`${PLUGIN_NAME} 插件已加载并就绪`);
@@ -1097,6 +1115,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       await server.start();
     } catch (err) {
       logger.warn?.('[Plugin] GatewayServer 启动告警 (可能端口被占用或测试环境):', err);
+    }
+
+    if (server.isConnected) {
+      offlineSyncer.sync().catch((err) => {
+        logger.error?.('[Plugin] 离线消息增量同步异常:', err);
+      });
     }
 
     // 启动群聊潜水超时主动巡检定时器
