@@ -181,4 +181,38 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
     const entries = await storage.getEntries();
     expect(entries).toHaveLength(0);
   });
+
+  it('契约 5: POST /plugins/dsh-napcat-bridge/slang 添加新词条成功与失败校验', async () => {
+    registerSlangRoutes({ ctx: mockCtx, storage });
+    const handler = registeredRoutes.get(`exact:${SLANG_API_PATH}`);
+
+    // 缺少 term
+    const reqNoTerm = createMockRequest('POST', SLANG_API_PATH, { definition: '释义' });
+    const resNoTerm = new MockResponse();
+    await handler(reqNoTerm, resNoTerm);
+    expect(resNoTerm.statusCode).toBe(400);
+
+    // 缺少 definition
+    const reqNoDef = createMockRequest('POST', SLANG_API_PATH, { term: '懂你意思' });
+    const resNoDef = new MockResponse();
+    await handler(reqNoDef, resNoDef);
+    expect(resNoDef.statusCode).toBe(400);
+
+    // 成功添加
+    const reqSuccess = createMockRequest('POST', SLANG_API_PATH, {
+      term: '懂你意思',
+      definition: '附和或反讽用法',
+      example: '例：你说得对',
+    });
+    const resSuccess = new MockResponse();
+    await handler(reqSuccess, resSuccess);
+    expect(resSuccess.statusCode).toBe(200);
+    const body = JSON.parse(resSuccess.body);
+    expect(body.ok).toBe(true);
+    expect(body.entry.term).toBe('懂你意思');
+
+    const entries = await storage.getEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].term).toBe('懂你意思');
+  });
 });
