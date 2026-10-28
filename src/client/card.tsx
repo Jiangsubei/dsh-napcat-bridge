@@ -24,6 +24,16 @@ function IconEdit(props: { size?: number }): React.JSX.Element {
   );
 }
 
+function IconPlus(props: { size?: number }): React.JSX.Element {
+  const size = props.size ?? 14;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
 function IconTrash(props: { size?: number }): React.JSX.Element {
   const size = props.size ?? 14;
   return (
@@ -274,6 +284,11 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const [editingSlangNewTerm, setEditingSlangNewTerm] = useState('');
   const [editingSlangDef, setEditingSlangDef] = useState('');
   const [editingSlangEx, setEditingSlangEx] = useState('');
+  const [isAddingSlang, setIsAddingSlang] = useState(false);
+  const [newSlangTerm, setNewSlangTerm] = useState('');
+  const [newSlangDef, setNewSlangDef] = useState('');
+  const [newSlangEx, setNewSlangEx] = useState('');
+  const [addingSlangLoading, setAddingSlangLoading] = useState(false);
 
   const loadSlang = useCallback(async () => {
     setSlangLoading(true);
@@ -330,6 +345,43 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
         void loadSlang();
       }
     } catch {}
+  };
+
+  const handleAddSlangSubmit = async () => {
+    if (!newSlangTerm.trim()) {
+      updateError('词条名称不能为空');
+      return;
+    }
+    if (!newSlangDef.trim()) {
+      updateError('核心释义不能为空');
+      return;
+    }
+    setAddingSlangLoading(true);
+    try {
+      const res = await fetch('/plugins/dsh-napcat-bridge/slang', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          term: newSlangTerm.trim(),
+          definition: newSlangDef.trim(),
+          example: newSlangEx.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.ok) {
+        setIsAddingSlang(false);
+        setNewSlangTerm('');
+        setNewSlangDef('');
+        setNewSlangEx('');
+        void loadSlang();
+      } else {
+        updateError(data?.error || '添加黑话词条失败');
+      }
+    } catch (err: any) {
+      updateError(err?.message || '添加黑话词条失败');
+    } finally {
+      setAddingSlangLoading(false);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1245,8 +1297,24 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 <div>
                   共 <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{slangTotal}</strong> 条黑话词条
                 </div>
-                <div>
-                  字符占用: <strong style={{ color: slangCharCount > slangBudgetChars ? 'var(--dsw-alias-label-error)' : 'var(--dsw-alias-label-primary)' }}>{slangCharCount}</strong> / {slangBudgetChars} 字符
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div>
+                    字符占用: <strong style={{ color: slangCharCount > slangBudgetChars ? 'var(--dsw-alias-label-error)' : 'var(--dsw-alias-label-primary)' }}>{slangCharCount}</strong> / {slangBudgetChars} 字符
+                  </div>
+                  <button
+                    type="button"
+                    className={`napcat-slang-add-btn ${faceStyle.actionBtn}`}
+                    title="添加黑话词条"
+                    disabled={isAddingSlang}
+                    onClick={() => {
+                      setIsAddingSlang(true);
+                      setNewSlangTerm('');
+                      setNewSlangDef('');
+                      setNewSlangEx('');
+                    }}
+                  >
+                    <IconPlus size={12} />
+                  </button>
                 </div>
               </div>
 
@@ -1254,12 +1322,77 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                 <div className={faceStyle.empty}>
                   <p className={faceStyle.emptyText}>正在加载黑话库...</p>
                 </div>
-              ) : slangEntries.length === 0 ? (
+              ) : slangEntries.length === 0 && !isAddingSlang ? (
                 <div className={faceStyle.empty}>
                   <p className={faceStyle.emptyText}>暂无已收录黑话词条，聊天中 Agent 会自动学习或可手动通过 record_slang 工具添加。</p>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  {isAddingSlang && (
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        border: '1px solid var(--dsw-alias-border-l2)',
+                        borderRadius: '8px',
+                        background: 'var(--dsw-alias-bg-layer-2)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                      }}
+                    >
+                      <div className={faceStyle.inlineEditor}>
+                        <input
+                          type="text"
+                          value={newSlangTerm}
+                          onChange={(e) => setNewSlangTerm(e.target.value)}
+                          placeholder="词条名称 (如：懂你意思、牢大)"
+                          className={fieldStyle.input}
+                          style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                          autoFocus
+                        />
+                        <input
+                          type="text"
+                          value={newSlangDef}
+                          onChange={(e) => setNewSlangDef(e.target.value)}
+                          placeholder="核心释义 (简明概括其含义与语境，一两句话即可)"
+                          className={fieldStyle.input}
+                          style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                        />
+                        <input
+                          type="text"
+                          value={newSlangEx}
+                          onChange={(e) => setNewSlangEx(e.target.value)}
+                          placeholder="使用示例 (典型例句或使用场景，可留空)"
+                          className={fieldStyle.input}
+                          style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
+                        />
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                          <button
+                            type="button"
+                            className={cardStyle.discard}
+                            onClick={() => {
+                              setIsAddingSlang(false);
+                              setNewSlangTerm('');
+                              setNewSlangDef('');
+                              setNewSlangEx('');
+                            }}
+                            style={{ height: '24px', padding: '0 8px', fontSize: '11px' }}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className={`napcat-slang-save-add-btn ${cardStyle.save}`}
+                            disabled={addingSlangLoading}
+                            onClick={handleAddSlangSubmit}
+                            style={{ height: '24px', padding: '0 10px', fontSize: '11px' }}
+                          >
+                            {addingSlangLoading ? '保存中...' : '保存'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {slangEntries.map((item) => {
                     const isEditing = editingSlangTerm === item.term;
                     return (
@@ -1325,7 +1458,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                               type="text"
                               value={editingSlangNewTerm}
                               onChange={(e) => setEditingSlangNewTerm(e.target.value)}
-                              placeholder="词条名称"
+                              placeholder="词条名称 (如：懂你意思、牢大)"
                               className={fieldStyle.input}
                               style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
                             />
@@ -1333,7 +1466,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                               type="text"
                               value={editingSlangDef}
                               onChange={(e) => setEditingSlangDef(e.target.value)}
-                              placeholder="释义"
+                              placeholder="核心释义 (简明概括其含义与语境，一两句话即可)"
                               className={fieldStyle.input}
                               style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
                             />
@@ -1341,7 +1474,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                               type="text"
                               value={editingSlangEx}
                               onChange={(e) => setEditingSlangEx(e.target.value)}
-                              placeholder="例句"
+                              placeholder="使用示例 (典型例句或使用场景，可留空)"
                               className={fieldStyle.input}
                               style={{ height: '28px', fontSize: '12px', padding: '0 8px' }}
                             />

@@ -70,4 +70,12 @@ describe('契约测试: Web UI 设置卡「黑话学习」Tab (Slang Settings Ta
     expect(html).not.toContain('id="napcat-slang-storage-path"');
     expect(html).not.toContain('字符占用:');
   });
+
+  it('契约 4: 渲染「+ 添加黑话」图标按钮且位于字符占用右侧', () => {
+    const { html } = renderCard({ initialTab: 'slang' });
+
+    expect(html).toContain('napcat-slang-add-btn');
+    expect(html).toContain('title="添加黑话词条"');
+    expect(html).toMatch(/字符占用[\s\S]*?napcat-slang-add-btn/);
+  });
 });

@@ -39,6 +39,35 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
       }
       return;
     }
+    if (method === 'POST') {
+      try {
+        const body = (await parseJsonBody(req)) || {};
+        const { term, definition, example } = body;
+        if (!term || typeof term !== 'string' || !term.trim()) {
+          sendJson(res, 400, { ok: false, error: '缺少词条名称 (term)' });
+          return;
+        }
+        if (!definition || typeof definition !== 'string' || !definition.trim()) {
+          sendJson(res, 400, { ok: false, error: '缺少核心释义 (definition)' });
+          return;
+        }
+        const recordRes = await storage.recordEntry({
+          term: term.trim(),
+          definition: definition.trim(),
+          example: typeof example === 'string' ? example.trim() : '',
+        });
+        sendJson(res, 200, {
+          ok: true,
+          entry: recordRes.entry,
+          action: recordRes.action,
+          char_count: recordRes.charCount,
+          budget_chars: recordRes.budgetChars,
+        });
+      } catch (err: any) {
+        sendJson(res, 400, { ok: false, error: err?.message || '添加词条失败' });
+      }
+      return;
+    }
     sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
   };
 
