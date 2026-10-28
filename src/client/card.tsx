@@ -68,7 +68,7 @@ export interface TabItem {
 export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'connection', label: '连接身份' },
   { id: 'persona', label: '人格与准则' },
-  { id: 'proactive', label: '主动回复' },
+  { id: 'proactive', label: '回复配置' },
   { id: 'memory', label: '记忆' },
   { id: 'face', label: '表情包' },
   { id: 'slang', label: '黑话学习' },
@@ -780,11 +780,11 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
           <ValueField
             id="napcat-proactive-buffer-size"
             label="滑动窗口保留条数 (proactive_buffer_size)"
-            hint="群聊消息滑动窗口队列最大保留条数 (默认 10 条，新入旧汰)"
+            hint="群聊消息滑动窗口队列最大保留条数 (默认 10 条)，为被动唤醒与主动回复共同提供短程前序上下文"
             placeholder="10"
             numeric
             value={String(draft.proactive_buffer_size ?? 10)}
-            disabled={saving || !draft.proactive_reply_enabled}
+            disabled={saving}
             overridden={model.isOverridden('proactive_buffer_size')}
             onReset={() => handleResetField('proactive_buffer_size')}
             onChange={(val) => handleFieldChange('proactive_buffer_size', parseInt(val, 10) || 10)}

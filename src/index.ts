@@ -901,13 +901,25 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         if (decision.trigger === 'proactive') {
           proactiveManager.recordProactiveReply(decision.payload.peer, timestamp);
         } else if (isGroup) {
-          // 即时直接唤醒：重置群主动回复观测计时，并将直接唤醒消息记录至滑动窗口 (replied: true)
-          proactiveManager.recordDirectWakeup(decision.payload.peer, timestamp, {
-            from_user: String(event.user_id),
-            from_name: event.sender?.card || event.sender?.nickname || '',
-            content: content || (event.raw_message ?? ''),
-            msg_id: Number(event.message_id) || undefined,
-          });
+          // 即时被动唤醒：获取前序未回复消息快照拼入 payload，为 Agent 提供短程群聊上下文
+          const unrepliedBefore = proactiveManager.getUnrepliedMessages(decision.payload.peer);
+          if (unrepliedBefore.length > 0 && !decision.payload.buffered_messages) {
+            decision.payload.buffered_messages = unrepliedBefore;
+          }
+
+          // 即时直接唤醒：重置群主动回复观测计时，并将直接唤醒消息记录至滑动窗口 (replied: true)，
+          // 同时将滑动窗口中此前所有未回复消息全部原子标记为 replied: true（已读消费，防止幽灵重复打扰）
+          proactiveManager.recordDirectWakeup(
+            decision.payload.peer,
+            timestamp,
+            {
+              from_user: String(event.user_id),
+              from_name: event.sender?.card || event.sender?.nickname || '',
+              content: content || (event.raw_message ?? ''),
+              msg_id: Number(event.message_id) || undefined,
+            },
+            currentConfig()
+          );
         }
 
         // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供入站唤醒与上下文跟踪 (Spec §7.1 决策 A)

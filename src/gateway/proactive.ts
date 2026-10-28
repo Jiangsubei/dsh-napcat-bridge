@@ -45,15 +45,13 @@ export class ProactiveManager {
 
   /**
    * 收集并存入群聊普通消息到滑动窗口队列
+   * 滑动窗口常驻维护（与主动回复总开关解耦），为被动唤醒与主动回复共同提供短程上下文。
    */
   recordGroupMessage(
     peer: string,
     msg: Omit<WindowGroupMessage, 'replied'>,
     config: BridgePluginConfig
   ): void {
-    if (!config.proactive_reply_enabled) {
-      return;
-    }
     if (config.proactive_only_text && msg.isTextOnly === false) {
       return;
     }
@@ -74,30 +72,47 @@ export class ProactiveManager {
   }
 
   /**
+   * 获取某群当前滑动窗口中的未回复消息快照
+   */
+  getUnrepliedMessages(peer: string): WindowGroupMessage[] {
+    const list = this.windowMessages.get(peer) || [];
+    return list.filter((m) => !m.replied);
+  }
+
+  /**
    * 记录发生了一次即时直接唤醒 (如 @、戳一戳、引用)
-   * 顺延/重置该群的主动回复观测计时，并将直接唤醒消息标记为 replied: true 存入滑动窗口
+   * 顺延/重置该群的主动回复观测计时；
+   * 将滑动窗口中此前所有未回复消息原子标记为 replied: true（已读消费，防止幽灵重复打扰）；
+   * 并将直接唤醒消息标记为 replied: true 存入滑动窗口。
    */
   recordDirectWakeup(
     peer: string,
     timestamp = Date.now(),
-    msg?: { from_user: string; from_name: string; content: string; msg_id?: number }
+    msg?: { from_user: string; from_name: string; content: string; msg_id?: number },
+    config?: BridgePluginConfig
   ): void {
     this.recordHumanMessage(peer, timestamp);
     this.lastProactiveTimes.set(peer, timestamp);
 
+    const list = this.windowMessages.get(peer) || [];
+
+    // 关键状态流转闭环：此前未回复消息全部消费标记为已回复
+    for (const m of list) {
+      m.replied = true;
+    }
+
     if (msg) {
-      const list = this.windowMessages.get(peer) || [];
       list.push({
         ...msg,
         timestamp,
         replied: true,
       });
-      const maxLimit = 10;
+      const maxLimit = Math.max(1, config?.proactive_buffer_size ?? 10);
       while (list.length > maxLimit) {
         list.shift();
       }
-      this.windowMessages.set(peer, list);
     }
+    this.windowMessages.set(peer, list);
   }
 
   /**
