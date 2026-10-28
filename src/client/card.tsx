@@ -753,6 +753,19 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             ].filter(Boolean).join(' ')}
             style={activeTab !== 'proactive' ? { display: 'none' } : undefined}
           >
+          <ValueField
+            id="napcat-proactive-buffer-size"
+            label="滑动窗口保留条数 (proactive_buffer_size)"
+            hint="群聊消息滑动窗口队列最大保留条数 (默认 10 条)，为被动唤醒与主动回复共同提供短程前序上下文"
+            placeholder="10"
+            numeric
+            value={String(draft.proactive_buffer_size ?? 10)}
+            disabled={saving}
+            overridden={model.isOverridden('proactive_buffer_size')}
+            onReset={() => handleResetField('proactive_buffer_size')}
+            onChange={(val) => handleFieldChange('proactive_buffer_size', parseInt(val, 10) || 10)}
+          />
+
           <SwitchField
             id="napcat-proactive-reply-enabled"
             label="启用群聊主动回复 (proactive_reply_enabled)"
@@ -775,19 +788,6 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             overridden={model.isOverridden('proactive_interval_mins')}
             onReset={() => handleResetField('proactive_interval_mins')}
             onChange={(val) => handleFieldChange('proactive_interval_mins', parseInt(val, 10) || 3)}
-          />
-
-          <ValueField
-            id="napcat-proactive-buffer-size"
-            label="滑动窗口保留条数 (proactive_buffer_size)"
-            hint="群聊消息滑动窗口队列最大保留条数 (默认 10 条)，为被动唤醒与主动回复共同提供短程前序上下文"
-            placeholder="10"
-            numeric
-            value={String(draft.proactive_buffer_size ?? 10)}
-            disabled={saving}
-            overridden={model.isOverridden('proactive_buffer_size')}
-            onReset={() => handleResetField('proactive_buffer_size')}
-            onChange={(val) => handleFieldChange('proactive_buffer_size', parseInt(val, 10) || 10)}
           />
 
           <SwitchField
