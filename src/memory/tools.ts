@@ -371,13 +371,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     defineTool({
       name: 'read_memory',
       description:
-        '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。适用于在上下文快照提示画像未完全展示时按需查阅用户深层偏好，或在需要确认当前群专属约定、群规与互动氛围以便提供贴切回复时主动查阅；同时也是在调用 edit_memory 精简或修改记忆前，获取最新内容与唯一 old_string 的前置工具。日常对话若上下文中已具备清晰背景则无需频繁调用。目标文件不存在或内容为空时返回安全提示，不影响后续交互。',
+        '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。适用于在日常交流或协助任务中，主动查阅以掌握用户深层偏好、习惯风格或确认群专属约定与互动氛围；当上下文快照提示画像未完全展示时按需查阅，或作为调用 edit_memory 精简修改前获取最新内容与唯一 old_string 的前置工具。日常对话若上下文中已有清晰背景则无需频繁调用。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'session' 表示读取群聊/私聊规则与文化；'user' 表示读取个人用户画像。",
+          description: "记忆类型：'session' 表示群聊/私聊规则与文化；'user' 表示个人用户画像。",
         },
         peer: {
           type: 'string',
@@ -414,18 +414,18 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     defineTool({
       name: 'create_memory',
       description:
-        '创建跨场景通用的个人偏好画像（type=\'user\'），或当前会话专属的规则与文化（type=\'session\'）。适用于在用户明确要求记住设定，或交流中顺手提炼出持久稳定的关键事实时主动建立档案；用户画像重点关注长期人设、工作风格、技术栈习惯、称呼与沟通偏好，会话记忆重点关注长期约定、群规禁忌、固定互动剧本与群专属社交氛围。切勿用于记录网络梗、特定词汇代称与社群黑话（此类全局词条由专有黑话工具收录，切勿存入记忆），亦严禁记录单次技术排查流水账、命令参数与操作步骤手册、一次性测试跑分、临时报错、路过客套打招呼、单次复读摸鱼、未验证的失败尝试，以及因临时环境问题得出的工具不可用等负面断言。内容必须保持紧凑（Compact）与高信号的单行陈述事实（建议单条 30 至 80 字，如 "- 偏好：xxx" 或 "- 互动约定：xxx"），严禁编写叙事性段落。严格受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符，超限直接拒绝写入）；仅在目标记忆尚未建立时首次调用，若记忆已存在切勿重复创建，应使用 edit_memory 进行融合更新。',
+        '首次创建跨场景通用的个人偏好画像（type=\'user\'），或当前会话专属的规则与文化（type=\'session\'）。适用于在交流或日常闲聊中发现用户确定性事实与长期偏好（如工作风格、技术栈习惯、人设与称呼偏好），或捕捉到群聊长期约定、群规与专属互动氛围时主动建立档案；亦在用户明确要求记住设定时调用。网络梗、词汇代称与社群黑话请使用专有黑话工具（record_slang），勿存入记忆；目标记忆已存在时勿重复创建，应使用 edit_memory 进行更新融合。严禁记录单次排查流水账、命令参数与操作手册、一次性跑分、临时报错、路过客套寒暄、单次复读摸鱼，以及因临时环境问题得出的负面断言。内容须保持紧凑高信号的单行陈述（如 "- 偏好：xxx" 或 "- 互动约定：xxx"），避免长篇叙事。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'user' 表示创建该用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则与文化（不跨场景）。",
+          description: "记忆类型：'user' 表示创建用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则与文化。",
         },
         content: {
           type: 'string',
           required: true,
-          description: '要写入的完整记忆内容。必须为简练的 Markdown 条目（建议单条 <80 字），原样写入，严禁流水账叙事。',
+          description: '要写入的完整记忆内容。必须为简练紧凑的 Markdown 条目（建议单条 <80 字），严禁流水账叙事。',
         },
         peer: {
           type: 'string',
@@ -461,13 +461,13 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
     defineTool({
       name: 'edit_memory',
       description:
-        '定向修改、更新、合并或精简已有的长期记忆条目。通过唯一匹配 old_string 替换为 new_string；若 new_string 省略或为空字符串则直接删除该匹配片段。适用于用户明确要求纠正设定，或在交流中主动合并相似条目、更新变更的人设与偏好、完善演化的群规与互动剧本，以及删减过时、冗余、失效的琐碎内容（Consolidation），使记忆文件始终保持精炼且高信号。维护与修改词汇级黑话请使用专有的黑话管理工具，切勿在此混淆写入；亦切勿拼接长篇叙事背景、会话排查流水账或一次性玩笑，不要在发生偶然分歧时随意篡改长期稳定约定。内容保持单行精简陈述，严格受容量硬上限约束（默认用户画像 <= 1500 字符，会话记忆 <= 2200 字符），超限直接拒绝写入并返回提示。调用前可结合 read_memory 确保 old_string 在目标文件中唯一且准确。',
+        '定向修改、更新、合并或精简已有的长期记忆条目。通过唯一匹配 old_string 替换为 new_string（若 new_string 省略或为空字符串则直接删除匹配片段）。适用于在交流与闲聊中捕捉到用户习惯演化、新事实补充时主动更新已有记忆，或在条目冗余时主动精简合并、删减失效过时的琐碎内容，使记忆持续保持高信号；亦在用户明确要求纠正、变更或删除设定时调用。维护词条级黑话请使用 manage_slang；切勿记录临时排查流水账或偶然分歧。内容保持单行精简陈述，调用前可结合 read_memory 确保 old_string 文本唯一准确。',
       parameters: {
         type: {
           type: 'string',
           enum: ['session', 'user'],
           required: true,
-          description: "记忆类型：'user' 表示修改用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示修改当前会话专属规则（不跨场景）。",
+          description: "记忆类型：'user' 表示修改用户跨场景稳定画像；'session' 表示修改当前会话专属规则。",
         },
         old_string: {
           type: 'string',
@@ -476,7 +476,7 @@ export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[
         },
         new_string: {
           type: 'string',
-          description: '替换后的新内容（保持精炼）。若省略或为空字符串，则删除匹配的 old_string 片段。',
+          description: '替换后的新内容（保持精炼单行）；省略或为空字符串则直接删除匹配的 old_string 片段。',
         },
         peer: {
           type: 'string',

@@ -509,22 +509,22 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(keptContent).toContain('喜欢简短回答');
   });
 
-  it('契约 11: 工具定义描述 (Tool Definitions) 包含 Compact、容量限制与禁流水账指导', () => {
+  it('契约 11: 工具定义描述 (Tool Definitions) 包含核心行为指导、黑话分流与禁流水账约束', () => {
     const toolDefs = createMemoryToolDefinitions(tools);
     const createTool = toolDefs.find((t) => t.name === 'create_memory')!;
     const editTool = toolDefs.find((t) => t.name === 'edit_memory')!;
     const readTool = toolDefs.find((t) => t.name === 'read_memory')!;
 
     // create_memory 描述
-    expect(createTool.description).toContain('Compact');
-    expect(createTool.description).toContain('1500');
-    expect(createTool.description).toContain('2200');
+    expect(createTool.description).toContain('单行');
+    expect(createTool.description).toContain('record_slang');
+    expect(createTool.description).toContain('edit_memory');
     expect(createTool.description).toContain('严禁');
 
     // edit_memory 描述
-    expect(editTool.description).toContain('Consolidation');
-    expect(editTool.description).toContain('1500');
-    expect(editTool.description).toContain('2200');
+    expect(editTool.description).toContain('manage_slang');
+    expect(editTool.description).toContain('单行');
+    expect(readTool.description).toContain('edit_memory');
 
     // read_memory 描述
     expect(readTool.description).toContain('old_string');
