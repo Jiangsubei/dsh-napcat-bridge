@@ -143,12 +143,12 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
     defineTool({
       name: 'record_slang',
       description:
-        '记录并收录跨会话通用的网络梗、社群黑话、圈内缩写或特色代称。用于在用户主动解释某个新词新梗的含义、纠正认知，或在交流中发现值得长期记住的高频黑话表达时调用；黑话跨所有群聊与私聊全局复用。仅需提取最核心的词条名称、凝练释义与简短例句，严禁记录闲聊流水账、对话背景琐事或多余修饰，保持极高信息密度与紧凑度。已存在的黑话词条若需修改请使用 manage_slang。',
+        '记录并收录跨会话通用的网络梗、社群黑话、圈内缩写或特色代称。适用于在交流或日常闲聊中捕捉到值得长期掌握的高频黑话表达、或用户主动解释新词新梗时主动收录；黑话在所有群聊与私聊中全局生效复用。用户个人偏好或群专属规则请使用记忆工具，勿记入黑话。仅提取核心词条名称、凝练释义与典型例句，严禁记录对话琐事背景；已存在的黑话词条若需修改请使用 manage_slang。',
       parameters: {
         term: {
           type: 'string',
           required: true,
-          description: '核心黑话/梗/词条名称（必填，如“牢大”、“电子阳痿”、“开香槟”等，保持简短原生）',
+          description: '核心黑话/梗/代称名称（必填，如“牢大”、“电子阳痿”等，保持简短原生）',
         },
         definition: {
           type: 'string',
@@ -184,17 +184,17 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
     defineTool({
       name: 'manage_slang',
       description:
-        '管理与维护全局黑话知识库。用于在用户指正黑话理解有误或补充新用法时更新释义例句、在黑话过时/被用户要求遗忘/出现错误信息时删除条目，或在准备修改前查询检索已有黑话列表以核对词条原名与现有内容。日常普通收录请使用 record_slang。',
+        '管理与维护全局黑话知识库（支持检索 list、修改 edit、删除 delete）。适用于在交流中发现既有黑话含义演化、用法更新或用户指正时更新释义例句，在黑话过时、失效或用户要求遗忘时删除条目，或在准备修改前检索核对现有黑话列表。日常首次收录新黑话请直接使用 record_slang。',
       parameters: {
         action: {
           type: 'string',
           required: true,
           enum: ['list', 'edit', 'delete'],
-          description: '操作类型：list (列出/检索已有黑话条目), edit (修改已有黑话的释义或例句), delete (删除指定黑话)',
+          description: '操作类型：list (检索/列出已有黑话条目), edit (修改已有黑话的释义或例句), delete (删除指定黑话)',
         },
         term: {
           type: 'string',
-          description: '目标黑话词条名称（action 为 edit 或 delete 时必填；action 为 list 时可选填用于精确指定）',
+          description: '目标黑话词条名称（action 为 edit 或 delete 时必填；action 为 list 时可选填用于精准匹配）',
         },
         definition: {
           type: 'string',
