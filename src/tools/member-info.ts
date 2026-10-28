@@ -23,7 +23,8 @@ export const GROUP_MEMBER_INFO_DESCRIPTION =
   '查询当前群聊中的成员资料、身份角色（群主/管理员/普通成员）、群头衔及进群时间等官方元数据。用于核实群成员的真实身份、判断某人是否为群主或管理员、了解群成员昵称与名片对应关系，或防范其他群成员冒充身份。支持通过 user_id 精确查询、通过 query 模糊搜索昵称名片，或通过 role 直接筛选群主与管理员列表。仅在群聊中有效。';
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 默认 5 分钟缓存
-const MAX_RETURN_LIMIT = 20; // 防止上下文爆炸的最大返回限制
+const DEFAULT_PAGE_LIMIT = 20; // 默认单页返回条数
+const MAX_PAGE_LIMIT = 50; // 单页最大返回条数上限
 
 class GroupMemberCachePool {
   private cache = new Map<string, { expires: number; members: GroupMemberRawItem[] }>();
@@ -252,15 +253,24 @@ export async function queryGroupMemberInfo(
     filtered = filtered.filter((m) => m.role === params.role);
   }
 
+  const page = Math.max(1, Math.floor(Number(params.page) || 1));
+  const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(Number(params.limit) || DEFAULT_PAGE_LIMIT)));
+
   const totalMatched = filtered.length;
-  const sliced = filtered.slice(0, MAX_RETURN_LIMIT);
+  const totalPages = Math.max(1, Math.ceil(totalMatched / limit));
+  const startIndex = (page - 1) * limit;
+  const endIndex = Math.min(startIndex + limit, totalMatched);
+  const sliced = startIndex < totalMatched ? filtered.slice(startIndex, endIndex) : [];
+  const hasMore = page < totalPages;
   const formattedMembers = sliced.map(formatMemberInfo);
 
   let message: string | undefined;
   if (totalMatched === 0) {
     message = '未找到符合条件的群成员。';
-  } else if (totalMatched > MAX_RETURN_LIMIT) {
-    message = `共匹配到 ${totalMatched} 位群成员，已截取展示前 ${MAX_RETURN_LIMIT} 位。如需精确查找某人，请使用更具体的 user_id 或 query 参数。`;
+  } else if (hasMore) {
+    message = `当前展示第 ${startIndex + 1}~${endIndex} 位（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。若需继续浏览，请再次调用并传入 page: ${page + 1}。`;
+  } else if (totalPages > 1) {
+    message = `已展示至最后一页（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。`;
   }
 
   return {
@@ -269,6 +279,10 @@ export async function queryGroupMemberInfo(
     members: formattedMembers,
     total: formattedMembers.length,
     total_matched: totalMatched,
+    page,
+    limit,
+    total_pages: totalPages,
+    has_more: hasMore,
     message,
   };
 }
@@ -309,6 +323,14 @@ export function createGetGroupMemberInfoTool(
         type: 'boolean',
         description: '是否强制穿透缓存刷新群成员数据 (默认 false)',
       },
+      page: {
+        type: 'number',
+        description: '分页页码，从 1 开始。默认为第 1 页。',
+      },
+      limit: {
+        type: 'number',
+        description: '每页返回的群成员数量 (默认 20，单次上限 50)。',
+      },
     },
     output: {
       schema: { type: 'json' },
@@ -321,13 +343,18 @@ export function createGetGroupMemberInfoTool(
         if (v.total === 0) {
           return [{ type: 'text', text: v.message || '未找到符合条件的群成员。' }];
         }
-        const lines = [`### 群成员查询结果 (共 ${v.total_matched ?? v.total} 人)`];
+        const pageInfo = v.page && v.total_pages ? ` (第 ${v.page}/${v.total_pages} 页)` : '';
+        const lines = [`### 群成员查询结果${pageInfo} (共 ${v.total_matched ?? v.total} 人)`];
         for (const m of v.members) {
           lines.push(
             `- **${m.display_name}** (QQ: ${m.user_id}) | 身份: ${m.role} | 头衔: ${m.title} | 入群: ${m.join_time} | 状态: ${m.status}`
           );
         }
-        if (v.message) {
+        if (v.has_more && v.page) {
+          lines.push(
+            `\n> 提示：当前还有未展示的成员（共 ${v.total_pages} 页）。如需继续浏览，可再次调用本工具并传入 page: ${v.page + 1}。`
+          );
+        } else if (v.message) {
           lines.push(`\n> ${v.message}`);
         }
         return [{ type: 'text', text: lines.join('\n') }];
