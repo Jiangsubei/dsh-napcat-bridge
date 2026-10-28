@@ -312,6 +312,51 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(result.hasOwnProperty('message')).toBe(false);
       expect(result.hasOwnProperty('error')).toBe(false);
     });
+
+    it('契约 2.9: 分页支持与默认值 (page: 1, limit: 20)，切片与元数据完备', async () => {
+      // mockMembers 共有 4 位成员，若指定 limit: 2, page: 1
+      const res = await queryGroupMemberInfo(
+        { page: 1, limit: 2 },
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.total).toBe(2);
+      expect(res.total_matched).toBe(4);
+      expect(res.page).toBe(1);
+      expect(res.limit).toBe(2);
+      expect(res.total_pages).toBe(2);
+      expect(res.has_more).toBe(true);
+      expect(res.members[0].user_id).toBe('10001');
+      expect(res.members[1].user_id).toBe('10002');
+      expect(res.message).toContain('page: 2');
+    });
+
+    it('契约 2.10: 翻页行为与末页检测 (page: 2, limit: 2)', async () => {
+      const res = await queryGroupMemberInfo(
+        { page: 2, limit: 2 },
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.total).toBe(2);
+      expect(res.page).toBe(2);
+      expect(res.has_more).toBe(false);
+      expect(res.members[0].user_id).toBe('10003');
+      expect(res.members[1].user_id).toBe('10004');
+    });
+
+    it('契约 2.11: 分页边界安全保护 (limit 超限 clamp 到 50，page < 1 clamp 到 1)', async () => {
+      const res = await queryGroupMemberInfo(
+        { page: 0, limit: 100 },
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.page).toBe(1);
+      expect(res.limit).toBe(50);
+      expect(res.total).toBe(4);
+    });
   });
 
   describe('3. 真实装配闭环', () => {
@@ -334,8 +379,12 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         expect(toolDef.name).toBe('get_group_member_info');
         expect(toolDef.description).toContain('查询当前群聊中的成员资料');
         expect(toolDef.description).toContain('身份角色（群主/管理员/普通成员）');
+        const props = (toolDef.parameters as any).properties || toolDef.parameters;
         // 参数列表中严禁暴露 group_id，模型无需指定
-        expect(toolDef.parameters.group_id).toBeUndefined();
+        expect(props.group_id).toBeUndefined();
+        // 声明参数中必须包含 page 与 limit
+        expect(props.page).toBeDefined();
+        expect(props.limit).toBeDefined();
       } finally {
         await booted.dispose();
       }

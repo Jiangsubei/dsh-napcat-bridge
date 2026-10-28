@@ -329,6 +329,10 @@ export interface QueryGroupMemberParams {
   role?: 'owner' | 'admin' | 'member' | 'all';
   /** 是否强制穿透缓存刷新群成员数据 (默认 false) */
   no_cache?: boolean;
+  /** 分页页码，从 1 开始 (默认 1) */
+  page?: number;
+  /** 每页返回数量 (默认 20，范围 1~50) */
+  limit?: number;
 }
 
 export interface FormattedGroupMember {
@@ -351,6 +355,10 @@ export interface QueryGroupMemberResult {
   members: FormattedGroupMember[];
   total: number;
   total_matched?: number;
+  page?: number;
+  limit?: number;
+  total_pages?: number;
+  has_more?: boolean;
   error?: string;
   message?: string;
 }
