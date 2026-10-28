@@ -59,7 +59,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toContain('人格与准则');
 
       expect(html).toContain('id="napcat-tab-proactive"');
-      expect(html).toContain('主动回复');
+      expect(html).toContain('回复配置');
 
       expect(html).toContain('id="napcat-tab-memory"');
       expect(html).toContain('记忆');
