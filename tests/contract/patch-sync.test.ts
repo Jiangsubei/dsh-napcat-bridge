@@ -21,7 +21,8 @@ describe('cordis.patch.yml 与预设单一真相源同步契约测试', () => {
     // 1. 文本层面核验 !!js 关键字段与提示词
     expect(rawContent).toContain('tool-ask-user');
     expect(rawContent).toContain('@deepseek-ai/dsh-tool-ask-user');
-    expect(rawContent).toContain(QQ_PRESET_PERSONA_PREFIX);
+    // YAML 以 JSON 字符串形式写入 prefix，多段文本中的换行会被转义为 \n
+    expect(rawContent).toContain(JSON.stringify(QQ_PRESET_PERSONA_PREFIX));
 
     // 2. 结构解析核验
     // 注意：Cordis 的 !!js 自定义 tag 在普通 yaml 解析时需要自定义 Type 避免抛错

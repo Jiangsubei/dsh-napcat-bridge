@@ -287,7 +287,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     expect(personaCtx?.text).toContain('测试人格');
     // 验证包含记忆工具规则与自然顺手维护引导
     expect(personaCtx?.text).toContain('记忆工具规则');
-    expect(personaCtx?.text).toContain('切勿随意调用记忆工具');
+    expect(personaCtx?.text).toContain('不必每轮都调用记忆工具');
     expect(personaCtx?.text).toContain('create_memory');
 
     disposePrompt();
