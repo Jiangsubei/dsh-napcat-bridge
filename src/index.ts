@@ -21,6 +21,7 @@ import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/
 import { MessageDatabase } from './storage/database.js';
 import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';
 import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
+import { resolveInboundImage } from './gateway/inbound-media.js';
 import { OfflineMessageSyncer } from './gateway/sync.js';
 import { SessionManager } from './gateway/session.js';
 import { shouldWakeup, parseNormalizedContent, resolveAtNicknames, isExcludedFromProactive } from './gateway/wakeup.js';
@@ -546,34 +547,35 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           fileId = data.file || data.file_id || null;
           const isSticker = data.sub_type === 1 || Boolean(data.emoji_package_id);
           if (isSticker) dominantType = 'sticker';
-          const imgUrl = data.url || data.file;
 
-          if (imgUrl && /^https?:\/\//i.test(imgUrl) && mediaManager) {
-            try {
-              // 注意：QQ/NapCat 上报的 data.file 经常固定带 .jpg 伪后缀（如 PNG/GIF 表情包被无脑命名为 MD5.jpg），
-              // 绝不能将 data.file 作为图片扩展名传给底层；仅在 data.url 显式携带路径扩展名时作为可选参考，
-              // 最终落盘扩展名由 mediaManager 依据 Buffer 真实魔数（PNG/JPEG/GIF/WebP）精准识别。
-              const inferUrlExt = (str?: string): string | undefined => {
-                if (!str || typeof str !== 'string') return undefined;
-                const clean = str.split('?')[0].split('#')[0];
-                const match = /\.([a-zA-Z0-9]+)$/.exec(clean);
-                return match ? match[1].toLowerCase() : undefined;
-              };
-              const urlExt = inferUrlExt(data.url);
-
-              const saved = await mediaManager.downloadAndSave(imgUrl, {
-                type: isSticker ? 'sticker' : 'image',
-                sessionId: peer,
-                fileId: fileId || undefined,
-                ...(urlExt ? { ext: urlExt } : {}),
-              });
-              data.local_path = saved.localPath;
+          // 入站图片四段式取图（devlog/修复方案-媒体直链失效与回退落盘_261030.md）：
+          //   QQ 段内 gchat.qpic.cn/download?rkey=… 直链对第三方进程 100% 返回 -5503007，
+          //   NapCat get_image / get_file 却能稳定拿到本机原图 → 本地优先，直链与 get_msg 兜底。
+          //   任一路拿到的字节都复制进 downloads/<type>/<peer>/，绝不引用 NapCat 缓存路径。
+          if (mediaManager) {
+            const resolved = await resolveInboundImage({
+              peer,
+              isSticker,
+              url: data.url,
+              file: data.file,
+              fileId: data.file_id,
+              declaredSize: data.file_size,
+              localPath: data.local_path,
+              msgId: Number(event.message_id) || undefined,
+              gateway: server,
+              mediaManager,
+              logger,
+            });
+            if (resolved.ok && resolved.localPath) {
+              data.local_path = resolved.localPath;
               if (!primaryLocalPath) {
-                primaryLocalPath = saved.localPath;
-                primaryFingerprint = saved.fingerprint;
+                primaryLocalPath = resolved.localPath;
+                primaryFingerprint = resolved.fingerprint ?? null;
               }
-            } catch (dlErr) {
-              logger.debug?.('[Plugin] 即时下载图片媒体失败 (跳过直接存库):', dlErr);
+            } else {
+              logger.warn?.(
+                `[Plugin] 入站图片落盘失败 (peer: ${peer}, msg_id: ${event.message_id}, file: ${data.file || data.file_id || '?'}): ${resolved.error || '未知原因'}`
+              );
             }
           }
         } else if (seg.type === 'file') {
