@@ -7,6 +7,7 @@ import * as fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from './database.js';
 import { DEFAULT_DOWNLOAD_ROOT } from '../constants/index.js';
@@ -100,6 +101,19 @@ export class MediaStorageManager {
 
   computeHash(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
+  }
+
+  /**
+   * 一级去重只读查询：file_id 命中且文件仍在 → 返回现有落盘路径。
+   * 供入站图片解析在调用 NapCat 之前短路（避免重复取图）。
+   */
+  lookupCached(fileId?: string | null): { localPath: string; fingerprint: string } | null {
+    if (!fileId || !this.db) return null;
+    const record = this.db.getByFileId(fileId);
+    if (record?.local_path && fs.existsSync(record.local_path)) {
+      return { localPath: record.local_path, fingerprint: record.fingerprint || '' };
+    }
+    return null;
   }
 
   /**
@@ -229,9 +243,9 @@ export class MediaStorageManager {
 
     // 2. 处理本地路径或 file:// URI
     if (urlOrPath.startsWith('file://')) {
-      const localFilePath = urlOrPath.replace(/^file:\/\//, '');
-      buffer = await fsp.readFile(localFilePath);
-    } else if (urlOrPath.startsWith('/') || (process.platform === 'win32' && /^[a-zA-Z]:\\/.test(urlOrPath))) {
+      // fileURLToPath 同时处理 file:///C:/… 与 URI 百分号编码（%20 等）
+      buffer = await fsp.readFile(fileURLToPath(urlOrPath));
+    } else if (path.isAbsolute(urlOrPath)) {
       if (fs.existsSync(urlOrPath)) {
         buffer = await fsp.readFile(urlOrPath);
       } else {
