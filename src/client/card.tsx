@@ -140,8 +140,9 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   proactive_cooldown_mins: 10,
   proactive_night_dnd: true,
   memory_storage_dir: '.dsh/napcat/napcat_memory',
-  group_memory_budget_chars: 2200,
-  private_memory_budget_chars: 1500,
+  user_profile_budget_chars: 2200,
+  session_memory_budget_chars: 2200,
+  group_memory_total_budget_chars: 8000,
   face_enabled: false,
   face_store_max: 100,
   face_store_dir: '.dsh/napcat/faces',
@@ -918,29 +919,42 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
           />
 
           <ValueField
-            id="napcat-group-memory-budget-chars"
-            label="群聊记忆预算字符上限 (group_memory_budget_chars)"
-            hint="群聊会话规则与多位活跃群友画像注入 Prompt 的字符预算上限，兼单群规则写入物理上限 (默认 2200)"
+            id="napcat-user-profile-budget-chars"
+            label="用户画像字符预算上限 (user_profile_budget_chars)"
+            hint="单个用户画像文件的写入上限，跨群聊/私聊通用 (默认 2200)"
             placeholder="2200"
             numeric
-            value={String(draft.group_memory_budget_chars ?? 2200)}
+            value={String(draft.user_profile_budget_chars ?? 2200)}
             disabled={saving}
-            overridden={model.isOverridden('group_memory_budget_chars')}
-            onReset={() => handleResetField('group_memory_budget_chars')}
-            onChange={(val) => handleFieldChange('group_memory_budget_chars', parseInt(val, 10) || 2200)}
+            overridden={model.isOverridden('user_profile_budget_chars')}
+            onReset={() => handleResetField('user_profile_budget_chars')}
+            onChange={(val) => handleFieldChange('user_profile_budget_chars', parseInt(val, 10) || 2200)}
           />
 
           <ValueField
-            id="napcat-private-memory-budget-chars"
-            label="私聊记忆预算字符上限 (private_memory_budget_chars)"
-            hint="私聊单用户画像及私聊规则注入与存储的字符预算上限 (默认 1500)"
-            placeholder="1500"
+            id="napcat-session-memory-budget-chars"
+            label="Session 规则字符预算上限 (session_memory_budget_chars)"
+            hint="单个会话规则文件的写入上限，群聊与私聊统一 (默认 2200)"
+            placeholder="2200"
             numeric
-            value={String(draft.private_memory_budget_chars ?? 1500)}
+            value={String(draft.session_memory_budget_chars ?? 2200)}
             disabled={saving}
-            overridden={model.isOverridden('private_memory_budget_chars')}
-            onReset={() => handleResetField('private_memory_budget_chars')}
-            onChange={(val) => handleFieldChange('private_memory_budget_chars', parseInt(val, 10) || 1500)}
+            overridden={model.isOverridden('session_memory_budget_chars')}
+            onReset={() => handleResetField('session_memory_budget_chars')}
+            onChange={(val) => handleFieldChange('session_memory_budget_chars', parseInt(val, 10) || 2200)}
+          />
+
+          <ValueField
+            id="napcat-group-memory-total-budget-chars"
+            label="群聊用户画像总预算上限 (group_memory_total_budget_chars)"
+            hint="群聊注入时所有活跃群友画像合计的字符预算，Session 规则不计入 (默认 8000)"
+            placeholder="8000"
+            numeric
+            value={String(draft.group_memory_total_budget_chars ?? 8000)}
+            disabled={saving}
+            overridden={model.isOverridden('group_memory_total_budget_chars')}
+            onReset={() => handleResetField('group_memory_total_budget_chars')}
+            onChange={(val) => handleFieldChange('group_memory_total_budget_chars', parseInt(val, 10) || 8000)}
           />
         </div>
 

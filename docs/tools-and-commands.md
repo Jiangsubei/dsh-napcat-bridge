@@ -56,8 +56,8 @@
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
 | `read_memory` | 读取当前会话的规则与群文化记忆（`session`），或指定用户的跨场景个人画像（`user`）。 | `type` (string, 必填: `session`/`user`)<br>`peer` (string, 可选: 默认当前会话对端)<br>`qq` (string, 可选: 目标用户 QQ 号) |
-| `create_memory` | 初始化创建用户跨场景稳定画像（`user`）或当前会话专属规则/文化（`session`）。内容受字符预算上限限制，要求精炼陈述。 | `type` (string, 必填: `session`/`user`)<br>`content` (string, 必填: 精简单行陈述事实)<br>`peer` (string, 可选)<br>`qq` (string, 可选) |
-| `edit_memory` | 定向修改或删减已有记忆。通过 `old_string` 精确匹配替换为 `new_string`；若 `new_string` 省略或为空则直接删除该片段。 | `type` (string, 必填: `session`/`user`)<br>`old_string` (string, 必填: 精确匹配现有文本片段)<br>`new_string` (string, 可选: 替换内容，留空表示删除)<br>`peer` (string, 可选)<br>`qq` (string, 可选) |
+| `create_memory` | 初始化创建用户跨场景稳定画像（`user`）或当前会话专属规则/文化（`session`）。内容受对应字符预算上限限制，超限时本次创建不落盘并要求精简后重试。 | `type` (string, 必填: `session`/`user`)<br>`content` (string, 必填: 精简单行陈述事实)<br>`peer` (string, 可选)<br>`qq` (string, 可选) |
+| `edit_memory` | 定向修改或删减已有记忆。通过 `old_string` 精确匹配替换为 `new_string`；若 `new_string` 省略或为空则直接删除该片段。编辑后总长超预算时本次编辑不落盘，并返回还需缩减的字符数。 | `type` (string, 必填: `session`/`user`)<br>`old_string` (string, 必填: 精确匹配现有文本片段)<br>`new_string` (string, 可选: 替换内容，留空表示删除)<br>`peer` (string, 可选)<br>`qq` (string, 可选) |
 
 ---
 

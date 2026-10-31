@@ -8,8 +8,8 @@ import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { MemoryStorage } from './storage.js';
 import type { MemoryOperationResult, MemoryType } from './types.js';
 import {
-  DEFAULT_USER_PROFILE_CHAR_LIMIT,
-  DEFAULT_SESSION_MEMORY_CHAR_LIMIT,
+  DEFAULT_USER_PROFILE_BUDGET_CHARS,
+  DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
 } from '../constants/index.js';
 
 export interface ReadMemoryArgs {
@@ -83,9 +83,10 @@ export function resolveContextPeerAndQQ(
 }
 
 export interface MemoryToolsLimits {
-  getUserLimit?: () => number;
+  /** 单个用户画像文件的写入上限 */
+  getUserProfileLimit?: () => number;
+  /** 单个 Session 规则文件的写入上限 */
   getSessionLimit?: () => number;
-  getSessionLimitFor?: (peer: string) => number;
 }
 
 export class MemoryTools {
@@ -95,15 +96,12 @@ export class MemoryTools {
     private limits?: MemoryToolsLimits
   ) {}
 
-  private getUserLimit(): number {
-    return this.limits?.getUserLimit?.() ?? DEFAULT_USER_PROFILE_CHAR_LIMIT;
+  private getUserProfileLimit(): number {
+    return this.limits?.getUserProfileLimit?.() ?? DEFAULT_USER_PROFILE_BUDGET_CHARS;
   }
 
-  private getSessionLimit(peer?: string): number {
-    if (peer && this.limits?.getSessionLimitFor) {
-      return this.limits.getSessionLimitFor(peer);
-    }
-    return this.limits?.getSessionLimit?.() ?? DEFAULT_SESSION_MEMORY_CHAR_LIMIT;
+  private getSessionLimit(): number {
+    return this.limits?.getSessionLimit?.() ?? DEFAULT_SESSION_MEMORY_BUDGET_CHARS;
   }
 
   /**
@@ -180,14 +178,11 @@ export class MemoryTools {
       return { success: false, message: '创建内容不能为空。' };
     }
 
-    const limit =
-      type === 'user'
-        ? this.getUserLimit()
-        : this.getSessionLimit(args.peer?.trim());
+    const limit = type === 'user' ? this.getUserProfileLimit() : this.getSessionLimit();
     if (content.length > limit) {
       return {
         success: false,
-        message: `${type === 'user' ? '用户画像' : 'Session 记忆'}内容长度 (${content.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`,
+        message: `${type === 'user' ? '用户画像' : 'Session 记忆'}内容长度 (${content.length} 字符) 超出上限 (${limit} 字符)，本次创建未写入。请精简提炼到 ${limit} 字符以内后重新调用 create_memory，或先创建一份简短的基础内容，再用 edit_memory 增量补充。`,
       };
     }
 
@@ -305,12 +300,11 @@ export class MemoryTools {
       const newContent =
         currentContent.slice(0, firstIndex) + newStr + currentContent.slice(firstIndex + oldStr.length);
 
-      const limit =
-        type === 'user'
-          ? this.getUserLimit()
-          : this.getSessionLimit(target);
+      const limit = type === 'user' ? this.getUserProfileLimit() : this.getSessionLimit();
       if (newContent.length > limit) {
-        throw new Error(`${type === 'user' ? '用户画像' : 'Session 记忆'}总长度 (${newContent.length} 字符) 超出上限 (${limit} 字符)。请先使用 edit_memory 精简合并或删除过时、冗余条目后再试。`);
+        throw new Error(
+          `${type === 'user' ? '用户画像' : 'Session 记忆'}编辑后总长度 (${newContent.length} 字符) 超出上限 (${limit} 字符)，本次编辑未落盘。还需再缩减 ${newContent.length - limit} 字符；请精简合并或删除过时、冗余条目后重试。`
+        );
       }
 
       const preStart = Math.max(0, firstIndex - 30);

@@ -9,9 +9,9 @@ import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
 import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } from './tools.js';
 import {
-  DEFAULT_MEMORY_BUDGET_CHARS,
-  DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
-  DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
+  DEFAULT_USER_PROFILE_BUDGET_CHARS,
+  DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
+  DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
 } from '../constants/index.js';
 import { resolveDshPath } from '../utils/path.js';
 
@@ -20,18 +20,22 @@ export * from './storage.js';
 export * from './tools.js';
 
 export interface MemoryBudgetOptions {
-  getGroupBudget?: () => number;
-  getPrivateBudget?: () => number;
+  /** 群聊注入时所有活跃用户画像合计的总预算 */
+  getGroupUserProfilesBudget?: () => number;
 }
 
 export interface MemoryServiceOptions {
   storageDir?: string;
   dshHome?: string;
-  budgetChars?: number;
-  groupBudgetChars?: number;
-  privateBudgetChars?: number;
-  getGroupBudgetChars?: () => number;
-  getPrivateBudgetChars?: () => number;
+  /** 单个用户画像文件的写入上限 */
+  userProfileBudgetChars?: number;
+  /** 单个 Session 规则文件的写入上限 */
+  sessionMemoryBudgetChars?: number;
+  /** 群聊注入时所有活跃用户画像合计的总预算 */
+  groupMemoryTotalBudgetChars?: number;
+  getUserProfileBudgetChars?: () => number;
+  getSessionMemoryBudgetChars?: () => number;
+  getGroupMemoryTotalBudgetChars?: () => number;
   getCurrentSpeaker?: (peer: string) => string | undefined;
   db?: MessageDatabase;
   sessionManager?: SessionManager;
@@ -43,7 +47,8 @@ export function registerMemoryPromptContext(
   ctx: Context,
   storage: MemoryStorage,
   db?: MessageDatabase,
-  budgetInput: (() => number) | MemoryBudgetOptions = () => DEFAULT_MEMORY_BUDGET_CHARS,
+  budgetInput: (() => number) | MemoryBudgetOptions = () =>
+    DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
   getCurrentSpeaker?: (peer: string) => string | undefined
 ): () => void {
   const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
@@ -73,21 +78,13 @@ export function registerMemoryPromptContext(
       }
 
       const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-      let budget: number;
-      if (typeof budgetInput === 'function') {
-        budget = budgetInput() || DEFAULT_MEMORY_BUDGET_CHARS;
-      } else {
-        budget = isPrivate
-          ? (budgetInput.getPrivateBudget?.() ?? DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS)
-          : (budgetInput.getGroupBudget?.() ?? DEFAULT_GROUP_MEMORY_BUDGET_CHARS);
-      }
 
       if (isPrivate) {
-        // 私聊：直接传入单用户，无 7 天活跃限制
+        // 私聊：直接传入单用户，画像全量注入，无 7 天活跃限制
         return storage.getPromptSnapshotSync(
           peer,
           [{ qq: resolved.qq, name: resolved.qq }],
-          budget,
+          DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
           currentQQ
         );
       }
@@ -101,7 +98,12 @@ export function registerMemoryPromptContext(
         } catch {}
       }
 
-      return storage.getPromptSnapshotSync(peer, activeUsers, budget, currentQQ);
+      const groupUserProfilesBudget =
+        typeof budgetInput === 'function'
+          ? budgetInput() || DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS
+          : (budgetInput.getGroupUserProfilesBudget?.() ?? DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS);
+
+      return storage.getPromptSnapshotSync(peer, activeUsers, groupUserProfilesBudget, currentQQ);
     },
   });
 }
@@ -117,25 +119,24 @@ export function setupMemoryService(
   const effectiveDshHome = resolveDshPath(options.dshHome);
   const storage = new MemoryStorage(options.storageDir, effectiveDshHome);
 
-  const getGroupBudget = () =>
-    options.getGroupBudgetChars?.() ??
-    options.groupBudgetChars ??
-    options.budgetChars ??
-    DEFAULT_GROUP_MEMORY_BUDGET_CHARS;
+  const getUserProfileBudget = () =>
+    options.getUserProfileBudgetChars?.() ??
+    options.userProfileBudgetChars ??
+    DEFAULT_USER_PROFILE_BUDGET_CHARS;
 
-  const getPrivateBudget = () =>
-    options.getPrivateBudgetChars?.() ??
-    options.privateBudgetChars ??
-    options.budgetChars ??
-    DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS;
+  const getSessionMemoryBudget = () =>
+    options.getSessionMemoryBudgetChars?.() ??
+    options.sessionMemoryBudgetChars ??
+    DEFAULT_SESSION_MEMORY_BUDGET_CHARS;
+
+  const getGroupUserProfilesBudget = () =>
+    options.getGroupMemoryTotalBudgetChars?.() ??
+    options.groupMemoryTotalBudgetChars ??
+    DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS;
 
   const tools = new MemoryTools(storage, ctx, {
-    getUserLimit: getPrivateBudget,
-    getSessionLimit: getGroupBudget,
-    getSessionLimitFor: (peer: string) => {
-      const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-      return isPrivate ? getPrivateBudget() : getGroupBudget();
-    },
+    getUserProfileLimit: getUserProfileBudget,
+    getSessionLimit: getSessionMemoryBudget,
   });
 
   const unregisters: Array<() => void> = [];
@@ -175,8 +176,7 @@ export function setupMemoryService(
     storage,
     options.db,
     {
-      getGroupBudget,
-      getPrivateBudget,
+      getGroupUserProfilesBudget,
     },
     options.getCurrentSpeaker
   );

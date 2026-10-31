@@ -6,7 +6,7 @@ import { DEFAULT_BASE_CONFIG } from '../../src/server/routes.js';
 import { migrateLegacyConfig, readLegacyConfig } from '../../src/config/migrate.js';
 
 describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Settings Alignment Contract)', () => {
-  it('A8: Schema、服务端默认值、客户端默认值三方键严格一致，且 memory_budget_chars 彻底移除', () => {
+  it('A8: Schema、服务端默认值、客户端默认值三方键严格一致，且旧记忆预算键彻底移除', () => {
     // 1. 读取 Schema 键
     const schemaShape = (BridgeConfigSchema as any).dict || (BridgeConfigSchema as any).shape || {};
     const schemaKeys = Object.keys(schemaShape).sort();
@@ -26,10 +26,10 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
       .map((line) => line.split(':')[0].trim())
       .sort();
 
-    // 断言 1: 三方键数量均为 24
-    expect(schemaKeys.length).toBe(29);
-    expect(serverKeys.length).toBe(29);
-    expect(clientKeys.length).toBe(29);
+    // 断言 1: 三方键数量均为 30
+    expect(schemaKeys.length).toBe(30);
+    expect(serverKeys.length).toBe(30);
+    expect(clientKeys.length).toBe(30);
 
     // 断言 2: 三方键集合完全恒等
     expect(schemaKeys).toEqual(serverKeys);
@@ -38,6 +38,8 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     // 断言 3: 废弃字段不存在于任何一方
     const deadKeys = [
       'memory_budget_chars',
+      'group_memory_budget_chars',
+      'private_memory_budget_chars',
       'review_enabled',
       'review_turns_interval',
       'review_tool_calls_interval',
@@ -59,8 +61,8 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     const schemaShape = (BridgeConfigSchema as any).dict || (BridgeConfigSchema as any).shape || {};
     const schemaKeys = Object.keys(schemaShape);
 
-    // 验证全量 24 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
-    expect(schemaKeys.length).toBe(29);
+    // 验证全量 30 项配置字段均必须带有 .volatile() 标记（包含 bot_qq）
+    expect(schemaKeys.length).toBe(30);
     expect(schemaShape.bot_qq?.meta?.volatile).toBe(true);
 
     for (const field of schemaKeys) {
@@ -71,13 +73,14 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     }
   });
 
-  it('A8: migrateLegacyConfig 旧配置单向迁移：映射 memory_budget_chars 至 group 键并不写回旧键', () => {
+  it('A8: migrateLegacyConfig 旧配置单向迁移：旧记忆预算键映射至新键且不保留旧键', () => {
     // 构造旧版 yaml 内容
     const legacyYaml = `
 dsh-napcat-bridge:
   bot_qq: "987654321"
   ws_port: 8099
   memory_budget_chars: 3333
+  private_memory_budget_chars: 5555
 `;
     const tmpDir = path.resolve(process.cwd(), 'tmp/test-migrate-legacy');
     fs.mkdirSync(tmpDir, { recursive: true });
@@ -87,10 +90,13 @@ dsh-napcat-bridge:
     try {
       const parsed = readLegacyConfig(tmpDir);
       expect(parsed).toBeTruthy();
-      // 必须映射到新键
-      expect(parsed!.group_memory_budget_chars).toBe(3333);
+      // memory_budget_chars 链式迁移到群聊画像总预算
+      expect(parsed!.group_memory_total_budget_chars).toBe(3333);
+      // 私聊旧预算映射到单个用户画像预算
+      expect(parsed!.user_profile_budget_chars).toBe(5555);
       // 旧键必须被剔除，绝不保留在迁移结果字典中
       expect((parsed as any).memory_budget_chars).toBeUndefined();
+      expect((parsed as any).private_memory_budget_chars).toBeUndefined();
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

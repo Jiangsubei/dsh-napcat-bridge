@@ -10,13 +10,13 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **QQ 会话专属预设（`qq-session`）**：构建期与运行时单一真相源（SSOT）自动同步，专属注入 QQ 工具集，彻底杜绝工具向 Web UI 常规会话泄露；深度补齐工作区、跨平台 Shell（Windows pwsh / Linux bash）、Web 搜索、交互提问与技能系统，并抑制多余快照。
 - **用户侧静默出站体系**：遵循「用户侧静默原则」，废除纯文本直接推流；文本出站统一由 **`send_qq_message`** 工具驱动，由模型根据入站标头 `[消息ID: <id>]` 与上下文逻辑自主决定是否引用原消息（`reply_to`）或艾特用户（`at_user`）。
 - **工具与回合解耦（单 Agent 顺手维护）**：执行出站工具不强行终止回合，模型在回复用户后可在同一轮次中顺手调用记忆或表情管理工具，自然平稳终结。
-- **两层记忆体系**：群聊会话记忆 + 用户跨群互通画像，Markdown 文件存储，提供 `read_memory`、`create_memory`、`edit_memory` 三大工具与群聊/私聊字符预算硬上限治理；彻底摒弃独立后台回顾 Agent。
+- **两层记忆体系**：群聊会话记忆 + 用户跨群互通画像，Markdown 文件存储，提供 `read_memory`、`create_memory`、`edit_memory` 三大工具；写入侧按“用户画像 / Session 规则 / 群聊画像总预算”三个独立字符预算硬拒绝超限落盘，注入侧保持文件内容原子；彻底摒弃独立后台回顾 Agent。
 - **表情包管理体系**：受 `face_enabled` 配置门控，提供查表情（`list_faces`）、发表情（`send_face`）、收录好图（`collect_face`）与库容维护/LRU 淘汰（`manage_faces`）闭环工具链；另有群聊 `react_message` 贴表情轻量表态。
 - **串行发送与多媒体交互**：单对端串行出站队列，避免并发乱序；支持私聊文件入站自动落盘、群共享文件索引查询（`list_group_files`）、动态资源拉取（`fetch_chat_resource`）与合并转发展开（`expand_forward_message`）。
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
 - **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，5 大 Tab 分组（连接身份、人格与准则、主动回复、记忆、表情包），全部 24 项参数支持 volatile 动态热更新。
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，5 大 Tab 分组（连接身份、人格与准则、主动回复、记忆、表情包），全部 30 项参数支持 volatile 动态热更新。
 
 ---
 
@@ -99,8 +99,9 @@ dsh plugin --profile web add link:.
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `memory_storage_dir` | `string` | `".dsh/napcat/napcat_memory"` | 记忆 Markdown 文件根存储目录 |
-| `group_memory_budget_chars` | `number` | `2200` | 群聊场景下注入 System Prompt 的群规与群友画像字符总上限 |
-| `private_memory_budget_chars` | `number` | `1500` | 私聊场景下单用户画像注入与单次写入的字符上限 |
+| `user_profile_budget_chars` | `number` | `2200` | 单个用户画像文件的写入上限（跨群聊/私聊通用） |
+| `session_memory_budget_chars` | `number` | `2200` | 单个 Session 规则文件的写入上限（群聊/私聊统一） |
+| `group_memory_total_budget_chars` | `number` | `8000` | 群聊注入时所有活跃群友画像合计的字符预算；Session 规则不计入 |
 
 ### 5. 表情包 (Face)
 | 参数 | 类型 | 默认值 | 说明 |

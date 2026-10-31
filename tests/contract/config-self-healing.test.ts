@@ -94,14 +94,17 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
   });
 
   describe('1. 单一真相源与纯函数自愈清洗契约 (sanitizeConfigPayload)', () => {
-    it('getValidConfigKeys 动态返回 BridgeConfigSchema 中声明的 29 项合法键', () => {
+    it('getValidConfigKeys 动态返回 BridgeConfigSchema 中声明的 30 项合法键', () => {
       const validKeys = getValidConfigKeys();
-      expect(validKeys.size).toBe(29);
+      expect(validKeys.size).toBe(30);
       expect(validKeys.has('proactive_interval_mins')).toBe(true);
       expect(validKeys.has('proactive_buffer_size')).toBe(true);
       expect(validKeys.has('ws_port')).toBe(true);
       expect(validKeys.has('bot_qq')).toBe(true);
       expect(validKeys.has('face_enabled')).toBe(true);
+      expect(validKeys.has('user_profile_budget_chars')).toBe(true);
+      expect(validKeys.has('session_memory_budget_chars')).toBe(true);
+      expect(validKeys.has('group_memory_total_budget_chars')).toBe(true);
 
       // 已下线的历史键严禁存在于有效键集合中
       expect(validKeys.has('at_questioner')).toBe(false);
@@ -109,6 +112,8 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       expect(validKeys.has('review_enabled')).toBe(false);
       expect(validKeys.has('face_auto_curate')).toBe(false);
       expect(validKeys.has('memory_budget_chars')).toBe(false);
+      expect(validKeys.has('group_memory_budget_chars')).toBe(false);
+      expect(validKeys.has('private_memory_budget_chars')).toBe(false);
     });
 
     it('sanitizeConfigPayload 正确分离合法字段与脏字段，并剔除无效键', () => {
@@ -142,6 +147,20 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
 
       const result = sanitizeConfigPayload(cleanInput);
       expect(result.valid).toEqual(cleanInput);
+      expect(result.removed).toEqual([]);
+    });
+
+    it('sanitizeConfigPayload 在清洗前将旧记忆预算键的值搬运至新键', () => {
+      const legacyInput = {
+        ws_port: 8080,
+        memory_budget_chars: 3300,
+        private_memory_budget_chars: 1900,
+      };
+
+      const result = sanitizeConfigPayload(legacyInput);
+      expect(result.valid.ws_port).toBe(8080);
+      expect(result.valid.group_memory_total_budget_chars).toBe(3300);
+      expect(result.valid.user_profile_budget_chars).toBe(1900);
       expect(result.removed).toEqual([]);
     });
   });
@@ -208,6 +227,40 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       const healResult = healProfileConfigFile(testTmpDir, 'desktop');
       expect(healResult.healed).toBe(false);
       expect(healResult.removedKeys).toEqual([]);
+    });
+
+    it('探测到旧记忆预算键时原地重命名为新键并保留用户旧值', () => {
+      const profileDir = path.join(testTmpDir, 'profiles/desktop');
+      fs.mkdirSync(profileDir, { recursive: true });
+      const patchPath = path.join(profileDir, 'cordis.patch.yml');
+
+      const legacyYaml = `
+- id: dsh-napcat-bridge
+  name: dsh-napcat-bridge
+  config:
+    ws_port: 3001
+    group_memory_budget_chars: 4100
+    private_memory_budget_chars: 1900
+    persona: "测试人格"
+`;
+      fs.writeFileSync(patchPath, legacyYaml, 'utf8');
+
+      const healResult = healProfileConfigFile(testTmpDir, 'desktop');
+      expect(healResult.healed).toBe(true);
+      expect(healResult.removedKeys).toEqual([]);
+      expect(healResult.renamedKeys).toEqual(
+        expect.arrayContaining([
+          { from: 'group_memory_budget_chars', to: 'group_memory_total_budget_chars' },
+          { from: 'private_memory_budget_chars', to: 'user_profile_budget_chars' },
+        ])
+      );
+
+      const updatedContent = fs.readFileSync(patchPath, 'utf8');
+      expect(updatedContent).toContain('group_memory_total_budget_chars: 4100');
+      expect(updatedContent).toContain('user_profile_budget_chars: 1900');
+      expect(updatedContent).not.toContain('group_memory_budget_chars');
+      expect(updatedContent).not.toContain('private_memory_budget_chars');
+      expect(updatedContent).toContain('测试人格');
     });
   });
 

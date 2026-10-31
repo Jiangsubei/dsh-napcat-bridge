@@ -726,10 +726,12 @@ export interface BridgePluginConfig {
   proactive_night_dnd?: boolean;
   /** 记忆 Markdown 文件存储根目录 (默认 .dsh/napcat/napcat_memory) */
   memory_storage_dir?: string;
-  /** 群聊会话规则与多活跃用户画像注入总字符预算上限 (默认 2200) */
-  group_memory_budget_chars?: number;
-  /** 私聊会话规则与单用户画像注入总字符预算上限 (默认 1500) */
-  private_memory_budget_chars?: number;
+  /** 用户画像字符预算上限：单个用户画像文件的写入上限 (默认 2200) */
+  user_profile_budget_chars?: number;
+  /** Session 规则字符预算上限：单个会话规则文件的写入上限 (默认 2200) */
+  session_memory_budget_chars?: number;
+  /** 群聊用户画像总预算上限：群聊注入时所有活跃群友画像合计字符预算，Session 规则不计入 (默认 8000) */
+  group_memory_total_budget_chars?: number;
   /** 控制新建会话是否装载表情包工具集，对后续新会话生效 */
   face_enabled?: boolean;
   /** 本地表情库存储容量上限 (默认 100 张) */

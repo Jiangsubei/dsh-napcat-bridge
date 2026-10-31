@@ -46,7 +46,7 @@ ${SETTINGS_NAMESPACE}:
       expect(result?.bot_qq).toBe('987654321');
     });
 
-    it('当旧配置包含 memory_budget_chars 时正确映射至 group_memory_budget_chars', async () => {
+    it('当旧配置包含 memory_budget_chars 时链式映射至 group_memory_total_budget_chars', async () => {
       const yamlContent = `
 ${SETTINGS_NAMESPACE}:
   ws_port: 8080
@@ -56,7 +56,24 @@ ${SETTINGS_NAMESPACE}:
 
       const result = readLegacyConfig(tmpHome);
       expect(result).toBeDefined();
-      expect(result?.group_memory_budget_chars).toBe(3500);
+      expect(result?.group_memory_total_budget_chars).toBe(3500);
+      expect((result as any)?.memory_budget_chars).toBeUndefined();
+    });
+
+    it('当旧配置包含 group_memory_budget_chars 与 private_memory_budget_chars 时分别映射至新键', async () => {
+      const yamlContent = `
+${SETTINGS_NAMESPACE}:
+  group_memory_budget_chars: 4100
+  private_memory_budget_chars: 1900
+`;
+      await fsp.writeFile(path.join(tmpHome, 'settings.yaml'), yamlContent, 'utf8');
+
+      const result = readLegacyConfig(tmpHome);
+      expect(result).toBeDefined();
+      expect(result?.group_memory_total_budget_chars).toBe(4100);
+      expect(result?.user_profile_budget_chars).toBe(1900);
+      expect((result as any)?.group_memory_budget_chars).toBeUndefined();
+      expect((result as any)?.private_memory_budget_chars).toBeUndefined();
     });
 
     it('支持从 settings.yaml.imported 读取旧配置', async () => {
