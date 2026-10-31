@@ -363,16 +363,35 @@ export interface QueryGroupMemberResult {
   message?: string;
 }
 
-export interface FetchChatResourceParams {
+export interface FetchResourceItem {
   file_id: string;
   busid?: number;
   file_name?: string;
+}
+
+export interface FetchChatResourceItemResult {
+  file_id: string;
+  file_name?: string;
+  busid?: number;
+  success: boolean;
+  local_path?: string;
+  error?: string;
+}
+
+export interface FetchChatResourceParams {
+  file_id?: string;
+  busid?: number;
+  file_name?: string;
+  files?: FetchResourceItem[];
 }
 
 export interface FetchChatResourceResult {
   success: boolean;
   local_path?: string;
   error?: string;
+  total?: number;
+  downloaded_count?: number;
+  results?: FetchChatResourceItemResult[];
 }
 
 export interface ExpandForwardMessageParams {

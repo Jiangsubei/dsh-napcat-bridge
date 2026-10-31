@@ -176,4 +176,113 @@ describe('契约测试: 群文件下载链路 (Group File Download Contract IS-F
     expect(res.success).toBe(false);
     expect(res.error).toContain('NapCat 未连接');
   });
+  it('方案A-契约 1: 批量传入 files 列表，单次调用依次拉取多个文件并返回结构化清单', async () => {
+    const { gateway, calls } = stubGateway();
+    const { mediaManager, mediaCalls } = stubMedia();
+
+    const res = await fetchChatResource(
+      {
+        files: [
+          { file_id: 'file-1', busid: 102, file_name: 'mod1.vpk' },
+          { file_id: 'file-2', busid: 104, file_name: 'mod2.vpk' },
+        ],
+      },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager }
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.total).toBe(2);
+    expect(res.downloaded_count).toBe(2);
+    expect(res.results).toHaveLength(2);
+    expect(res.results?.[0].file_id).toBe('file-1');
+    expect(res.results?.[0].success).toBe(true);
+    expect(res.results?.[0].local_path).toBeDefined();
+    expect(res.results?.[1].file_id).toBe('file-2');
+    expect(res.results?.[1].success).toBe(true);
+    expect(res.results?.[1].local_path).toBeDefined();
+
+    // 验证 gateway 和 mediaManager 依次被调用
+    expect(calls).toHaveLength(2);
+    expect(mediaCalls).toHaveLength(2);
+  });
+
+  it('方案A-契约 2: 批量下载遇到部分文件失败时（Partial Success），不阻断其他文件并返回明细', async () => {
+    const calls: any[] = [];
+    const gateway = {
+      getGroupFileUrl: async (groupId: any, fileId: any, busid: any) => {
+        calls.push({ groupId, fileId, busid });
+        if (fileId === 'file-fail') {
+          return { status: 'failed', retcode: 100, wording: '该文件已被管理员删除' };
+        }
+        return { status: 'ok', retcode: 0, data: { url: 'https://example.com/dl/success.vpk' } };
+      },
+    };
+    const { mediaManager } = stubMedia();
+
+    const res = await fetchChatResource(
+      {
+        files: [
+          { file_id: 'file-ok', busid: 102, file_name: 'ok.vpk' },
+          { file_id: 'file-fail', busid: 104, file_name: 'fail.vpk' },
+        ],
+      },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager }
+    );
+
+    // 存在部分成功时整体 success 为 true (Partial Success)
+    expect(res.success).toBe(true);
+    expect(res.total).toBe(2);
+    expect(res.downloaded_count).toBe(1);
+    expect(res.results).toHaveLength(2);
+    expect(res.results?.[0].success).toBe(true);
+    expect(res.results?.[1].success).toBe(false);
+    expect(res.results?.[1].error).toContain('已被管理员删除');
+  });
+
+  it('方案A-契约 3: 未提供 file_id 且未提供 files 返回清晰错误', async () => {
+    const res = await fetchChatResource({}, { peer: GROUP_PEER, groupId: 3000000001 });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('file_id 或 files');
+  });
+
+  it('方案A-契约 4: 批量中已落盘的文件走一级去重，未落盘文件走真实下载', async () => {
+    const { gateway, calls } = stubGateway();
+    const { mediaManager, mediaCalls } = stubMedia();
+
+    const cachedFile = `/tmp/dsh-test-cached-${Date.now()}.txt`;
+    fs.writeFileSync(cachedFile, 'already-downloaded');
+
+    try {
+      const db = {
+        getByFileId: (id: string) => {
+          if (id === 'cached-file') {
+            return { local_path: cachedFile, fingerprint: 'fp-cached' };
+          }
+          return null;
+        },
+      } as any;
+
+      const res = await fetchChatResource(
+        {
+          files: [
+            { file_id: 'cached-file', busid: 102, file_name: 'cached.txt' },
+            { file_id: 'new-file', busid: 104, file_name: 'new.vpk' },
+          ],
+        },
+        { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager, db }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.total).toBe(2);
+      expect(res.downloaded_count).toBe(2);
+      // cached-file 命中去重，未请求 gateway；new-file 请求 gateway
+      expect(calls).toHaveLength(1);
+      expect(calls[0].fileId).toBe('new-file');
+      expect(mediaCalls).toHaveLength(1);
+      expect(res.results?.[0].local_path).toBe(cachedFile);
+      expect(res.results?.[1].local_path).toContain('test.txt');
+    } finally {
+      fs.rmSync(cachedFile, { force: true });
+    }
+  });
 });

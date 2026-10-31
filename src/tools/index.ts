@@ -12,6 +12,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import type {
   FetchChatResourceParams,
   FetchChatResourceResult,
+  FetchResourceItem,
+  FetchChatResourceItemResult,
   ExpandForwardMessageParams,
   ExpandForwardMessageResult,
   SendFileParams,
@@ -121,109 +123,256 @@ export function getGlobalToolContext(): ToolExecutionContext {
  * 失败分级：gateway 未连接 / 拿不到 url / HTTP 下载失败，各自清晰文案，绝不笼统
  * “资源不存在或下载超时”（AGENTS §3.1 禁假成功/占位）。
  */
+/**
+ * 飞行中下载任务去重 Map：相同 file_id 在拉取期间共享同一个 Promise，
+ * 彻底防止并发击穿、重复拉取与文件覆盖竞争。
+ */
+const inFlightDownloads = new Map<string, Promise<FetchChatResourceItemResult>>();
+
+/**
+ * 内部单文件下载执行单元
+ */
+async function fetchSingleChatResourceItem(
+  item: FetchResourceItem,
+  ctx: ToolExecutionContext
+): Promise<FetchChatResourceItemResult> {
+  const fileId = (item.file_id || '').trim();
+  if (!fileId) {
+    return { file_id: '', success: false, error: '缺少有效的 file_id' };
+  }
+
+  // 1. 飞行中去重 (Single-Flight)：已有相同 fileId 在下载中，直接复用 Promise
+  const ongoing = inFlightDownloads.get(fileId);
+  if (ongoing) {
+    return ongoing;
+  }
+
+  const downloadPromise = (async (): Promise<FetchChatResourceItemResult> => {
+    // 2. IS-F1: 判定群文件 —— 依据上下文 peer / groupId / 落库类型 (group_file)
+    const sessionPeer = ctx.peer || '';
+    const inGroupContext =
+      (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') ||
+      sessionPeer.startsWith('group_') ||
+      sessionPeer.startsWith('qq-group-');
+    let isGroupFile = inGroupContext;
+
+    // 落库类型佐证：peer/groupId 缺失时，若库中记录类型为 group_file 仍按群文件处理
+    if (!isGroupFile && ctx.db) {
+      try {
+        const record = ctx.db.getByFileId(fileId);
+        if (record?.type === 'group_file') {
+          isGroupFile = true;
+        }
+      } catch {}
+    }
+
+    // 3. 一级静态去重: 查数据库
+    if (ctx.db) {
+      const record = ctx.db.getByFileId(fileId);
+      if (record?.local_path && fs.existsSync(record.local_path)) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: true,
+          local_path: record.local_path,
+        };
+      }
+    }
+
+    // 4. 群文件: get_group_file_url({groupid, fileid, busid}) → data.url → 真实落盘
+    if (isGroupFile) {
+      if (item.busid === undefined || item.busid === null) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: '下载群文件缺少 busid (需同时提供 file_id 与 busid)',
+        };
+      }
+      if (!ctx.gateway) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: `下载失败: NapCat 未连接 (gateway 不可用)，无法获取群文件下载地址 (file_id: ${fileId})`,
+        };
+      }
+      if (!ctx.mediaManager) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: '下载失败: 媒体存储服务不可用，无法落盘',
+        };
+      }
+      if (!ctx.groupId) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: `下载失败: 缺少群组上下文 (groupId)，无法定位群文件所属群聊 (file_id: ${fileId})`,
+        };
+      }
+      try {
+        const res = await ctx.gateway.getGroupFileUrl(ctx.groupId, fileId, item.busid);
+        const fileUrl = res.data?.url;
+        if (!fileUrl) {
+          const apiInfo = [res.wording, res.message].filter(Boolean).join(' ');
+          return {
+            file_id: fileId,
+            file_name: item.file_name,
+            busid: item.busid,
+            success: false,
+            error: `下载失败: NapCat 未返回群文件下载 URL (file_id: ${fileId})${apiInfo ? ` — NapCat: ${apiInfo}` : ''}`,
+          };
+        }
+        // IS-F2: 落盘带 sessionId=peer → files/<peer>/；peer 缺失时回退 group_<groupId>
+        const hasGroupId = ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '';
+        const sessionId = sessionPeer || (hasGroupId ? `group_${ctx.groupId}` : undefined);
+        const saved = await ctx.mediaManager.downloadAndSave(fileUrl, {
+          fileId,
+          type: 'files',
+          filename: item.file_name,
+          ...(sessionId ? { sessionId } : {}),
+        });
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: true,
+          local_path: saved.localPath,
+        };
+      } catch (err: any) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: `下载群文件失败: ${err?.message || '未知错误'}`,
+        };
+      }
+    }
+
+    // 5. 非群文件（私聊 file_id 资源）
+    if (!ctx.gateway) {
+      return {
+        file_id: fileId,
+        file_name: item.file_name,
+        busid: item.busid,
+        success: false,
+        error: '资源获取失败: NapCat 未连接，无法拉取远程资源',
+      };
+    }
+    if (!ctx.mediaManager) {
+      return {
+        file_id: fileId,
+        file_name: item.file_name,
+        busid: item.busid,
+        success: false,
+        error: '下载失败: 媒体存储服务不可用，无法落盘',
+      };
+    }
+    const dl = await downloadPrivateFile({
+      fileId,
+      peer: sessionPeer || undefined,
+      busid: item.busid ?? null,
+      filename: item.file_name,
+      gateway: ctx.gateway,
+      mediaManager: ctx.mediaManager,
+    });
+    if (dl.ok && dl.localPath) {
+      return {
+        file_id: fileId,
+        file_name: item.file_name,
+        busid: item.busid,
+        success: true,
+        local_path: dl.localPath,
+      };
+    }
+    return {
+      file_id: fileId,
+      file_name: item.file_name,
+      busid: item.busid,
+      success: false,
+      error: dl.error || '下载失败: 未知原因',
+    };
+  })();
+
+  inFlightDownloads.set(fileId, downloadPromise);
+  try {
+    return await downloadPromise;
+  } finally {
+    inFlightDownloads.delete(fileId);
+  }
+}
+
 export async function fetchChatResource(
   params: FetchChatResourceParams,
   context?: ToolExecutionContext
 ): Promise<FetchChatResourceResult> {
   const ctx = { ...globalToolContext, ...context };
 
-  if (!params || !params.file_id || typeof params.file_id !== 'string' || params.file_id.trim() === '') {
-    return { success: false, error: '你需要指定 file_id' };
+  const hasFilesArray = Array.isArray(params?.files) && params.files.length > 0;
+  const hasSingleFileId = typeof params?.file_id === 'string' && params.file_id.trim() !== '';
+
+  if (!hasFilesArray && !hasSingleFileId) {
+    return { success: false, error: '你需要指定 file_id 或 files 列表' };
   }
 
-  const fileId = params.file_id.trim();
+  // 1. 归一化输入列表
+  const isSingleMode = !hasFilesArray && hasSingleFileId;
+  const targetItems: FetchResourceItem[] = isSingleMode
+    ? [{ file_id: params.file_id!.trim(), busid: params.busid, file_name: params.file_name }]
+    : params.files!;
 
-  // 1. IS-F1: 判定群文件 —— 依据上下文 peer / groupId / 落库类型 (group_file)
-  const sessionPeer = ctx.peer || '';
-  const inGroupContext =
-    (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') ||
-    sessionPeer.startsWith('group_') ||
-    sessionPeer.startsWith('qq-group-');
-  let isGroupFile = inGroupContext;
-
-  // 落库类型佐证：peer/groupId 缺失时，若库中记录类型为 group_file 仍按群文件处理
-  if (!isGroupFile && ctx.db) {
-    try {
-      const record = ctx.db.getByFileId(fileId);
-      if (record?.type === 'group_file') {
-        isGroupFile = true;
-      }
-    } catch {}
+  // 2. 依次拉取 (受控调度，杜绝并发网络流控与内存风暴)
+  const results: FetchChatResourceItemResult[] = [];
+  for (const item of targetItems) {
+    const itemRes = await fetchSingleChatResourceItem(item, ctx);
+    results.push(itemRes);
   }
 
-  // 2. 一级去重: 查数据库
-  if (ctx.db) {
-    const record = ctx.db.getByFileId(fileId);
-    if (record?.local_path && fs.existsSync(record.local_path)) {
-      return { success: true, local_path: record.local_path };
-    }
-  }
+  const downloadedCount = results.filter((r) => r.success).length;
+  const total = results.length;
 
-  // 3. 群文件: get_group_file_url({groupid, fileid, busid}) → data.url → 真实落盘
-  if (isGroupFile) {
-    if (params.busid === undefined || params.busid === null) {
-      return { success: false, error: '下载群文件缺少 busid (需同时提供 file_id 与 busid)' };
-    }
-    if (!ctx.gateway) {
+  // 3. 结果组装与完全向后兼容
+  if (isSingleMode) {
+    const single = results[0];
+    if (single.success) {
       return {
-        success: false,
-        error: `下载失败: NapCat 未连接 (gateway 不可用)，无法获取群文件下载地址 (file_id: ${fileId})`,
+        success: true,
+        local_path: single.local_path,
+        total: 1,
+        downloaded_count: 1,
+        results,
       };
     }
-    if (!ctx.mediaManager) {
-      return { success: false, error: '下载失败: 媒体存储服务不可用，无法落盘' };
-    }
-    if (!ctx.groupId) {
-      return {
-        success: false,
-        error: `下载失败: 缺少群组上下文 (groupId)，无法定位群文件所属群聊 (file_id: ${fileId})`,
-      };
-    }
-    try {
-      const res = await ctx.gateway.getGroupFileUrl(ctx.groupId, fileId, params.busid);
-      const fileUrl = res.data?.url;
-      if (!fileUrl) {
-        const apiInfo = [res.wording, res.message].filter(Boolean).join(' ');
-        return {
-          success: false,
-          error: `下载失败: NapCat 未返回群文件下载 URL (file_id: ${fileId})${apiInfo ? ` — NapCat: ${apiInfo}` : ''}`,
-        };
-      }
-      // IS-F2: 落盘带 sessionId=peer → files/<peer>/；peer 缺失时回退 group_<groupId>
-      const hasGroupId = ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '';
-      const sessionId = sessionPeer || (hasGroupId ? `group_${ctx.groupId}` : undefined);
-      const saved = await ctx.mediaManager.downloadAndSave(fileUrl, {
-        fileId,
-        type: 'files',
-        filename: params.file_name,
-        ...(sessionId ? { sessionId } : {}),
-      });
-      return { success: true, local_path: saved.localPath };
-    } catch (err: any) {
-      return { success: false, error: `下载群文件失败: ${err?.message || '未知错误'}` };
-    }
+    return {
+      success: false,
+      error: single.error || '下载失败',
+      total: 1,
+      downloaded_count: 0,
+      results,
+    };
   }
 
-  // 4. 非群文件（私聊 file_id 资源）：走私聊文件两级退化下载（PF-001 任务包 §3.1）——
-  //    首选 get_private_file_url 直链 → 回退 get_file 本地路径翻译 → 落盘 files/<peer>/
-  if (!ctx.gateway) {
-    return { success: false, error: '资源获取失败: NapCat 未连接，无法拉取远程资源' };
-  }
-  if (!ctx.mediaManager) {
-    return { success: false, error: '下载失败: 媒体存储服务不可用，无法落盘' };
-  }
-  const dl = await downloadPrivateFile({
-    fileId,
-    peer: sessionPeer || undefined,
-    busid: params.busid ?? null,
-    filename: params.file_name,
-    gateway: ctx.gateway,
-    mediaManager: ctx.mediaManager,
-  });
-  if (dl.ok && dl.localPath) {
-    return { success: true, local_path: dl.localPath };
-  }
-  return { success: false, error: dl.error || '下载失败: 未知原因' };
+  // 批量模式：部分成功判定 (Partial Success)
+  const isOverallSuccess = downloadedCount > 0;
+  const firstSuccessPath = results.find((r) => r.success)?.local_path;
+
+  return {
+    success: isOverallSuccess,
+    ...(firstSuccessPath ? { local_path: firstSuccessPath } : {}),
+    ...(isOverallSuccess ? {} : { error: `批量下载失败: ${results.map((r) => r.error).filter(Boolean).join('; ')}` }),
+    total,
+    downloaded_count: downloadedCount,
+    results,
+  };
 }
 
 /**
@@ -1314,22 +1463,49 @@ export function registerAgentTools(
         defineTool({
           name: 'fetch_chat_resource',
           description:
-            '根据资源 file_id（群文件需附带 busid）将外部文件或富媒体拉取到本地磁盘。用于需要深入阅读、分析聊天中的文档、音视频或图片内容时；下载完成后返回本地物理路径（local_path），供后续文件或图片读取工具消费。',
+            '根据资源 file_id（群文件需附带 busid）将外部文件或富媒体拉取到本地磁盘。用于需要深入阅读、分析聊天中的文档、音视频或图片内容时；下载完成后返回本地物理路径（local_path），供后续文件或图片读取工具消费。如需深入阅读多个文件，请在单次调用中使用 files 参数批量传入，切勿在单轮内并发多次调用本工具。',
           parameters: {
-            file_id: { type: 'string', required: true, description: '资源 ID (必填)' },
+            file_id: { type: 'string', description: '单个资源 ID (单文件模式填写)' },
             busid: { type: 'number', description: '群文件专用 busid (群文件必填)' },
             file_name: { type: 'string', description: '保存文件名建议' },
+            files: {
+              type: 'array',
+              description: '批量拉取文件列表 (多文件模式一次性传入，包含 file_id、busid 与可选 file_name)',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  file_id: { type: 'string', required: true, description: '资源 ID' },
+                  busid: { type: 'number', description: '群文件专用 busid' },
+                  file_name: { type: 'string', description: '保存文件名建议' },
+                },
+              },
+            },
           },
           output: {
             schema: { type: 'json' },
-            render: (_args, value) => [
-              {
-                type: 'text',
-                text: (value as any).success
-                  ? `资源已就绪: ${(value as any).local_path}`
-                  : `资源抓取失败: ${(value as any).error}`,
-              },
-            ],
+            render: (_args, value) => {
+              const res = value as any;
+              if (Array.isArray(res?.results) && res.results.length > 1) {
+                const lines = [`批量下载结果 (${res.downloaded_count || 0}/${res.total || 0}):`];
+                for (const item of res.results) {
+                  lines.push(
+                    item.success
+                      ? `  • ${item.file_name || item.file_id}: 就绪 (${item.local_path})`
+                      : `  • ${item.file_name || item.file_id}: 失败 (${item.error || '未知错误'})`
+                  );
+                }
+                return [{ type: 'text', text: lines.join('\n') }];
+              }
+              return [
+                {
+                  type: 'text',
+                  text: res?.success
+                    ? `资源已就绪: ${res?.local_path}`
+                    : `资源抓取失败: ${res?.error || '未知原因'}`,
+                },
+              ];
+            },
           },
           async execute(args, exec) {
             const session = (exec.agent as any)?.session;
