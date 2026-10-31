@@ -1,6 +1,6 @@
 {
   "name": "dsh-napcat-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness × NapCat(OneBot 11) QQ 桥接：零手写配置、30 项参数全 WebUI 可视化，群聊/私聊开箱即用，内置两层记忆·表情包·黑话体系",
   "type": "module",
   "main": "dist/index.js",
