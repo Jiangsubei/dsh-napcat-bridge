@@ -15,9 +15,26 @@
 
 ---
 
-## 2. 编译与安装
+## 2. 安装插件
 
 DSH 通过 `package.json` 的 `main` 字段（指向 `dist/index.js`）加载插件，并通过 `dsh.bundle.patch` 加载 `cordis.patch.yml`。
+
+### 方式一：从 npm 安装（推荐）
+
+npm 包已内置编译产物与 `cordis.patch.yml`，无需本地构建：
+
+```bash
+# 安装到 DSH 的 web profile
+dsh plugin --profile web add dsh-napcat-bridge
+
+# 或安装到全局默认环境
+dsh plugin add dsh-napcat-bridge
+```
+
+> [!NOTE]
+> **Desktop 版**没有 `dsh` CLI，请在 DSH「插件 → 添加插件」里直接输入包名 `dsh-napcat-bridge` 安装。
+
+### 方式二：从源码编译安装（开发 / 调试）
 
 在进行 link 安装前，**必须先执行构建命令**：
 
