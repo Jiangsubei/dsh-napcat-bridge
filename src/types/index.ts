@@ -767,7 +767,45 @@ export interface BridgePluginConfig {
   slang_budget_chars?: number;
   /** 黑话 Markdown 文档保存路径 (默认 .dsh/napcat/slang/slang.md) */
   slang_storage_path?: string;
+  /** 私聊发言黑名单列表 (命中则不唤醒、不回复，管理员亦不例外) */
+  private_blacklist?: BlacklistItem[];
+  /** 群聊发言黑名单列表 (命中则不唤醒、不回复，管理员亦不例外) */
+  group_blacklist?: BlacklistItem[];
+  /** 私聊新建会话默认权限模式 (默认 'workspace-write') */
+  session_permission_private_default?: DshPermissionPreset;
+  /** 群聊新建会话默认权限模式 (默认 'read-only') */
+  session_permission_group_default?: DshPermissionPreset;
+  /** 会话权限模式自定义覆盖例外列表 */
+  session_permission_overrides?: SessionPermissionOverride[];
+  /** 私聊新建会话默认是否装载 Coding 工具组 (默认 true) */
+  coding_tools_private_default?: boolean;
+  /** 群聊新建会话默认是否装载 Coding 工具组 (默认 false) */
+  coding_tools_group_default?: boolean;
+  /** Coding 工具组自定义覆盖例外列表 */
+  coding_tools_overrides?: CodingToolsOverride[];
 }
+
+export type DshPermissionPreset = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export interface BlacklistItem {
+  id: string;
+  remark?: string;
+}
+
+export interface SessionPermissionOverride {
+  id: string;
+  type: 'user' | 'group';
+  permission: DshPermissionPreset;
+  remark?: string;
+}
+
+export interface CodingToolsOverride {
+  id: string;
+  type: 'user' | 'group';
+  enabled: boolean;
+  remark?: string;
+}
+
 
 // ==================== 6. 出站串行队列与入站上下文契约 ====================
 

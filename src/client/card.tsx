@@ -68,7 +68,7 @@ const SafeIconChevronDown: React.ComponentType<{ className?: string }> = resolve
 
 export { DEFAULT_BASE_CONFIG };
 
-export type SettingsTabId = 'connection' | 'persona' | 'proactive' | 'memory' | 'face' | 'slang';
+export type SettingsTabId = 'connection' | 'persona' | 'proactive' | 'memory' | 'face' | 'slang' | 'security';
 
 export interface TabItem {
   id: SettingsTabId;
@@ -82,6 +82,7 @@ export const SETTINGS_TABS: readonly TabItem[] = [
   { id: 'memory', label: '记忆' },
   { id: 'face', label: '表情包' },
   { id: 'slang', label: '黑话学习' },
+  { id: 'security', label: '权限与安全' },
 ] as const;
 
 export interface CardController {
@@ -151,6 +152,14 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   slang_enabled: true,
   slang_budget_chars: 5000,
   slang_storage_path: '.dsh/napcat/slang/slang.md',
+  private_blacklist: [],
+  group_blacklist: [],
+  session_permission_private_default: 'workspace-write',
+  session_permission_group_default: 'read-only',
+  session_permission_overrides: [],
+  coding_tools_private_default: true,
+  coding_tools_group_default: false,
+  coding_tools_overrides: [],
 };
 
 function formatArrayToString(arr?: string[]): string {
@@ -290,6 +299,23 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const [newSlangDef, setNewSlangDef] = useState('');
   const [newSlangEx, setNewSlangEx] = useState('');
   const [addingSlangLoading, setAddingSlangLoading] = useState(false);
+
+  // Security Tab 本地添加表单状态
+  const [newPrivateBlacklistId, setNewPrivateBlacklistId] = useState('');
+  const [newPrivateBlacklistRemark, setNewPrivateBlacklistRemark] = useState('');
+  const [newGroupBlacklistId, setNewGroupBlacklistId] = useState('');
+  const [newGroupBlacklistRemark, setNewGroupBlacklistRemark] = useState('');
+
+  const [newPermOverrideId, setNewPermOverrideId] = useState('');
+  const [newPermOverrideType, setNewPermOverrideType] = useState<'user' | 'group'>('group');
+  const [newPermOverrideLevel, setNewPermOverrideLevel] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('workspace-write');
+  const [newPermOverrideRemark, setNewPermOverrideRemark] = useState('');
+
+  const [newCodingOverrideId, setNewCodingOverrideId] = useState('');
+  const [newCodingOverrideType, setNewCodingOverrideType] = useState<'user' | 'group'>('group');
+  const [newCodingOverrideEnabled, setNewCodingOverrideEnabled] = useState(true);
+  const [newCodingOverrideRemark, setNewCodingOverrideRemark] = useState('');
+
 
   const loadSlang = useCallback(async () => {
     setSlangLoading(true);
@@ -1519,6 +1545,498 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
               )}
             </>
           )}
+        </div>
+
+        <div
+          id="napcat-tabpanel-security"
+          data-testid="napcat-tabpanel-security"
+          role="tabpanel"
+          aria-labelledby="napcat-tab-security"
+          hidden={activeTab !== 'security'}
+          className={[
+            cardStyle.tabPanel,
+            activeTab !== 'security' ? cardStyle.tabPanelHidden : '',
+          ].filter(Boolean).join(' ')}
+          style={activeTab !== 'security' ? { display: 'none' } : undefined}
+        >
+          {/* 分区 1: 发言黑名单 */}
+          <div style={{ padding: '8px 0 12px' }}>
+            <h4 style={{ margin: '4px 0 6px', fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>发言黑名单</h4>
+            <p className={fieldStyle.hint} style={{ margin: '0 0 12px' }}>
+              被拉黑的私聊用户或群聊，消息正常入库记录供归档审计，但永远阻断唤醒与所有回复（管理员亦不豁免）。
+            </p>
+
+            {/* 私聊黑名单 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊黑名单</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder="QQ 号 (如: 1000000003)"
+                  value={newPrivateBlacklistId}
+                  onChange={(e) => setNewPrivateBlacklistId(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <input
+                  type="text"
+                  placeholder="备注说明 (可选)"
+                  value={newPrivateBlacklistRemark}
+                  onChange={(e) => setNewPrivateBlacklistRemark(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <button
+                  type="button"
+                  className={faceStyle.actionBtn}
+                  title="添加私聊黑名单"
+                  style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => {
+                    const id = newPrivateBlacklistId.trim();
+                    if (!id) return;
+                    const list = [...(draft.private_blacklist || [])];
+                    if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
+                      list.push({ id, remark: newPrivateBlacklistRemark.trim() || undefined });
+                      handleFieldChange('private_blacklist', list);
+                    }
+                    setNewPrivateBlacklistId('');
+                    setNewPrivateBlacklistRemark('');
+                  }}
+                >
+                  <IconPlus size={12} /> 添加
+                </button>
+              </div>
+
+              {(draft.private_blacklist || []).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {(draft.private_blacklist || []).map((item: any, idx: number) => {
+                    const id = typeof item === 'string' ? item : item.id;
+                    const remark = typeof item === 'object' ? item.remark : '';
+                    return (
+                      <div
+                        key={id + '-' + idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 10px',
+                          border: '1px solid var(--dsw-alias-border-l2)',
+                          borderRadius: '6px',
+                          background: 'var(--dsw-alias-bg-layer-2)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <div>
+                          <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{id}</strong>
+                          {remark && <span style={{ marginLeft: '8px', color: 'var(--dsw-alias-label-tertiary)' }}>({remark})</span>}
+                        </div>
+                        <button
+                          type="button"
+                          className={faceStyle.actionBtn}
+                          title="移除黑名单"
+                          style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
+                          onClick={() => {
+                            const list = (draft.private_blacklist || []).filter((i: any) => (typeof i === 'string' ? i : i.id) !== id);
+                            handleFieldChange('private_blacklist', list);
+                          }}
+                        >
+                          <IconTrash size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无私聊黑名单</div>
+              )}
+            </div>
+
+            {/* 群聊黑名单 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊黑名单</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder="群号 (如: 8000000001)"
+                  value={newGroupBlacklistId}
+                  onChange={(e) => setNewGroupBlacklistId(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <input
+                  type="text"
+                  placeholder="备注说明 (可选)"
+                  value={newGroupBlacklistRemark}
+                  onChange={(e) => setNewGroupBlacklistRemark(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <button
+                  type="button"
+                  className={faceStyle.actionBtn}
+                  title="添加群聊黑名单"
+                  style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => {
+                    const id = newGroupBlacklistId.trim();
+                    if (!id) return;
+                    const list = [...(draft.group_blacklist || [])];
+                    if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
+                      list.push({ id, remark: newGroupBlacklistRemark.trim() || undefined });
+                      handleFieldChange('group_blacklist', list);
+                    }
+                    setNewGroupBlacklistId('');
+                    setNewGroupBlacklistRemark('');
+                  }}
+                >
+                  <IconPlus size={12} /> 添加
+                </button>
+              </div>
+
+              {(draft.group_blacklist || []).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {(draft.group_blacklist || []).map((item: any, idx: number) => {
+                    const id = typeof item === 'string' ? item : item.id;
+                    const remark = typeof item === 'object' ? item.remark : '';
+                    return (
+                      <div
+                        key={id + '-' + idx}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 10px',
+                          border: '1px solid var(--dsw-alias-border-l2)',
+                          borderRadius: '6px',
+                          background: 'var(--dsw-alias-bg-layer-2)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <div>
+                          <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{id}</strong>
+                          {remark && <span style={{ marginLeft: '8px', color: 'var(--dsw-alias-label-tertiary)' }}>({remark})</span>}
+                        </div>
+                        <button
+                          type="button"
+                          className={faceStyle.actionBtn}
+                          title="移除黑名单"
+                          style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
+                          onClick={() => {
+                            const list = (draft.group_blacklist || []).filter((i: any) => (typeof i === 'string' ? i : i.id) !== id);
+                            handleFieldChange('group_blacklist', list);
+                          }}
+                        >
+                          <IconTrash size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无群聊黑名单</div>
+              )}
+            </div>
+          </div>
+
+          {/* 分区 2: 新建会话权限模式 */}
+          <div style={{ padding: '12px 0', borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
+            <h4 style={{ margin: '4px 0 6px', fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>新建会话权限模式</h4>
+            <p className={fieldStyle.hint} style={{ margin: '0 0 12px' }}>
+              控制新建会话 (agents.create 或 /新建 指令) 的初始 DSH 权限预设。已有会话热恢复不强行覆盖。
+            </p>
+
+            <div className={fieldStyle.field}>
+              <label htmlFor="napcat-session-permission-private-default" className={fieldStyle.label}>
+                私聊新建会话默认权限 (session_permission_private_default)
+              </label>
+              <select
+                id="napcat-session-permission-private-default"
+                className={fieldStyle.input}
+                disabled={saving}
+                value={draft.session_permission_private_default || 'workspace-write'}
+                onChange={(e) => handleFieldChange('session_permission_private_default', e.target.value as any)}
+              >
+                <option value="workspace-write">工作区读写 (workspace-write) [默认]</option>
+                <option value="read-only">只读 (read-only)</option>
+                <option value="danger-full-access">完全 (danger-full-access)</option>
+              </select>
+            </div>
+
+            <div className={fieldStyle.field}>
+              <label htmlFor="napcat-session-permission-group-default" className={fieldStyle.label}>
+                群聊新建会话默认权限 (session_permission_group_default)
+              </label>
+              <select
+                id="napcat-session-permission-group-default"
+                className={fieldStyle.input}
+                disabled={saving}
+                value={draft.session_permission_group_default || 'read-only'}
+                onChange={(e) => handleFieldChange('session_permission_group_default', e.target.value as any)}
+              >
+                <option value="read-only">只读 (read-only) [默认，安全推荐]</option>
+                <option value="workspace-write">工作区读写 (workspace-write)</option>
+                <option value="danger-full-access">完全 (danger-full-access)</option>
+              </select>
+            </div>
+
+            {/* 权限例外覆盖表 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>权限例外覆盖</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select
+                  value={newPermOverrideType}
+                  onChange={(e) => setNewPermOverrideType(e.target.value as any)}
+                  className={fieldStyle.input}
+                  style={{ width: '80px', height: '30px', fontSize: '12px' }}
+                >
+                  <option value="group">群聊</option>
+                  <option value="user">私聊</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="群号或 QQ 号"
+                  value={newPermOverrideId}
+                  onChange={(e) => setNewPermOverrideId(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <select
+                  value={newPermOverrideLevel}
+                  onChange={(e) => setNewPermOverrideLevel(e.target.value as any)}
+                  className={fieldStyle.input}
+                  style={{ width: '130px', height: '30px', fontSize: '12px' }}
+                >
+                  <option value="workspace-write">工作区读写</option>
+                  <option value="read-only">只读</option>
+                  <option value="danger-full-access">完全</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="备注 (可选)"
+                  value={newPermOverrideRemark}
+                  onChange={(e) => setNewPermOverrideRemark(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <button
+                  type="button"
+                  className={faceStyle.actionBtn}
+                  title="添加权限例外"
+                  style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => {
+                    const id = newPermOverrideId.trim();
+                    if (!id) return;
+                    const list = [...(draft.session_permission_overrides || [])];
+                    const existingIdx = list.findIndex((i: any) => i.id === id && i.type === newPermOverrideType);
+                    const item = {
+                      id,
+                      type: newPermOverrideType,
+                      permission: newPermOverrideLevel,
+                      remark: newPermOverrideRemark.trim() || undefined,
+                    };
+                    if (existingIdx >= 0) {
+                      list[existingIdx] = item;
+                    } else {
+                      list.push(item);
+                    }
+                    handleFieldChange('session_permission_overrides', list);
+                    setNewPermOverrideId('');
+                    setNewPermOverrideRemark('');
+                  }}
+                >
+                  <IconPlus size={12} /> 添加
+                </button>
+              </div>
+
+              {(draft.session_permission_overrides || []).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {(draft.session_permission_overrides || []).map((item: any, idx: number) => (
+                    <div
+                      key={item.id + '-' + item.type + '-' + idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 10px',
+                        border: '1px solid var(--dsw-alias-border-l2)',
+                        borderRadius: '6px',
+                        background: 'var(--dsw-alias-bg-layer-2)',
+                        fontSize: '12px',
+                      }}
+                    >
+                      <div>
+                        <span style={{ color: 'var(--dsw-alias-label-secondary)', marginRight: '6px' }}>
+                          [{item.type === 'group' ? '群聊' : '私聊'}]
+                        </span>
+                        <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{item.id}</strong>
+                        <span style={{ marginLeft: '8px', color: 'var(--dsw-alias-brand-primary)' }}>
+                          {item.permission}
+                        </span>
+                        {item.remark && <span style={{ marginLeft: '8px', color: 'var(--dsw-alias-label-tertiary)' }}>({item.remark})</span>}
+                      </div>
+                      <button
+                        type="button"
+                        className={faceStyle.actionBtn}
+                        title="移除权限例外"
+                        style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
+                        onClick={() => {
+                          const list = (draft.session_permission_overrides || []).filter((i: any) => !(i.id === item.id && i.type === item.type));
+                          handleFieldChange('session_permission_overrides', list);
+                        }}
+                      >
+                        <IconTrash size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无权限例外覆盖</div>
+              )}
+            </div>
+          </div>
+
+          {/* 分区 3: Coding 工具组装载控制 */}
+          <div style={{ padding: '12px 0 8px', borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
+            <h4 style={{ margin: '4px 0 6px', fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>Coding 工具组装载</h4>
+            <p className={fieldStyle.hint} style={{ margin: '0 0 12px' }}>
+              控制新建会话是否装载 7 个工程编码工具 (bash/pwsh/read/write/edit/read_image/working_directory)。关闭可彻底隔离高危操作并大幅节省 Token。
+            </p>
+
+            <SwitchField
+              id="napcat-coding-tools-private-default"
+              label="私聊默认装载 Coding 工具组 (coding_tools_private_default)"
+              hint="私聊新建会话是否默认包含工程与终端工具 (默认开启)"
+              checked={Boolean(draft.coding_tools_private_default ?? true)}
+              disabled={saving}
+              overridden={model.isOverridden('coding_tools_private_default')}
+              onReset={() => handleResetField('coding_tools_private_default')}
+              onChange={(checked) => handleFieldChange('coding_tools_private_default', checked)}
+            />
+
+            <SwitchField
+              id="napcat-coding-tools-group-default"
+              label="群聊默认装载 Coding 工具组 (coding_tools_group_default)"
+              hint="群聊新建会话是否默认包含工程与终端工具 (默认关闭，安全推荐)"
+              checked={Boolean(draft.coding_tools_group_default ?? false)}
+              disabled={saving}
+              overridden={model.isOverridden('coding_tools_group_default')}
+              onReset={() => handleResetField('coding_tools_group_default')}
+              onChange={(checked) => handleFieldChange('coding_tools_group_default', checked)}
+            />
+
+            {/* Coding 工具例外覆盖表 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>Coding 工具例外覆盖</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select
+                  value={newCodingOverrideType}
+                  onChange={(e) => setNewCodingOverrideType(e.target.value as any)}
+                  className={fieldStyle.input}
+                  style={{ width: '80px', height: '30px', fontSize: '12px' }}
+                >
+                  <option value="group">群聊</option>
+                  <option value="user">私聊</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="群号或 QQ 号"
+                  value={newCodingOverrideId}
+                  onChange={(e) => setNewCodingOverrideId(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <select
+                  value={newCodingOverrideEnabled ? 'true' : 'false'}
+                  onChange={(e) => setNewCodingOverrideEnabled(e.target.value === 'true')}
+                  className={fieldStyle.input}
+                  style={{ width: '90px', height: '30px', fontSize: '12px' }}
+                >
+                  <option value="true">开启</option>
+                  <option value="false">关闭</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="备注 (可选)"
+                  value={newCodingOverrideRemark}
+                  onChange={(e) => setNewCodingOverrideRemark(e.target.value)}
+                  className={fieldStyle.input}
+                  style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                />
+                <button
+                  type="button"
+                  className={faceStyle.actionBtn}
+                  title="添加工具例外"
+                  style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => {
+                    const id = newCodingOverrideId.trim();
+                    if (!id) return;
+                    const list = [...(draft.coding_tools_overrides || [])];
+                    const existingIdx = list.findIndex((i: any) => i.id === id && i.type === newCodingOverrideType);
+                    const item = {
+                      id,
+                      type: newCodingOverrideType,
+                      enabled: newCodingOverrideEnabled,
+                      remark: newCodingOverrideRemark.trim() || undefined,
+                    };
+                    if (existingIdx >= 0) {
+                      list[existingIdx] = item;
+                    } else {
+                      list.push(item);
+                    }
+                    handleFieldChange('coding_tools_overrides', list);
+                    setNewCodingOverrideId('');
+                    setNewCodingOverrideRemark('');
+                  }}
+                >
+                  <IconPlus size={12} /> 添加
+                </button>
+              </div>
+
+              {(draft.coding_tools_overrides || []).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {(draft.coding_tools_overrides || []).map((item: any, idx: number) => (
+                    <div
+                      key={item.id + '-' + item.type + '-' + idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 10px',
+                        border: '1px solid var(--dsw-alias-border-l2)',
+                        borderRadius: '6px',
+                        background: 'var(--dsw-alias-bg-layer-2)',
+                        fontSize: '12px',
+                      }}
+                    >
+                      <div>
+                        <span style={{ color: 'var(--dsw-alias-label-secondary)', marginRight: '6px' }}>
+                          [{item.type === 'group' ? '群聊' : '私聊'}]
+                        </span>
+                        <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{item.id}</strong>
+                        <span style={{ marginLeft: '8px', color: item.enabled ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-error)' }}>
+                          {item.enabled ? '已开启' : '已关闭'}
+                        </span>
+                        {item.remark && <span style={{ marginLeft: '8px', color: 'var(--dsw-alias-label-tertiary)' }}>({item.remark})</span>}
+                      </div>
+                      <button
+                        type="button"
+                        className={faceStyle.actionBtn}
+                        title="移除工具例外"
+                        style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
+                        onClick={() => {
+                          const list = (draft.coding_tools_overrides || []).filter((i: any) => !(i.id === item.id && i.type === item.type));
+                          handleFieldChange('coding_tools_overrides', list);
+                        }}
+                      >
+                        <IconTrash size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无 Coding 工具例外覆盖</div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className={cardStyle.footer}>

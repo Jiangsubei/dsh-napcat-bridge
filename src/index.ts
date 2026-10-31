@@ -56,7 +56,7 @@ export * from './slang/index.js';
 
 export const name = PLUGIN_NAME;
 export const inject = ['tools', 'systemPrompt', 'agents'];
-export const Config = BridgeConfigSchema;
+export const Config: any = BridgeConfigSchema;
 
 export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const logger = ctx.logger ? ctx.logger(PLUGIN_NAME) : console;
@@ -300,7 +300,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     ttlDays: config.image_ttl_days ?? 7,
   });
 
-  const sessionManager = new SessionManager(ctx, dshHome, db);
+  const sessionManager = new SessionManager(ctx, dshHome, db, { configGetter: currentConfig });
   sessionManager.registerWorkspace(sessionManager.resolveCwd()).catch((wsErr) => {
     logger.warn?.('[Plugin] 初始化注册 NapCat 顶级工作区失败:', wsErr);
   });
@@ -443,10 +443,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     if (typeof (ctx as any).provide === 'function') {
       (ctx as any).provide('napcat-proactive');
       (ctx as any).provide('napcat-session');
+      (ctx as any).provide('napcat-bridge-config');
     }
   } catch {}
   (ctx as any)['napcat-proactive'] = proactiveManager;
   (ctx as any)['napcat-session'] = sessionManager;
+  (ctx as any)['napcat-bridge-config'] = currentConfig;
   if (typeof (ctx as any).set === 'function') {
     (ctx as any).set('napcat-proactive', proactiveManager);
     (ctx as any).set('napcat-session', sessionManager);
@@ -701,6 +703,33 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       db.saveMessage(record);
     } catch (err) {
       logger.error?.('[Plugin] 消息入库失败:', err);
+    }
+
+    // 发言黑名单门控：消息正常落库供审计，但阻断一切唤醒、斜杠命令与提问审批（管理员亦不例外）
+    const cfg = currentConfig();
+    const isPrivateBlacklisted =
+      !isGroup &&
+      fromUser &&
+      Array.isArray(cfg.private_blacklist) &&
+      cfg.private_blacklist.some((item: any) => {
+        const targetId = typeof item === 'string' ? item : item?.id;
+        return String(targetId).trim() === fromUser;
+      });
+
+    const isGroupBlacklisted =
+      isGroup &&
+      event.group_id !== undefined &&
+      Array.isArray(cfg.group_blacklist) &&
+      cfg.group_blacklist.some((item: any) => {
+        const targetId = typeof item === 'string' ? item : item?.id;
+        return String(targetId).trim() === String(event.group_id);
+      });
+
+    if (isPrivateBlacklisted || isGroupBlacklisted) {
+      logger.info?.(
+        `[Plugin] 命中发言黑名单 (peer: ${peer}, user: ${fromUser})，消息已入库但阻断一切唤醒、指令与回复`
+      );
+      return;
     }
 
     // 优先拦截斜杠命令 (如 /mode, /model, /think, /help, /clear)

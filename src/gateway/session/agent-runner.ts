@@ -1,3 +1,46 @@
+export function safeGetService(ctx: any, name: string): any {
+  if (!ctx) return undefined;
+  try {
+    if (typeof ctx.get === 'function') {
+      const val = ctx.get(name);
+      if (val !== undefined) return val;
+    }
+  } catch {}
+  try {
+    if (ctx.root && typeof ctx.root.get === 'function') {
+      const rootVal = ctx.root.get(name);
+      if (rootVal !== undefined) return rootVal;
+    }
+  } catch {}
+  return undefined;
+}
+
+export function parsePeerTarget(peer: string): { type: 'user' | 'group'; id: string } {
+  if (peer.startsWith('group_')) {
+    return { type: 'group', id: peer.slice(6) };
+  }
+  if (peer.startsWith('group:')) {
+    return { type: 'group', id: peer.slice(6) };
+  }
+  if (peer.startsWith('qq-group-')) {
+    const stripped = peer.slice(9);
+    const id = stripped.split('-')[0];
+    return { type: 'group', id };
+  }
+  if (peer.startsWith('user_')) {
+    return { type: 'user', id: peer.slice(5) };
+  }
+  if (peer.startsWith('user:')) {
+    return { type: 'user', id: peer.slice(5) };
+  }
+  if (peer.startsWith('qq-user-')) {
+    const stripped = peer.slice(8);
+    const id = stripped.split('-')[0];
+    return { type: 'user', id };
+  }
+  return { type: 'user', id: peer };
+}
+
 /**
  * dsh-napcat-bridge: Agent 运行时生命周期与执行调度模块
  * 负责 Agent 创建与恢复、会话独占锁与看门狗、以及入站唤醒 (dispatchWakeup) 的消息排队下发。
@@ -55,6 +98,50 @@ export class SessionAgentRunner {
     private readonly delegate: AgentRunnerDelegate,
     private readonly options?: SessionManagerOptions
   ) {}
+
+  private resolveSessionPermission(peer: string): string {
+    const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
+    const config: any = (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
+    const { type, id } = parsePeerTarget(peer);
+
+    // 1. 特例覆盖优先
+    if (Array.isArray(config.session_permission_overrides)) {
+      const match = config.session_permission_overrides.find((item: any) => {
+        return item && String(item.id).trim() === id && item.type === type;
+      });
+      if (match?.permission) {
+        return match.permission;
+      }
+    }
+
+    // 2. 全局默认
+    if (type === 'group') {
+      return config.session_permission_group_default || 'read-only';
+    }
+    return config.session_permission_private_default || 'workspace-write';
+  }
+
+  private resolveCodingToolsEnabled(peer: string): boolean {
+    const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
+    const config: any = (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
+    const { type, id } = parsePeerTarget(peer);
+
+    // 1. 特例覆盖优先
+    if (Array.isArray(config.coding_tools_overrides)) {
+      const match = config.coding_tools_overrides.find((item: any) => {
+        return item && String(item.id).trim() === id && item.type === type;
+      });
+      if (match && typeof match.enabled === 'boolean') {
+        return match.enabled;
+      }
+    }
+
+    // 2. 全局默认
+    if (type === 'group') {
+      return Boolean(config.coding_tools_group_default ?? false);
+    }
+    return Boolean(config.coding_tools_private_default ?? true);
+  }
 
   public setOutboundBridge(bridge: OutboundBridgeLike): void {
     this.outboundBridge = bridge;
@@ -323,6 +410,28 @@ export class SessionAgentRunner {
       }
     }
 
+    const codingToolsEnabled = this.resolveCodingToolsEnabled(peer);
+    const applyCodingToolsRestriction = (agentCtx: any) => {
+      const toolsSvc: any = agentCtx?.tools || (agentCtx?.get && agentCtx.get('tools'));
+      if (toolsSvc && typeof toolsSvc.restrict === 'function') {
+        const potential = ['bash', 'pwsh', 'read', 'write', 'edit', 'read_image', 'working_directory'];
+        const known: string[] | undefined = Array.isArray(toolsSvc.names) ? toolsSvc.names : undefined;
+        const deny = known
+          ? potential.filter((t) => known.includes(t))
+          : potential.filter((t) => (process.platform === 'win32' ? t !== 'bash' : t !== 'pwsh'));
+        if (deny.length > 0) {
+          try {
+            toolsSvc.restrict({ deny });
+          } catch (rErr: any) {
+            this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+              '[SessionAgentRunner] tools.restrict 执行告警:',
+              rErr?.message
+            );
+          }
+        }
+      }
+    };
+
     const setupFn = (agentCtx: any) => {
       if (typeof agentCtx?.on === 'function') {
         installModelSelection(agentCtx, selectionRef);
@@ -332,7 +441,12 @@ export class SessionAgentRunner {
       if (presets?.mount) {
         return presets
           .mount(agentCtx, QQ_PRESET_ID)
-          .then(() => undefined)
+          .then(() => {
+            if (!codingToolsEnabled) {
+              applyCodingToolsRestriction(agentCtx);
+            }
+            return undefined;
+          })
           .catch((err: any) => {
             this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
               '[SessionAgentRunner] mount preset qq-session failed, falling back:',
@@ -342,6 +456,9 @@ export class SessionAgentRunner {
               (this.ctx as any).napcatBridgeTools ||
               (this.ctx.root as any)?.napcatBridgeTools;
             provider?.registerTools?.(agentCtx);
+            if (!codingToolsEnabled) {
+              applyCodingToolsRestriction(agentCtx);
+            }
             return undefined;
           });
       }
@@ -349,6 +466,9 @@ export class SessionAgentRunner {
         (this.ctx as any).napcatBridgeTools ||
         (this.ctx.root as any)?.napcatBridgeTools;
       provider?.registerTools?.(agentCtx);
+      if (!codingToolsEnabled) {
+        applyCodingToolsRestriction(agentCtx);
+      }
       return undefined;
     };
 
@@ -467,6 +587,23 @@ export class SessionAgentRunner {
     }
 
     this.activeHandles.set(sessionId, handle);
+
+    // CHK-04: 全新会话初始化权限模式
+    if (!isResumed) {
+      const targetPermission = this.resolveSessionPermission(peer);
+      const permissionPresets: any = safeGetService(this.ctx, 'permissionPresets');
+      if (permissionPresets && typeof permissionPresets.set === 'function') {
+        try {
+          permissionPresets.set(handle.agent.session, targetPermission);
+        } catch (permErr: any) {
+          this.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
+            `[SessionAgentRunner] 设置会话 ${sessionId} 权限预设 (${targetPermission}) 异常:`,
+            permErr?.message
+          );
+        }
+      }
+    }
+
     if (isResumed) {
       this.markSessionPersisted(sessionId);
       this.clearPendingFirstTurn(sessionId);
@@ -482,9 +619,8 @@ export class SessionAgentRunner {
     this.updateSessionTitle(handle.agent.session, peer, sessionId);
 
     // 固化 agentPreset 投影至 session，确保冷重启恢复时绝不 fallback 至默认 coding 预设
-    const presets: any = (this.ctx as any).agentPresets || (this.ctx.root as any)?.agentPresets;
-    const sessionProjections: any =
-      (this.ctx as any).sessionProjections || (this.ctx.root as any)?.sessionProjections;
+    const presets: any = safeGetService(this.ctx, 'agentPresets');
+    const sessionProjections: any = safeGetService(this.ctx, 'sessionProjections');
     const currentPreset = sessionProjections?.stateOf?.(handle.agent.session, 'agentPreset');
     if (currentPreset !== QQ_PRESET_ID) {
       if (presets?.select && typeof presets.select === 'function') {

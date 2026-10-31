@@ -31,10 +31,14 @@ import {
   DEFAULT_SLANG_ENABLED,
   DEFAULT_SLANG_BUDGET_CHARS,
   DEFAULT_SLANG_STORAGE_PATH,
+  DEFAULT_SESSION_PERMISSION_PRIVATE,
+  DEFAULT_SESSION_PERMISSION_GROUP,
+  DEFAULT_CODING_TOOLS_PRIVATE,
+  DEFAULT_CODING_TOOLS_GROUP,
 } from '../constants/index.js';
 import type { BridgePluginConfig } from '../types/index.js';
 
-export const BridgeConfigSchema = z.object({
+export const BridgeConfigSchema: z<any> = z.object({
   ws_port: z.number().default(DEFAULT_WS_PORT).volatile().description('WebSocket 服务端监听端口 (NapCat 反向 WS 连接目标)'),
   ws_token: z.string().default('').role('secret').volatile().description('NapCat 连接鉴权 Token (留空不鉴权)'),
   bot_qq: z.string().default('').volatile().description('机器人自身 QQ 号 (用于自循环防护与识别锚点，留空则自动降级并在启动时告警)'),
@@ -65,6 +69,14 @@ export const BridgeConfigSchema = z.object({
   slang_enabled: z.boolean().default(DEFAULT_SLANG_ENABLED).volatile().description('控制新建会话是否装载黑话工具集与注入黑话上下文，对后续新会话生效'),
   slang_budget_chars: z.number().default(DEFAULT_SLANG_BUDGET_CHARS).volatile().description('黑话知识库字符预算上限 (默认 5000 字符)'),
   slang_storage_path: z.string().default(DEFAULT_SLANG_STORAGE_PATH).volatile().description('黑话 Markdown 文档保存路径 (默认 .dsh/napcat/slang/slang.md)'),
+  private_blacklist: z.array(z.object({ id: z.string(), remark: z.string().default('') })).default([]).volatile().description('私聊发言黑名单列表 (命中则不唤醒、不回复，管理员亦不例外)'),
+  group_blacklist: z.array(z.object({ id: z.string(), remark: z.string().default('') })).default([]).volatile().description('群聊发言黑名单列表 (命中则不唤醒、不回复，管理员亦不例外)'),
+  session_permission_private_default: z.union([z.const('read-only'), z.const('workspace-write'), z.const('danger-full-access')]).default(DEFAULT_SESSION_PERMISSION_PRIVATE).volatile().description('私聊新建会话默认权限模式 (默认 workspace-write)'),
+  session_permission_group_default: z.union([z.const('read-only'), z.const('workspace-write'), z.const('danger-full-access')]).default(DEFAULT_SESSION_PERMISSION_GROUP).volatile().description('群聊新建会话默认权限模式 (默认 read-only)'),
+  session_permission_overrides: z.array(z.object({ id: z.string(), type: z.union([z.const('user'), z.const('group')]), permission: z.union([z.const('read-only'), z.const('workspace-write'), z.const('danger-full-access')]), remark: z.string().default('') })).default([]).volatile().description('会话权限模式自定义覆盖例外列表'),
+  coding_tools_private_default: z.boolean().default(DEFAULT_CODING_TOOLS_PRIVATE).volatile().description('私聊新建会话默认是否装载 Coding 工具组 (默认 true)'),
+  coding_tools_group_default: z.boolean().default(DEFAULT_CODING_TOOLS_GROUP).volatile().description('群聊新建会话默认是否装载 Coding 工具组 (默认 false)'),
+  coding_tools_overrides: z.array(z.object({ id: z.string(), type: z.union([z.const('user'), z.const('group')]), enabled: z.boolean(), remark: z.string().default('') })).default([]).volatile().description('Coding 工具组自定义覆盖例外列表'),
 });
 
 export type { BridgePluginConfig };

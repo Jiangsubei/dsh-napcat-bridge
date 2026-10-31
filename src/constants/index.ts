@@ -59,3 +59,8 @@ export const DEFAULT_SLANG_ENABLED = true;
 export const DEFAULT_SLANG_BUDGET_CHARS = 5000;
 export const DEFAULT_SLANG_STORAGE_PATH = '.dsh/napcat/slang/slang.md';
 
+
+export const DEFAULT_SESSION_PERMISSION_PRIVATE = 'workspace-write';
+export const DEFAULT_SESSION_PERMISSION_GROUP = 'read-only';
+export const DEFAULT_CODING_TOOLS_PRIVATE = true;
+export const DEFAULT_CODING_TOOLS_GROUP = false;

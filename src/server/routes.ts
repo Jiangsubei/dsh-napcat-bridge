@@ -38,6 +38,10 @@ import {
   DEFAULT_SLANG_ENABLED,
   DEFAULT_SLANG_BUDGET_CHARS,
   DEFAULT_SLANG_STORAGE_PATH,
+  DEFAULT_SESSION_PERMISSION_PRIVATE,
+  DEFAULT_SESSION_PERMISSION_GROUP,
+  DEFAULT_CODING_TOOLS_PRIVATE,
+  DEFAULT_CODING_TOOLS_GROUP,
   SETTINGS_NAMESPACE,
 } from '../constants/index.js';
 
@@ -74,6 +78,14 @@ export const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   slang_enabled: DEFAULT_SLANG_ENABLED,
   slang_budget_chars: DEFAULT_SLANG_BUDGET_CHARS,
   slang_storage_path: DEFAULT_SLANG_STORAGE_PATH,
+  private_blacklist: [],
+  group_blacklist: [],
+  session_permission_private_default: DEFAULT_SESSION_PERMISSION_PRIVATE,
+  session_permission_group_default: DEFAULT_SESSION_PERMISSION_GROUP,
+  session_permission_overrides: [],
+  coding_tools_private_default: DEFAULT_CODING_TOOLS_PRIVATE,
+  coding_tools_group_default: DEFAULT_CODING_TOOLS_GROUP,
+  coding_tools_overrides: [],
 };
 
 export function sendJson(res: ServerResponse, status: number, data: unknown): void {

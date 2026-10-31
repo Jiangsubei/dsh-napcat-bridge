@@ -68,6 +68,8 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toContain('表情包');
       expect(html).toContain('id="napcat-tab-slang"');
       expect(html).toContain('黑话学习');
+      expect(html).toContain('id="napcat-tab-security"');
+      expect(html).toContain('权限与安全');
 
       // 3. 验证 SETTINGS_TABS 常量定义严格匹配 (已下线 reply 回复行为)
       expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
@@ -77,8 +79,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
         'memory',
         'face',
         'slang',
+        'security',
       ]);
-      expect(SETTINGS_TABS).toHaveLength(6);
+      expect(SETTINGS_TABS).toHaveLength(7);
       expect(html).not.toContain('id="napcat-tab-reply"');
       expect(html).not.toContain('napcat-tabpanel-reply');
 

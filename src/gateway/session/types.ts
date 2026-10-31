@@ -50,6 +50,9 @@ export interface OutboundBridgeLike {
   trackPendingMessage?(messageId: string, peer: string, context: any): void;
 }
 
+import type { BridgePluginConfig } from '../../types/index.js';
+
 export interface SessionManagerOptions {
   retryDelays?: number[];
+  configGetter?: () => BridgePluginConfig;
 }
