@@ -104,6 +104,7 @@ describe('契约测试: 入站图片落盘真实装配闭环 (Inbound Image Asse
   });
 
   afterEach(async () => {
+    delete process.env.NAPCAT_QQ_DATA_DIR;
     if (client) client.terminate();
     for (const s of servers) await new Promise<void>((r) => s.close(() => r())).catch(() => {});
     if (booted) await booted.dispose().catch(() => {});
@@ -146,5 +147,79 @@ describe('契约测试: 入站图片落盘真实装配闭环 (Inbound Image Asse
     expect(row.local_path).toBeNull();
     expect(row.content).toBe('[图片:0123456789ABCDEF0123456789ABCDEF.png]');
     expect(actions).toEqual(expect.arrayContaining(['get_image', 'get_file', 'get_msg']));
+  });
+
+  it('ASM-3: 同机 NTQQ 缓存直读装配：消息命中本地缓存时，local_path 正确落盘且完全不调用 NapCat Action', async () => {
+    const ntqqRoot = path.join(tmpHome, 'mock-ntqq-data');
+    const oriDir = path.join(ntqqRoot, BOT_QQ, 'nt_qq', 'nt_data', 'Pic', '2026-10', 'Ori');
+    await fsp.mkdir(oriDir, { recursive: true });
+    const cached = path.join(oriDir, 'DIRECTHIT01020304DIRECTHIT010203.jpg');
+    await fsp.writeFile(cached, PNG_BYTES);
+
+    process.env.NAPCAT_QQ_DATA_DIR = ntqqRoot;
+
+    reply = () => ({ status: 'failed', data: null, wording: 'should not be called' });
+
+    client.send(JSON.stringify(inboundImageMessage('DIRECTHIT01020304DIRECTHIT010203.image', undefined, 61003)));
+
+    const row = await waitForRow('DIRECTHIT01020304DIRECTHIT010203.image');
+    expect(row.local_path).toBeTruthy();
+    expect(String(row.local_path).startsWith(path.join(tmpHome, 'napcat', 'downloads', 'image', `group_${GROUP_ID}`))).toBe(true);
+    expect(fs.existsSync(row.local_path)).toBe(true);
+    expect(actions).not.toContain('get_image');
+    expect(actions).not.toContain('get_file');
+  });
+
+  it('ASM-4: 多图并发解析装配：包含多张图片的入站消息，通过 Promise.all 并发解析且全部成功落盘', async () => {
+    const cached1 = path.join(tmpHome, 'qq-cache', 'multi1.png');
+    const cached2 = path.join(tmpHome, 'qq-cache', 'multi2.png');
+    await fsp.mkdir(path.dirname(cached1), { recursive: true });
+    await fsp.writeFile(cached1, PNG_BYTES);
+    await fsp.writeFile(cached2, PNG_BYTES);
+
+    reply = (action, frame) => {
+      if (action === 'get_image') {
+        const fileParam = String(frame.params?.file || '');
+        if (fileParam.includes('MULTI_A')) {
+          return { status: 'ok', data: { file: cached1, file_size: String(PNG_BYTES.length) } };
+        }
+        if (fileParam.includes('MULTI_B')) {
+          return { status: 'ok', data: { file: cached2, file_size: String(PNG_BYTES.length) } };
+        }
+      }
+      return { status: 'failed', data: null, wording: 'unexpected action' };
+    };
+
+    const multiMsg = {
+      post_type: 'message',
+      message_type: 'group',
+      sub_type: 'normal',
+      message_id: 61004,
+      user_id: MEMBER_QQ,
+      group_id: GROUP_ID,
+      sender: { user_id: MEMBER_QQ, nickname: '测试成员' },
+      message: [
+        { type: 'image', data: { file: 'MULTI_A.png', sub_type: 0 } },
+        { type: 'image', data: { file: 'MULTI_B.png', sub_type: 0 } },
+      ],
+      raw_message: '',
+      time: Math.floor(Date.now() / 1000),
+      self_id: BOT_QQ,
+    };
+
+    client.send(JSON.stringify(multiMsg));
+
+    const row = await waitForRow('MULTI_A.png');
+    expect(row.local_path).toBeTruthy();
+    expect(fs.existsSync(row.local_path)).toBe(true);
+
+    const parsedRaw = JSON.parse(row.raw);
+    expect(parsedRaw).toHaveLength(2);
+    expect(parsedRaw[0].data.local_path).toBeTruthy();
+    expect(fs.existsSync(parsedRaw[0].data.local_path)).toBe(true);
+    expect(parsedRaw[1].data.local_path).toBeTruthy();
+    expect(fs.existsSync(parsedRaw[1].data.local_path)).toBe(true);
+    expect(row.content).toContain(parsedRaw[0].data.local_path);
+    expect(row.content).toContain(parsedRaw[1].data.local_path);
   });
 });

@@ -53,7 +53,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
 
       // 2. 验证 6 个 Tab 按钮全部渲染
       expect(html).toContain('id="napcat-tab-connection"');
-      expect(html).toContain('连接身份');
+      expect(html).toContain('连接设置');
 
       expect(html).toContain('id="napcat-tab-persona"');
       expect(html).toContain('人格与准则');
@@ -100,7 +100,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
     });
   });
 
-  describe('2. 默认展示 Tab 1 (连接身份) 契约', () => {
+  describe('2. 默认展示 Tab 1 (连接设置) 契约', () => {
     it('默认 activeTab 为 connection，其 Tab 按钮高亮且对应 panel 可见', () => {
       const html = renderCard();
 
@@ -127,7 +127,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(html).toMatch(/id="napcat-tabpanel-slang"[^>]*hidden/);
     });
 
-    it('Tab 1 (连接身份) 包含全部 6 个预定义配置项', () => {
+    it('Tab 1 (连接设置) 包含全部 6 个预定义配置项', () => {
       const html = renderCard();
 
       // 提取 connection panel 内容

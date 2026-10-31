@@ -53,12 +53,18 @@ export interface ResolveInboundImageInput {
   localPath?: string;
   /** 段内消息 ID（get_msg 刷新直链用） */
   msgId?: number;
+  emojiPackageId?: number | string;
+  emojiId?: string;
+  /** NapCat / NTQQ 数据存储根目录 (同机部署直读缓存) */
+  dataDir?: string;
+  /** Bot 自身 QQ 号 (用于精准匹配 NTQQ 目录) */
+  botQQ?: string;
   gateway?: InboundImageGateway | null;
   mediaManager: MediaStorageManager;
   logger?: InboundImageLogger;
 }
 
-export type InboundImageVia = 'cache' | 'segment_local_path' | 'get_image' | 'get_file' | 'url' | 'get_msg_url';
+export type InboundImageVia = 'cache' | 'nt_cache' | 'segment_local_path' | 'get_image' | 'get_file' | 'url' | 'get_msg_url';
 
 export interface InboundImageAttempt {
   via: InboundImageVia;
@@ -87,6 +93,289 @@ function inferUrlExt(str?: string): string | undefined {
 
 function isHttpUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value.trim());
+}
+
+let learnedNtqqDir: string | null = null;
+
+export function setLearnedNtqqDir(dir: string | null): void {
+  learnedNtqqDir = dir;
+}
+
+export function getLearnedNtqqDir(): string | null {
+  return learnedNtqqDir;
+}
+
+export function extractNtqqRoot(p: string): string | null {
+  if (!p || typeof p !== 'string') return null;
+  const normalized = path.normalize(p);
+  const sep = path.sep;
+  const idx = normalized.toLowerCase().indexOf(`${sep}nt_qq`);
+  if (idx !== -1) {
+    const root = normalized.slice(0, idx);
+    const parent = path.dirname(root);
+    if (/^\d+$/.test(path.basename(root))) {
+      return parent;
+    }
+    return root;
+  }
+  return null;
+}
+
+export function learnNtqqDirFromPath(filePath: string): void {
+  const root = extractNtqqRoot(filePath);
+  if (root) {
+    try {
+      if (fs.existsSync(root)) {
+        learnedNtqqDir = root;
+      }
+    } catch {}
+  }
+}
+
+export function detectNtqqUserDataDir(configuredDir?: string): string | null {
+  if (configuredDir && typeof configuredDir === 'string' && configuredDir.trim()) {
+    const trimmed = path.normalize(configuredDir.trim());
+    try {
+      if (fs.existsSync(trimmed)) return trimmed;
+    } catch {}
+  }
+
+  if (learnedNtqqDir) {
+    try {
+      if (fs.existsSync(learnedNtqqDir)) return learnedNtqqDir;
+    } catch {}
+  }
+
+  if (process.env.NAPCAT_QQ_DATA_DIR) {
+    const envDir = path.normalize(process.env.NAPCAT_QQ_DATA_DIR.trim());
+    try {
+      if (fs.existsSync(envDir)) return envDir;
+    } catch {}
+  }
+
+  // 在测试环境下（VITEST 存在）默认不扫描宿主机系统私有目录，保障单测环境纯净与可重现；
+  // 生产环境或显式指定 NAPCAT_PROBE_SYSTEM 时探测系统全局配置。
+  const allowSystemProbe = !process.env.VITEST || process.env.NAPCAT_PROBE_SYSTEM === 'true';
+  if (!allowSystemProbe) {
+    return null;
+  }
+
+  if (process.platform === 'win32') {
+    const iniPath = 'C:\\Users\\Public\\Documents\\Tencent\\QQ\\UserDataInfo.ini';
+    try {
+      if (fs.existsSync(iniPath)) {
+        const content = fs.readFileSync(iniPath, 'utf8');
+        const match = /UserDataSavePath=(.+)/i.exec(content);
+        if (match && match[1]) {
+          const p = path.normalize(match[1].trim());
+          if (fs.existsSync(p)) return p;
+        }
+      }
+    } catch {}
+
+    const defaultWinDocs = path.join(process.env.USERPROFILE || 'C:\\Users\\Default', 'Documents', 'Tencent Files');
+    try {
+      if (fs.existsSync(defaultWinDocs)) return defaultWinDocs;
+    } catch {}
+  }
+
+  if (process.platform === 'linux') {
+    const home = process.env.HOME || '/root';
+    const linuxNtqq = path.join(home, '.config', 'QQ', 'nt_qq');
+    try {
+      if (fs.existsSync(linuxNtqq)) return linuxNtqq;
+    } catch {}
+    const linuxDocs = path.join(home, 'Documents', 'Tencent Files');
+    try {
+      if (fs.existsSync(linuxDocs)) return linuxDocs;
+    } catch {}
+  }
+
+  return null;
+}
+
+function collectNtDataDirs(rootDir: string, botQQ?: string): string[] {
+  if (!rootDir) return [];
+  const results: string[] = [];
+  const normalizedRoot = path.normalize(rootDir);
+
+  try {
+    if (!fs.existsSync(normalizedRoot)) return [];
+  } catch {
+    return [];
+  }
+
+  // 1. rootDir 自身就是 nt_data
+  if ((fs.existsSync(path.join(normalizedRoot, 'Pic')) || fs.existsSync(path.join(normalizedRoot, 'Emoji')))) {
+    results.push(normalizedRoot);
+    return results;
+  }
+  // 2. rootDir/nt_data
+  const subNtData = path.join(normalizedRoot, 'nt_data');
+  if ((fs.existsSync(path.join(subNtData, 'Pic')) || fs.existsSync(path.join(subNtData, 'Emoji')))) {
+    results.push(subNtData);
+    return results;
+  }
+  // 3. rootDir/nt_qq/nt_data
+  const subNtQqData = path.join(normalizedRoot, 'nt_qq', 'nt_data');
+  if ((fs.existsSync(path.join(subNtQqData, 'Pic')) || fs.existsSync(path.join(subNtQqData, 'Emoji')))) {
+    results.push(subNtQqData);
+    return results;
+  }
+
+  // 4. botQQ 子目录
+  if (botQQ) {
+    const botData = path.join(normalizedRoot, String(botQQ), 'nt_qq', 'nt_data');
+    if ((fs.existsSync(path.join(botData, 'Pic')) || fs.existsSync(path.join(botData, 'Emoji')))) {
+      results.push(botData);
+      return results;
+    }
+  }
+
+  // 5. 扫描所有子目录
+  try {
+    const entries = fs.readdirSync(normalizedRoot, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const sub = path.join(normalizedRoot, ent.name);
+      const candidate1 = path.join(sub, 'nt_qq', 'nt_data');
+      if ((fs.existsSync(path.join(candidate1, 'Pic')) || fs.existsSync(path.join(candidate1, 'Emoji')))) {
+        results.push(candidate1);
+        continue;
+      }
+      const candidate2 = path.join(sub, 'nt_data');
+      if ((fs.existsSync(path.join(candidate2, 'Pic')) || fs.existsSync(path.join(candidate2, 'Emoji')))) {
+        results.push(candidate2);
+      }
+    }
+  } catch {}
+
+  return results;
+}
+
+function generateCandidateFilenames(rawFile: string): string[] {
+  if (!rawFile) return [];
+  const clean = path.basename(rawFile.trim());
+  const baseName = clean.replace(/\.[a-zA-Z0-9]+$/, '');
+  const strippedBase = baseName.replace(/_[0-9]+$/, '');
+  const extensions = ['', '.jpg', '.png', '.gif', '.webp', '.jpeg', '.image'];
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (name: string) => {
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      candidates.push(name);
+    }
+  };
+
+  add(clean);
+  for (const b of [baseName, strippedBase, `${strippedBase}_0`, `${baseName}_0`]) {
+    for (const ext of extensions) {
+      add(b + ext);
+    }
+  }
+  return candidates;
+}
+
+function getRecentMonthFolders(catDir: string): string[] {
+  try {
+    if (!fs.existsSync(catDir)) return [];
+    const entries = fs.readdirSync(catDir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory() && /^\d{4}-\d{2}$/.test(e.name))
+      .map((e) => e.name)
+      .sort()
+      .reverse()
+      .slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
+export interface FindNtqqCachedImageOptions {
+  dataDir?: string;
+  botQQ?: string;
+  file: string;
+  emojiPackageId?: number | string;
+  emojiId?: string;
+  isSticker?: boolean;
+}
+
+export function findNtqqCachedImage(options: FindNtqqCachedImageOptions): string | null {
+  const { dataDir, botQQ, file, emojiPackageId, emojiId, isSticker } = options;
+  if (!file || typeof file !== 'string') return null;
+
+  const rootDir = detectNtqqUserDataDir(dataDir);
+  if (!rootDir) return null;
+
+  const ntDataDirs = collectNtDataDirs(rootDir, botQQ);
+  if (ntDataDirs.length === 0) return null;
+
+  // 1. 商城官方表情探查 (Emoji/marketface/<pkg>/<id>)
+  if (emojiPackageId) {
+    const pkgStr = String(emojiPackageId);
+    const emojiCandidates: string[] = [];
+    if (emojiId) emojiCandidates.push(emojiId);
+    const clean = path.basename(file.trim()).replace(/\.[a-zA-Z0-9]+$/, '');
+    if (clean && clean !== emojiId) emojiCandidates.push(clean);
+
+    for (const ntData of ntDataDirs) {
+      const marketDir = path.join(ntData, 'Emoji', 'marketface', pkgStr);
+      for (const cand of emojiCandidates) {
+        for (const ext of ['', '.gif', '.png', '.jpg', '_thumb']) {
+          const target = path.join(marketDir, cand + ext);
+          try {
+            if (fs.existsSync(target)) {
+              const stat = fs.statSync(target);
+              if (stat.isFile() && stat.size > 0) return target;
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  // 2. 常规图片与表情探查 (Pic / Emoji/emoji-recv / Emoji/emoji-custom)
+  const candidates = generateCandidateFilenames(file);
+  if (candidates.length === 0) return null;
+
+  for (const ntData of ntDataDirs) {
+    const catDirs = isSticker
+      ? [
+          path.join(ntData, 'Emoji', 'emoji-recv'),
+          path.join(ntData, 'Emoji', 'emoji-custom'),
+          path.join(ntData, 'Pic'),
+        ]
+      : [
+          path.join(ntData, 'Pic'),
+          path.join(ntData, 'Emoji', 'emoji-recv'),
+          path.join(ntData, 'Emoji', 'emoji-custom'),
+        ];
+
+    for (const catDir of catDirs) {
+      const months = getRecentMonthFolders(catDir);
+      for (const m of months) {
+        const subDirs = ['Ori', 'OriTemp', 'Thumb', 'ThumbTemp'];
+        for (const sub of subDirs) {
+          const folder = path.join(catDir, m, sub);
+          for (const cand of candidates) {
+            const target = path.join(folder, cand);
+            try {
+              if (fs.existsSync(target)) {
+                const stat = fs.statSync(target);
+                if (stat.isFile() && stat.size > 0) {
+                  return target;
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -219,7 +508,10 @@ export async function resolveInboundImage(input: ResolveInboundImageInput): Prom
     try {
       const res = await call();
       const localPath = res?.status === 'ok' ? extractNapcatLocalPath(res) : null;
-      if (localPath) return localPath;
+      if (localPath) {
+        learnNtqqDirFromPath(localPath);
+        return localPath;
+      }
       record(
         via,
         false,
@@ -248,6 +540,20 @@ export async function resolveInboundImage(input: ResolveInboundImageInput): Prom
     }
   }
 
+  // 0.2 同机 NTQQ 本地缓存直读（避免进入 NapCat 挂起事件监听 / Action 延迟）
+  const cachedNtFile = findNtqqCachedImage({
+    dataDir: input.dataDir,
+    botQQ: input.botQQ,
+    file: segmentFile || saveFileId || '',
+    emojiPackageId: input.emojiPackageId,
+    emojiId: input.emojiId,
+    isSticker,
+  });
+  if (cachedNtFile) {
+    const done = await saveSource('nt_cache', cachedNtFile, `nt_cache:${path.basename(cachedNtFile)}`);
+    if (done) return done;
+  }
+
   // 0.5 段内已带 local_path：NapCat 已经给过本机路径，直接复制，不再重复调用 get_image。
   // 若该路径当前不可读（QQ 清缓存 / 跨机器路径），也不要再问 NapCat —— get_image 只会返回同一路径，
   // 反而会把入站消息链路卡在一次 15s Action 超时上；此处快速失败，调用方保持 content 既有路径。
@@ -264,34 +570,47 @@ export async function resolveInboundImage(input: ResolveInboundImageInput): Prom
     return { ok: false, attempts, error: detail || 'segment.local_path 不可读' };
   }
 
-  // 1. get_image({file}) —— NapCat 本机路径（今天 19/19 命中）
-  if (gateway?.getImage && segmentFile) {
+  // 判断是否为商城官方表情 / 静态公开 CDN（NapCat 对此类必无事件响应且必超时，直接快速走 HTTP 直链）
+  const isMarketEmoji = Boolean(input.emojiPackageId) || (legacyUrl && /gxh\.vip\.qq\.com/i.test(legacyUrl));
+  if (isMarketEmoji) {
+    if (legacyUrl) {
+      const done = await saveSource('url', legacyUrl, 'segment.url(market_emoji)');
+      if (done) return done;
+    } else {
+      record('url', false, 'no_http_url');
+    }
+  }
+
+  // 1. get_image({file}) —— NapCat 本机路径
+  if (!isMarketEmoji && gateway?.getImage && segmentFile) {
     const localPath = await probeNapcatPath('get_image', () => gateway.getImage!(segmentFile));
     if (localPath) {
       const done = await saveSource('get_image', localPath, `get_image:${segmentFile}`);
       if (done) return done;
     }
-  } else {
+  } else if (!isMarketEmoji) {
     record('get_image', false, 'api_unavailable_or_no_file');
   }
 
   // 2. get_file({file_id}) —— 与 get_image 同源，兼容不同 NapCat 版本
-  if (gateway?.getFile && saveFileId) {
+  if (!isMarketEmoji && gateway?.getFile && saveFileId) {
     const localPath = await probeNapcatPath('get_file', () => gateway.getFile!(saveFileId));
     if (localPath) {
       const done = await saveSource('get_file', localPath, `get_file:${saveFileId}`);
       if (done) return done;
     }
-  } else {
+  } else if (!isMarketEmoji) {
     record('get_file', false, 'api_unavailable_or_no_file_id');
   }
 
   // 3. 段内直链（multimedia.nt.qq.com.cn / gchatpic_new 这类仍可用的 host 靠这段兜住）
-  if (legacyUrl) {
-    const done = await saveSource('url', legacyUrl, 'segment.url');
-    if (done) return done;
-  } else {
-    record('url', false, 'no_http_url');
+  if (!isMarketEmoji) {
+    if (legacyUrl) {
+      const done = await saveSource('url', legacyUrl, 'segment.url');
+      if (done) return done;
+    } else {
+      record('url', false, 'no_http_url');
+    }
   }
 
   // 4. get_msg 刷新直链（最后兜底，同时验证新签发 rkey 是否可用）

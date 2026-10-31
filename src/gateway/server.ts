@@ -325,10 +325,10 @@ export class NapCatGatewayServer {
    * NapCat 源码实证 (GetImage.ts): GetImagePayloadSchema {file}，返回 data.{file, url, file_size, file_name}，
    * data.file 为 NapCat 本机原图路径 —— 入站图片四段式取图的首选段（QQ 直链对第三方进程不可用）。
    */
-  async getImage(file: string): Promise<OneBotActionResponse> {
+  async getImage(file: string, timeoutMs = 5000): Promise<OneBotActionResponse> {
     return this.sendAction('get_image', {
       file,
-    });
+    }, timeoutMs);
   }
 
   async getForwardMsg(forwardId: string): Promise<OneBotActionResponse> {
@@ -364,10 +364,10 @@ export class NapCatGatewayServer {
    * 返回 data.{file, url, file_size, file_name}，data.file 为 NapCat 本机本地路径 ——
    * 作为私聊文件入站落盘「回退」路径（packet 不可用时仍可靠，任务包 §3.1）。
    */
-  async getFile(fileId: string): Promise<OneBotActionResponse> {
+  async getFile(fileId: string, timeoutMs = 5000): Promise<OneBotActionResponse> {
     return this.sendAction('get_file', {
       file_id: fileId,
-    });
+    }, timeoutMs);
   }
 
   /**

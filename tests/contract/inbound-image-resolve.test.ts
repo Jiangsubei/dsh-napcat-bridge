@@ -6,7 +6,7 @@ import { promises as fsp } from 'node:fs';
 import * as http from 'node:http';
 import { MediaStorageManager } from '../../src/storage/media.js';
 import { MessageDatabase } from '../../src/storage/database.js';
-import { resolveInboundImage } from '../../src/gateway/inbound-media.js';
+import { resolveInboundImage, setLearnedNtqqDir, getLearnedNtqqDir, findNtqqCachedImage } from '../../src/gateway/inbound-media.js';
 
 /**
  * 契约测试: 入站图片四段式解析 (Inbound Image Resolve)
@@ -64,6 +64,7 @@ describe('契约测试: 入站图片四段式解析 (Inbound Image Resolve)', ()
   }
 
   beforeEach(async () => {
+    setLearnedNtqqDir(null);
     tmpHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'dsh-napcat-inbound-image-'));
     db = new MessageDatabase(path.join(tmpHome, 'messages.sqlite'));
     manager = new MediaStorageManager({ dshHome: tmpHome, downloadDir: 'downloads', db });
@@ -71,6 +72,7 @@ describe('契约测试: 入站图片四段式解析 (Inbound Image Resolve)', ()
   });
 
   afterEach(async () => {
+    setLearnedNtqqDir(null);
     for (const s of servers) await new Promise<void>((r) => s.close(() => r())).catch(() => {});
     db.close();
     await fsp.rm(tmpHome, { recursive: true, force: true }).catch(() => {});
@@ -300,5 +302,173 @@ describe('契约测试: 入站图片四段式解析 (Inbound Image Resolve)', ()
 
     expect(res.ok).toBe(true);
     expect(res.sizeMismatch).toBe(true);
+  });
+
+  it('DC-8: 同机 NTQQ 缓存直读命中 → 直接落盘且绝不调用 NapCat WebSocket 取图', async () => {
+    const ntqqRoot = path.join(tmpHome, 'mock-ntqq-data');
+    const oriDir = path.join(ntqqRoot, '1000000001', 'nt_qq', 'nt_data', 'Pic', '2026-10', 'Ori');
+    await fsp.mkdir(oriDir, { recursive: true });
+    const cachedFile = path.join(oriDir, 'CAFEBABE01020304CAFEBABE01020304.jpg');
+    await fsp.writeFile(cachedFile, PNG_BYTES);
+
+    let getImageCalled = 0;
+    let getFileCalled = 0;
+    const getImage = async () => {
+      getImageCalled++;
+      return ok({ file: 'never-called' });
+    };
+    const getFile = async () => {
+      getFileCalled++;
+      return ok({ file: 'never-called' });
+    };
+
+    const res = await resolveInboundImage({
+      peer: PEER,
+      isSticker: false,
+      file: 'CAFEBABE01020304CAFEBABE01020304.image',
+      fileId: 'CAFEBABE01020304CAFEBABE01020304',
+      dataDir: ntqqRoot,
+      botQQ: '1000000001',
+      gateway: { getImage, getFile },
+      mediaManager: manager,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.via).toBe('nt_cache');
+    expect(getImageCalled).toBe(0);
+    expect(getFileCalled).toBe(0);
+    expect(res.localPath).toBeTruthy();
+    expect(res.localPath!).not.toBe(cachedFile);
+    expect(res.localPath!.startsWith(path.join(tmpHome, 'downloads', 'image', PEER))).toBe(true);
+    expect(fs.existsSync(res.localPath!)).toBe(true);
+  });
+
+  it('DC-9: 动态学习 NTQQ 路径契约：首次 getImage 解析后自动记住 NTQQ 根路径，后续图片直读缓存', async () => {
+    const ntqqRoot = path.join(tmpHome, 'dynamic-ntqq-files');
+    const oriDir = path.join(ntqqRoot, '1000000001', 'nt_qq', 'nt_data', 'Pic', '2026-10', 'Ori');
+    await fsp.mkdir(oriDir, { recursive: true });
+
+    const firstImageFile = path.join(oriDir, 'FIRST00000000000FIRST00000000000.png');
+    const secondImageFile = path.join(oriDir, 'SECOND0000000000SECOND0000000000.png');
+    await fsp.writeFile(firstImageFile, PNG_BYTES);
+    await fsp.writeFile(secondImageFile, PNG_BYTES);
+
+    let getImageCalls = 0;
+    const getImage = async (f: string) => {
+      getImageCalls++;
+      if (f.includes('FIRST')) {
+        return ok({ file: firstImageFile, file_size: String(PNG_BYTES.length) });
+      }
+      return ok({ file: secondImageFile, file_size: String(PNG_BYTES.length) });
+    };
+
+    expect(getLearnedNtqqDir()).toBeNull();
+    const res1 = await resolveInboundImage({
+      peer: PEER,
+      isSticker: false,
+      file: 'FIRST00000000000FIRST00000000000.png',
+      gateway: { getImage },
+      mediaManager: manager,
+    });
+
+    expect(res1.ok).toBe(true);
+    expect(res1.via).toBe('get_image');
+    expect(getImageCalls).toBe(1);
+    expect(getLearnedNtqqDir()).toBe(ntqqRoot);
+
+    const res2 = await resolveInboundImage({
+      peer: PEER,
+      isSticker: false,
+      file: 'SECOND0000000000SECOND0000000000.image',
+      gateway: { getImage },
+      mediaManager: manager,
+    });
+
+    expect(res2.ok).toBe(true);
+    expect(res2.via).toBe('nt_cache');
+    expect(getImageCalls).toBe(1);
+  });
+
+  it('DC-10: 找不到本地缓存时正常回退到 NapCat 并在超时/失败时完整记录 attempts', async () => {
+    let getImageCalls = 0;
+    const getImage = async () => {
+      getImageCalls++;
+      throw new Error('Action timeout after 10000ms');
+    };
+
+    const res = await resolveInboundImage({
+      peer: PEER,
+      isSticker: false,
+      file: 'NOT_FOUND_ANYWHERE.png',
+      gateway: { getImage },
+      mediaManager: manager,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(getImageCalls).toBe(1);
+    expect(res.attempts.some((a) => a.via === 'get_image' && !a.ok && a.error?.includes('timeout'))).toBe(true);
+  });
+
+  it('DC-11: 商城官方表情 (Emoji/marketface) 本地缓存存在时瞬时直读落盘', async () => {
+    const ntqqRoot = path.join(tmpHome, 'marketface-ntqq-data');
+    const marketDir = path.join(ntqqRoot, '1000000001', 'nt_qq', 'nt_data', 'Emoji', 'marketface', '235605');
+    await fsp.mkdir(marketDir, { recursive: true });
+    const cachedFile = path.join(marketDir, 'b06b0b05e2c8c0e01733ceddbd3542cd');
+    await fsp.writeFile(cachedFile, GIF_BYTES);
+
+    let getImageCalled = 0;
+    const getImage = async () => {
+      getImageCalled++;
+      return ok({ file: 'never-called' });
+    };
+
+    const res = await resolveInboundImage({
+      peer: PEER,
+      isSticker: true,
+      file: 'b0-b06b0b05e2c8c0e01733ceddbd3542cd.gif',
+      emojiPackageId: 235605,
+      emojiId: 'b06b0b05e2c8c0e01733ceddbd3542cd',
+      dataDir: ntqqRoot,
+      botQQ: '1000000001',
+      gateway: { getImage },
+      mediaManager: manager,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.via).toBe('nt_cache');
+    expect(getImageCalled).toBe(0);
+    expect(fs.existsSync(res.localPath!)).toBe(true);
+  });
+
+  it('DC-12: 商城官方表情未命中本地缓存时，直接走 HTTP 直链且坚决不调用 NapCat 避免超时挂起', async () => {
+    const url = await startLoopback(GIF_BYTES);
+    let getImageCalled = 0;
+    let getFileCalled = 0;
+    const getImage = async () => {
+      getImageCalled++;
+      throw new Error('Should not be called for market emoji');
+    };
+    const getFile = async () => {
+      getFileCalled++;
+      throw new Error('Should not be called for market emoji');
+    };
+
+    const res = await resolveInboundImage({
+      peer: PEER,
+      isSticker: true,
+      file: 'b0-b06b0b05e2c8c0e01733ceddbd3542cd.gif',
+      emojiPackageId: 235605,
+      emojiId: 'b06b0b05e2c8c0e01733ceddbd3542cd',
+      url,
+      gateway: { getImage, getFile },
+      mediaManager: manager,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.via).toBe('url');
+    expect(getImageCalled).toBe(0);
+    expect(getFileCalled).toBe(0);
+    expect(res.attempts.map((a) => a.via)).toEqual(['url']);
+    expect(fs.existsSync(res.localPath!)).toBe(true);
   });
 });

@@ -76,7 +76,7 @@ export interface TabItem {
 }
 
 export const SETTINGS_TABS: readonly TabItem[] = [
-  { id: 'connection', label: '连接身份' },
+  { id: 'connection', label: '连接设置' },
   { id: 'persona', label: '人格与准则' },
   { id: 'proactive', label: '回复配置' },
   { id: 'security', label: '权限与安全' },

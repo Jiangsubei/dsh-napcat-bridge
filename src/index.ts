@@ -543,6 +543,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     let fileId: string | null = null;
     let busid: number | null = null;
 
+    const imageSegs: Array<{
+      seg: any;
+      data: any;
+      isSticker: boolean;
+    }> = [];
+
     // 1. 即时预处理并下载图片/表情包落盘
     if (Array.isArray(event.message)) {
       for (const seg of event.message) {
@@ -550,41 +556,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         const data = (seg.data || {}) as any;
 
         if (seg.type === 'image') {
-          dominantType = 'image';
-          fileId = data.file || data.file_id || null;
           const isSticker = data.sub_type === 1 || Boolean(data.emoji_package_id);
-          if (isSticker) dominantType = 'sticker';
-
-          // 入站图片四段式取图（devlog/修复方案-媒体直链失效与回退落盘_261030.md）：
-          //   QQ 段内 gchat.qpic.cn/download?rkey=… 直链对第三方进程 100% 返回 -5503007，
-          //   NapCat get_image / get_file 却能稳定拿到本机原图 → 本地优先，直链与 get_msg 兜底。
-          //   任一路拿到的字节都复制进 downloads/<type>/<peer>/，绝不引用 NapCat 缓存路径。
-          if (mediaManager) {
-            const resolved = await resolveInboundImage({
-              peer,
-              isSticker,
-              url: data.url,
-              file: data.file,
-              fileId: data.file_id,
-              declaredSize: data.file_size,
-              localPath: data.local_path,
-              msgId: Number(event.message_id) || undefined,
-              gateway: server,
-              mediaManager,
-              logger,
-            });
-            if (resolved.ok && resolved.localPath) {
-              data.local_path = resolved.localPath;
-              if (!primaryLocalPath) {
-                primaryLocalPath = resolved.localPath;
-                primaryFingerprint = resolved.fingerprint ?? null;
-              }
-            } else {
-              logger.warn?.(
-                `[Plugin] 入站图片落盘失败 (peer: ${peer}, msg_id: ${event.message_id}, file: ${data.file || data.file_id || '?'}): ${resolved.error || '未知原因'}`
-              );
-            }
+          if (dominantType === 'text') {
+            dominantType = isSticker ? 'sticker' : 'image';
           }
+          if (!fileId) {
+            fileId = data.file || data.file_id || null;
+          }
+          imageSegs.push({ seg, data, isSticker });
         } else if (seg.type === 'file') {
           dominantType = isGroup ? 'group_file' : 'file';
           fileId = data.file_id || data.file || null;
@@ -637,6 +616,46 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           dominantType = 'reply';
         } else if (seg.type === 'at' && dominantType === 'text') {
           dominantType = 'at';
+        }
+      }
+
+      // 多图异步并发解析落盘 (Promise.all 消除串行阻塞与十余秒超时累加)
+      if (mediaManager && imageSegs.length > 0) {
+        const resolvedList = await Promise.all(
+          imageSegs.map(({ data, isSticker }) =>
+            resolveInboundImage({
+              peer,
+              isSticker,
+              url: data.url,
+              file: data.file,
+              fileId: data.file_id,
+              declaredSize: data.file_size,
+              localPath: data.local_path,
+              msgId: Number(event.message_id) || undefined,
+              emojiPackageId: data.emoji_package_id,
+              emojiId: data.emoji_id,
+              botQQ: config?.bot_qq,
+              gateway: server,
+              mediaManager,
+              logger,
+            })
+          )
+        );
+
+        for (let i = 0; i < imageSegs.length; i++) {
+          const resolved = resolvedList[i];
+          const { data } = imageSegs[i];
+          if (resolved.ok && resolved.localPath) {
+            data.local_path = resolved.localPath;
+            if (!primaryLocalPath) {
+              primaryLocalPath = resolved.localPath;
+              primaryFingerprint = resolved.fingerprint ?? null;
+            }
+          } else {
+            logger.warn?.(
+              `[Plugin] 入站图片落盘失败 (peer: ${peer}, msg_id: ${event.message_id}, file: ${data.file || data.file_id || '?'}): ${resolved.error || '未知原因'}`
+            );
+          }
         }
       }
     }
