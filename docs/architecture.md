@@ -89,6 +89,8 @@ NapCatGatewayServer 接收并解析 JSON
             │
             ├─► 文本与卡片预处理 (提取 XML/JSON 卡片信息，下载私聊文件)
             │
+            ├─► 入站多图/表情并发自适应解析 (同机 NTQQ 缓存零配置直读 / 商城表情直通公开 CDN / NapCat 协议落盘 / HTTP 直链兜底并发 Promise.all)
+            │
             ├─► 检查是否被 wait_for_user_messages 挂起收集器捕获:
             │       └─► 若是: 存入待收集列表并直接返回，抑制唤醒
             │
