@@ -65,7 +65,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memDir = path.join(tmpDir, 'memory');
     const memoryService = setupMemoryService(ctx, {
       storageDir: memDir,
-      budgetChars: 2200,
+      groupMemoryTotalBudgetChars: 2200,
       db,
     });
 
@@ -120,7 +120,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memDir = path.join(tmpDir, 'memory2');
     const memoryService = setupMemoryService(ctx, {
       storageDir: memDir,
-      budgetChars: 2200,
+      groupMemoryTotalBudgetChars: 2200,
     });
 
     const toolsService = ctx.get('tools') || (ctx as any).tools;
@@ -221,7 +221,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const memDir = path.join(tmpDir, 'memory-tiered');
     const memoryService = setupMemoryService(ctx, {
       storageDir: memDir,
-      budgetChars: 2200,
+      groupMemoryTotalBudgetChars: 2200,
       getCurrentSpeaker: (peer) => (peer === 'group_3000000002' ? '3333333333' : undefined),
       db,
     });

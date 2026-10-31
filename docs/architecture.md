@@ -140,7 +140,8 @@ NapCatGatewayServer 接收并解析 JSON
    - 存储路径：`.dsh/napcat/napcat_memory/users/<user_id>.md`
    - 内容：针对特定用户的交互偏好、习惯与关键背景，在不同群聊与私聊间通用。
 3. **容量预算治理**：
-   - 区分 `group_memory_budget_chars`（群聊上限，默认 2200 字符）与 `private_memory_budget_chars`（私聊上限，默认 1500 字符），防止注入内容撑爆模型上下文。
+   - 写入侧三键单语义：`user_profile_budget_chars`（单个用户画像文件写入上限，默认 2200）、`session_memory_budget_chars`（单个 Session 规则文件写入上限，默认 2200）、`group_memory_total_budget_chars`（群聊注入时所有活跃用户画像合计预算，默认 8000）；
+   - 写入侧超预算时拒绝且不落盘；注入侧 Session 规则与私聊画像全量注入，群聊画像整块装填，预算只统计用户画像。
 4. **摒弃独立后台 Agent，单 Agent 顺手提炼**：
    - 彻底摒弃了易造成状态冲突与 Token 浪费的独立后台 Fork 回顾会话；
    - 主会话 Agent 在输出回复后，依托工具解耦机制在同轮次顺手提炼并更新记忆，轻量而稳定。

@@ -211,7 +211,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(proactiveHtml).toContain('夜间免打扰模式 (proactive_night_dnd)');
     });
 
-    it('切换到 Tab 5 (记忆) 时展示对应 3 个核心记忆配置项，且不包含已下线的回顾项', () => {
+    it('切换到 Tab 5 (记忆) 时展示对应 4 个核心记忆配置项，且不包含已下线的回顾项', () => {
       const html = renderCard({ initialTab: 'memory' });
 
       expect(html).toMatch(/id="napcat-tab-memory"[^>]*aria-selected="true"/);
@@ -222,15 +222,20 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       );
       const memoryHtml = panelMatch![0];
 
-      // 3 个核心记忆字段核对
+      // 4 个核心记忆字段核对
       expect(memoryHtml).toContain('id="napcat-memory-storage-dir"');
       expect(memoryHtml).toContain('记忆存储目录 (memory_storage_dir)');
 
-      expect(memoryHtml).toContain('id="napcat-group-memory-budget-chars"');
-      expect(memoryHtml).toContain('群聊记忆预算字符上限 (group_memory_budget_chars)');
+      expect(memoryHtml).toContain('id="napcat-user-profile-budget-chars"');
+      expect(memoryHtml).toContain('用户画像字符预算上限 (user_profile_budget_chars)');
 
-      expect(memoryHtml).toContain('id="napcat-private-memory-budget-chars"');
-      expect(memoryHtml).toContain('私聊记忆预算字符上限 (private_memory_budget_chars)');
+      expect(memoryHtml).toContain('id="napcat-session-memory-budget-chars"');
+      expect(memoryHtml).toContain('Session 规则字符预算上限 (session_memory_budget_chars)');
+
+      expect(memoryHtml).toContain('id="napcat-group-memory-total-budget-chars"');
+      expect(memoryHtml).toContain(
+        '群聊用户画像总预算上限 (group_memory_total_budget_chars)'
+      );
 
       // 已下线回顾字段排他断言
       expect(memoryHtml).not.toContain('id="napcat-review-enabled"');
@@ -325,7 +330,7 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
           ws_port: 8080,
           persona: '旧人设',
           proactive_reply_enabled: false,
-          memory_budget_chars: 2200,
+          user_profile_budget_chars: 2200,
         },
       });
 
@@ -337,8 +342,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       // Tab 3:
       controller.handleFieldChange('proactive_reply_enabled', true);
       // Tab 5:
-      controller.handleFieldChange('group_memory_budget_chars', 4000);
-      controller.handleFieldChange('private_memory_budget_chars', 1800);
+      controller.handleFieldChange('user_profile_budget_chars', 2300);
+      controller.handleFieldChange('session_memory_budget_chars', 2400);
+      controller.handleFieldChange('group_memory_total_budget_chars', 8000);
 
       expect(controller.isDirty).toBe(true);
 
@@ -354,8 +360,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(savedDraft.ws_port).toBe(9876);
       expect(savedDraft.persona).toBe('新人设');
       expect(savedDraft.proactive_reply_enabled).toBe(true);
-      expect(savedDraft.group_memory_budget_chars).toBe(4000);
-      expect(savedDraft.private_memory_budget_chars).toBe(1800);
+      expect(savedDraft.user_profile_budget_chars).toBe(2300);
+      expect(savedDraft.session_memory_budget_chars).toBe(2400);
+      expect(savedDraft.group_memory_total_budget_chars).toBe(8000);
 
       // 契约断言 3: 保存成功后 dirty 状态被清除，版本号更新
       expect(controller.isDirty).toBe(false);

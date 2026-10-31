@@ -41,11 +41,12 @@ export const DEFAULT_PROACTIVE_COOLDOWN_MINS = 10;
 export const DEFAULT_PROACTIVE_NIGHT_DND = true;
 
 export const DEFAULT_MEMORY_DIR = '.dsh/napcat/napcat_memory';
-export const DEFAULT_MEMORY_BUDGET_CHARS = 2200;
-export const DEFAULT_GROUP_MEMORY_BUDGET_CHARS = 2200;
-export const DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS = 1500;
-export const DEFAULT_USER_PROFILE_CHAR_LIMIT = 1500;
-export const DEFAULT_SESSION_MEMORY_CHAR_LIMIT = 2200;
+/** 单个用户画像文件的写入上限 */
+export const DEFAULT_USER_PROFILE_BUDGET_CHARS = 2200;
+/** 单个 Session 规则文件的写入上限 */
+export const DEFAULT_SESSION_MEMORY_BUDGET_CHARS = 2200;
+/** 群聊注入时所有活跃用户画像合计的总预算（Session 规则不计入） */
+export const DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS = 8000;
 export const DEFAULT_FACE_ENABLED = false;
 export const DEFAULT_FACE_STORE_MAX = 100;
 export const DEFAULT_FACE_STORE_DIR = '.dsh/napcat/faces';

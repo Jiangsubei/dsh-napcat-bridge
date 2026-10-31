@@ -464,17 +464,17 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resDefault.qq).toBe('default');
   });
 
-  it('契约 10: 写入端容量硬上限门禁 (user <= 1500, session <= 2200 超限拒绝并提示精简)', async () => {
-    // 1. create_memory 超出 user 上限 (1500 字符)
-    const longUserContent = 'A'.repeat(1501);
+  it('契约 10: 写入端容量硬上限门禁 (user <= 2200, session <= 2200 超限拒绝且不落盘)', async () => {
+    // 1. create_memory 超出 user 上限 (2200 字符)
+    const longUserContent = 'A'.repeat(2201);
     const resOverUser = await tools.createMemory({
       type: 'user',
       qq: '123456789',
       content: longUserContent,
     });
     expect(resOverUser.success).toBe(false);
-    expect(resOverUser.message).toContain('超出上限 (1500 字符)');
-    expect(resOverUser.message).toContain('edit_memory 精简合并');
+    expect(resOverUser.message).toContain('超出上限 (2200 字符)');
+    expect(resOverUser.message).toContain('本次创建未写入');
     expect(await storage.existsUserProfile('123456789')).toBe(false);
 
     // 2. create_memory 超出 session 上限 (2200 字符)
@@ -486,6 +486,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     });
     expect(resOverSession.success).toBe(false);
     expect(resOverSession.message).toContain('超出上限 (2200 字符)');
+    expect(resOverSession.message).toContain('本次创建未写入');
     expect(await storage.existsSessionMemory('group_overflow')).toBe(false);
 
     // 3. 上限内正常创建
@@ -501,10 +502,12 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
       type: 'user',
       qq: '123456789',
       old_string: '喜欢简短回答',
-      new_string: 'C'.repeat(1500),
+      new_string: 'C'.repeat(2200),
     });
     expect(resEditOver.success).toBe(false);
-    expect(resEditOver.message).toContain('超出上限 (1500 字符)');
+    expect(resEditOver.message).toContain('超出上限 (2200 字符)');
+    expect(resEditOver.message).toContain('本次编辑未落盘');
+    expect(resEditOver.message).toContain('还需再缩减');
     const keptContent = await storage.readUserProfile('123456789');
     expect(keptContent).toContain('喜欢简短回答');
   });
@@ -530,16 +533,16 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(readTool.description).toContain('old_string');
   });
 
-  it('契约 12: MemoryTools 支持动态 limits getter 配置私聊与群聊容量硬上限', async () => {
+  it('契约 12: MemoryTools 支持动态 limits getter 配置用户画像与 Session 规则容量硬上限', async () => {
     let dynamicUserLimit = 100;
     let dynamicSessionLimit = 200;
 
     const dynamicTools = new MemoryTools(storage, undefined, {
-      getUserLimit: () => dynamicUserLimit,
+      getUserProfileLimit: () => dynamicUserLimit,
       getSessionLimit: () => dynamicSessionLimit,
     });
 
-    // 1. 当 userLimit=100 时，写入 105 字符报错
+    // 1. 当 userProfileLimit=100 时，写入 105 字符报错
     const resOver = await dynamicTools.createMemory({
       type: 'user',
       qq: 'dyn_user',
@@ -556,6 +559,15 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
       content: 'X'.repeat(105),
     });
     expect(resOk.success).toBe(true);
+
+    // 3. Session 规则独立使用 getSessionLimit，不受用户画像上限影响
+    const resSessionOver = await dynamicTools.createMemory({
+      type: 'session',
+      peer: 'group_dyn',
+      content: 'Y'.repeat(201),
+    });
+    expect(resSessionOver.success).toBe(false);
+    expect(resSessionOver.message).toContain('超出上限 (200 字符)');
   });
 });
 

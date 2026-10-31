@@ -8,7 +8,7 @@
  * 2. Session 记忆 (per-peer) 读写与追加
  * 3. User Profile (per-QQ) 读写与追加及 default.md 兜底
  * 4. 私聊场景 Snapshot 组装 (全量加载，不受 7 天过滤)
- * 5. 群聊场景 Snapshot 组装与 2200 字符【用户画像原子完整性截断保护】
+ * 5. 群聊场景 Snapshot 组装与 2200 字符【用户画像原子完整性截断保护】(Session 规则全量注入且不计入预算)
  * 6. 7 天活跃机制 (不活跃不注入，文件永不删除)
  */
 
@@ -97,8 +97,10 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     expect(snapshot).toContain('### BotNickname (2000000001)\n昵称BotNickname，项目负责人');
   });
 
-  it('契约 5: 群聊场景 Snapshot 组装与 2200 字符【用户画像原子完整性截断保护】', () => {
-    storage.writeSessionMemorySync('group_3000000001', '群聊规则：技术探讨群');
+  it('契约 5: 群聊场景 Snapshot 组装与 2200 字符【用户画像原子完整性截断保护】，Session 规则全量注入且不计入预算', () => {
+    // Session 规则故意超过预算，验证其全量注入且不被切割
+    const longSessionMemory = '群'.repeat(3000);
+    storage.writeSessionMemorySync('group_3000000001', longSessionMemory);
 
     // 制造 3 位用户画像
     // 用户 1: 800 字符画像
@@ -123,10 +125,14 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
       2200
     );
 
+    // 断言 0: Session 规则全量注入，不出现截断标记
+    expect(snapshot).toContain(longSessionMemory);
+    expect(snapshot).not.toContain('...(超预算截断)');
+
     // 断言 1: 用户 1 完整存在
     expect(snapshot).toContain(user1Content);
 
-    // 断言 2: 用户 2 正好让总长度达到/突破 2200 预算，必须完整包含用户 2 的全部 1600 字符，绝不断裂
+    // 断言 2: 用户 2 正好让画像总长度达到/突破 2200 预算，必须完整包含用户 2 的全部 1600 字符，绝不断裂
     expect(snapshot).toContain(user2Content);
 
     // 断言 3: 用户 3 必须被截断舍弃，不包含在最终 prompt 中
@@ -180,21 +186,24 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     expect(snapshot).toContain('### 李四 (10002)\n无标题旧格式画像');
   });
 
-  it('契约 8: 私聊与群聊解耦预算 — 私聊支持独立 privateBudget 截断保护，群聊支持独立 groupBudget', () => {
-    // 1. 私聊独立预算截断保护 (如设定预算为 300 字符，画像有 800 字符)
+  it('契约 8: 私聊画像全量注入不受预算切割，群聊预算仅统计用户画像且整块装填', () => {
+    // 1. 私聊画像全量注入：即使传入 300 字符预算，也不切割、不追加截断标记
     const longPrivateProfile = '# 用户画像（9999）\n' + 'D'.repeat(800);
     storage.writeUserProfileSync('9999', longPrivateProfile);
 
     const snapshotPrivate = storage.getPromptSnapshotSync(
       'user_9999',
       [{ qq: '9999', name: 'UserPrivate' }],
-      300 // 传入私聊预算 300
+      300 // 私聊忽略该预算参数
     );
-    expect(snapshotPrivate.length).toBeLessThanOrEqual(300);
-    expect(snapshotPrivate).toContain('...(超预算截断)');
+    expect(snapshotPrivate.length).toBeGreaterThan(300);
+    expect(snapshotPrivate).toContain('D'.repeat(800));
+    expect(snapshotPrivate).not.toContain('...(超预算截断)');
+    expect(snapshotPrivate).not.toContain('受字符预算限制');
 
-    // 2. 群聊独立预算截断 (设定群聊预算为 500 字符)
-    storage.writeSessionMemorySync('group_custom_budget', '群规');
+    // 2. 群聊预算只统计划像：Session 规则再长也不挤占画像预算
+    const longSession = '群'.repeat(600);
+    storage.writeSessionMemorySync('group_custom_budget', longSession);
     storage.writeUserProfileSync('u1', 'A'.repeat(300));
     storage.writeUserProfileSync('u2', 'B'.repeat(300));
 
@@ -204,8 +213,9 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
         { qq: 'u1', name: 'User1' },
         { qq: 'u2', name: 'User2' },
       ],
-      250 // 群聊预算设为 250，u1(300)+群规(2)放完后，u2 必须被舍弃
+      250 // 画像预算 250：u1(300) 整块放完后超预算，u2 不再注入
     );
+    expect(snapshotGroup).toContain(longSession);
     expect(snapshotGroup).toContain('User1');
     expect(snapshotGroup).not.toContain('User2');
   });
@@ -216,7 +226,7 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
     storage.writeUserProfileSync('u2', 'B'.repeat(1400));
     storage.writeUserProfileSync('u3', 'C'.repeat(500));
 
-    // 1. 发生截断：u1(1000) + u2(1400) 突破 2200 预算，u3 被截断
+    // 1. 发生截断：u1(1000) + u2(1400) 画像块合计突破 2200 预算，u3 被截断
     const truncatedSnapshot = storage.getPromptSnapshotSync(
       'group_trunc_test',
       [
@@ -246,7 +256,7 @@ describe('契约测试: EN-003 MemoryStorage 存储层与两层记忆体系', ()
 
   it('契约 10: 动态阶梯排序 — 自然顺序下会被截断的发言用户提拔至首位，若本在预算内则保持顺序保护缓存', () => {
     storage.writeSessionMemorySync('group_tiered_test', '群规');
-    // u1: 800 字符, u2: 1500 字符 (两者合计 2300 > 2200), u3: 400 字符
+    // u1: 800 字符, u2: 1500 字符 (画像块合计突破 2200), u3: 400 字符
     storage.writeUserProfileSync('u1', 'A'.repeat(800));
     storage.writeUserProfileSync('u2', 'B'.repeat(1500));
     storage.writeUserProfileSync('u3', 'C'.repeat(400));

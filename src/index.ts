@@ -10,8 +10,9 @@ import {
   SETTINGS_NAMESPACE,
   DEFAULT_WS_PORT,
   DEFAULT_MEMORY_DIR,
-  DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
-  DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
+  DEFAULT_USER_PROFILE_BUDGET_CHARS,
+  DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
+  DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
   DEFAULT_DATABASE_PATH,
   DEFAULT_FACE_STORE_DIR,
 } from './constants/index.js';
@@ -353,14 +354,18 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     storageDir: normalizedMemoryDir,
     dshHome,
     registerGlobalTools: false,
-    groupBudgetChars: currentConfig().group_memory_budget_chars,
-    privateBudgetChars: currentConfig().private_memory_budget_chars,
-    getGroupBudgetChars: () =>
-      currentConfig().group_memory_budget_chars ??
-      DEFAULT_GROUP_MEMORY_BUDGET_CHARS,
-    getPrivateBudgetChars: () =>
-      currentConfig().private_memory_budget_chars ??
-      DEFAULT_PRIVATE_MEMORY_BUDGET_CHARS,
+    groupMemoryTotalBudgetChars: currentConfig().group_memory_total_budget_chars,
+    userProfileBudgetChars: currentConfig().user_profile_budget_chars,
+    sessionMemoryBudgetChars: currentConfig().session_memory_budget_chars,
+    getGroupMemoryTotalBudgetChars: () =>
+      currentConfig().group_memory_total_budget_chars ??
+      DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
+    getUserProfileBudgetChars: () =>
+      currentConfig().user_profile_budget_chars ??
+      DEFAULT_USER_PROFILE_BUDGET_CHARS,
+    getSessionMemoryBudgetChars: () =>
+      currentConfig().session_memory_budget_chars ??
+      DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
     getCurrentSpeaker: (peer: string) => currentSpeakers.get(peer),
     db,
     sessionManager,

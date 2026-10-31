@@ -12,6 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { BridgeConfigSchema } from './schema.js';
+import { LEGACY_CONFIG_KEY_MIGRATIONS, migrateLegacyConfigKeys } from './legacy.js';
 import type { BridgePluginConfig } from '../types/index.js';
 import { PLUGIN_NAME, SETTINGS_NAMESPACE } from '../constants/index.js';
 
@@ -29,18 +30,20 @@ export interface SanitizeResult {
 }
 
 /**
- * 纯函数：根据当前 Schema 清洗配置对象，分离出干净合法的配置项与脏键/过期键
+ * 纯函数：根据当前 Schema 清洗配置对象，分离出干净合法的配置项与脏键/过期键。
+ * 清洗前先将历史配置键的值搬运到当前键，避免升级后用户配置丢失。
  */
 export function sanitizeConfigPayload<T extends Record<string, any>>(raw: T): SanitizeResult {
   if (!raw || typeof raw !== 'object') {
     return { valid: {}, removed: [] };
   }
 
+  const migrated = migrateLegacyConfigKeys(raw);
   const validKeys = getValidConfigKeys();
   const valid: Record<string, any> = {};
   const removed: string[] = [];
 
-  for (const [key, value] of Object.entries(raw)) {
+  for (const [key, value] of Object.entries(migrated)) {
     if (validKeys.has(key)) {
       valid[key] = value;
     } else {
@@ -54,15 +57,21 @@ export function sanitizeConfigPayload<T extends Record<string, any>>(raw: T): Sa
 /**
  * 外科手术式行级 YAML 清洗：
  * 仅定位指定 pluginId 下的 config 节点，精确删除其中的 staleKeys，
+ * 并将 renameMap 中指定的历史键原地重命名为当前键（保留原值与其子块），
  * 绝不重排整个文件，严格保留用户的缩进、注释、空行与 !!js 等特殊语法。
  */
 export function surgicalCleanYamlConfig(
   yamlContent: string,
   pluginId: string,
-  staleKeys: Set<string>
-): { newContent: string; removedKeys: string[] } {
-  if (!staleKeys.size) {
-    return { newContent: yamlContent, removedKeys: [] };
+  staleKeys: Set<string>,
+  renameMap: Map<string, string> = new Map()
+): {
+  newContent: string;
+  removedKeys: string[];
+  renamedKeys: Array<{ from: string; to: string }>;
+} {
+  if (!staleKeys.size && !renameMap.size) {
+    return { newContent: yamlContent, removedKeys: [], renamedKeys: [] };
   }
 
   const lines = yamlContent.split('\n');
@@ -70,6 +79,7 @@ export function surgicalCleanYamlConfig(
   let inConfig = false;
   let configIndent = -1;
   const removed = new Set<string>();
+  const renamed: Array<{ from: string; to: string }> = [];
   const outputLines: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -107,18 +117,20 @@ export function surgicalCleanYamlConfig(
           continue;
         }
 
-        // 检查是否是需要剔除的过期键
-        let matchedStaleKey: string | null = null;
-        for (const staleKey of staleKeys) {
-          const keyRegex = new RegExp(`^\\s+${staleKey}:(?:\\s.*)?$`);
-          if (keyRegex.test(line)) {
-            matchedStaleKey = staleKey;
-            break;
-          }
+        const keyMatch = line.match(/^(\s+)([a-zA-Z0-9_]+):(.*)$/);
+        const configKey = keyMatch?.[2];
+
+        // 历史键原地重命名，保留原值与多行子块
+        if (configKey && renameMap.has(configKey)) {
+          const targetKey = renameMap.get(configKey)!;
+          outputLines.push(`${keyMatch![1]}${targetKey}:${keyMatch![3]}`);
+          renamed.push({ from: configKey, to: targetKey });
+          continue;
         }
 
-        if (matchedStaleKey) {
-          removed.add(matchedStaleKey);
+        // 检查是否是需要剔除的过期键
+        if (configKey && staleKeys.has(configKey)) {
+          removed.add(configKey);
           // 若该键的值为多行（如缩进的数组或多行字符串），跳过后续所有更深缩进的行
           let j = i + 1;
           while (j < lines.length) {
@@ -146,12 +158,14 @@ export function surgicalCleanYamlConfig(
   return {
     newContent: outputLines.join('\n'),
     removedKeys: Array.from(removed),
+    renamedKeys: renamed,
   };
 }
 
 export interface HealResult {
   healed: boolean;
   removedKeys: string[];
+  renamedKeys?: Array<{ from: string; to: string }>;
   filePath?: string;
 }
 
@@ -221,22 +235,51 @@ export function healProfileConfigFile(
       }
 
       const staleKeys = new Set<string>();
+      const renameMap = new Map<string, string>();
+      const renameTargets = new Set<string>();
+
+      // 按迁移表优先级决定由哪个旧键胜出，避免多代旧键同时存在时产生重复新键
+      for (const migration of LEGACY_CONFIG_KEY_MIGRATIONS) {
+        if (!presentKeys.has(migration.legacy)) continue;
+        if (presentKeys.has(migration.current) || renameTargets.has(migration.current)) {
+          staleKeys.add(migration.legacy);
+          continue;
+        }
+        renameMap.set(migration.legacy, migration.current);
+        renameTargets.add(migration.current);
+      }
+
       for (const k of presentKeys) {
-        if (!validKeys.has(k)) {
+        if (!validKeys.has(k) && !renameMap.has(k)) {
           staleKeys.add(k);
         }
       }
 
-      if (staleKeys.size > 0) {
-        const cleaned = surgicalCleanYamlConfig(content, SETTINGS_NAMESPACE, staleKeys);
-        if (cleaned.removedKeys.length > 0) {
+      if (staleKeys.size > 0 || renameMap.size > 0) {
+        const cleaned = surgicalCleanYamlConfig(
+          content,
+          SETTINGS_NAMESPACE,
+          staleKeys,
+          renameMap
+        );
+        if (cleaned.removedKeys.length > 0 || cleaned.renamedKeys.length > 0) {
           fs.writeFileSync(patchFile, cleaned.newContent, 'utf8');
-          logger?.info?.(
-            `[Config] 配置文件自愈成功 (${patchFile})，已物理清除失效配置项: ${cleaned.removedKeys.join(', ')}`
-          );
+          const details: string[] = [];
+          if (cleaned.renamedKeys.length > 0) {
+            details.push(
+              `已迁移历史配置项: ${cleaned.renamedKeys
+                .map((r) => `${r.from} -> ${r.to}`)
+                .join(', ')}`
+            );
+          }
+          if (cleaned.removedKeys.length > 0) {
+            details.push(`已物理清除失效配置项: ${cleaned.removedKeys.join(', ')}`);
+          }
+          logger?.info?.(`[Config] 配置文件自愈成功 (${patchFile})，${details.join('；')}`);
           return {
             healed: true,
             removedKeys: cleaned.removedKeys,
+            renamedKeys: cleaned.renamedKeys,
             filePath: patchFile,
           };
         }

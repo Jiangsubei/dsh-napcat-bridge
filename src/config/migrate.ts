@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import type { Context } from '@deepseek-ai/cordis';
 import type { BridgePluginConfig } from '../types/index.js';
 import { PLUGIN_NAME, SETTINGS_NAMESPACE } from '../constants/index.js';
+import { migrateLegacyConfigKeys } from './legacy.js';
 
 const require = createRequire(import.meta.url);
 
@@ -81,14 +82,8 @@ export function readLegacyConfig(explicitHome?: string): BridgePluginConfig | un
           const doc = parseYaml(content);
           const legacyValues = doc?.[SETTINGS_NAMESPACE];
           if (legacyValues && typeof legacyValues === 'object' && Object.keys(legacyValues).length > 0) {
-            const config = { ...legacyValues } as any;
-            // 历史字段映射：memory_budget_chars -> group_memory_budget_chars
-            if (config.memory_budget_chars !== undefined) {
-              if (config.group_memory_budget_chars === undefined) {
-                config.group_memory_budget_chars = config.memory_budget_chars;
-              }
-              delete config.memory_budget_chars;
-            }
+            // 历史字段映射统一由 legacy.ts 维护
+            const config = migrateLegacyConfigKeys({ ...legacyValues } as any);
             return config as BridgePluginConfig;
           }
         }
@@ -153,7 +148,6 @@ export async function migrateLegacyConfig(ctx: Context, currentConfig: BridgePlu
     if (!legacyValues) {
       return;
     }
-    delete (legacyValues as any).memory_budget_chars;
 
     logger.info?.(`[Plugin] 检测到旧版配置文件中的 ${SETTINGS_NAMESPACE} 配置，开始静默迁移至当前 profile...`);
 

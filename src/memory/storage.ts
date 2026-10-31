@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import { atomicWriteFile, atomicWriteFileSync } from '../utils/atomic-write.js';
 import {
   DEFAULT_MEMORY_DIR,
-  DEFAULT_MEMORY_BUDGET_CHARS,
+  DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
   TRUNCATED_USER_PROFILE_NOTICE,
 } from '../constants/index.js';
 import { resolveDshPath } from '../utils/path.js';
@@ -291,23 +291,19 @@ export class MemoryStorage {
 
   /**
    * 组装 System Prompt 动态记忆上下文快照
-   * 包含用户画像原子完整性截断保护机制 (放完整当前用户，丢弃后续用户)
+   * - Session 规则全量注入，永不切割；
+   * - 私聊用户画像全量注入，永不切割；
+   * - 群聊用户画像按总预算整块装填：放完当前画像后达到/超过预算时，
+   *   后续用户不再注入，并追加截断提示。预算只统计用户画像，不包含 Session 规则。
    */
   public getPromptSnapshotSync(
     peer: string,
     activeUsers: ActiveUserInfo[] = [],
-    maxBudget = DEFAULT_MEMORY_BUDGET_CHARS,
+    groupUserProfilesBudget = DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
     currentQQ?: string
   ): string {
     const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-    let sessionMemory = this.readSessionMemorySync(peer).trim();
-
-    // 预算硬上限 (B8): 避免 sessionMemory 本身超出 maxBudget
-    if (sessionMemory && sessionMemory.length > maxBudget) {
-      const suffix = '\n...(超预算截断)';
-      const cut = Math.max(0, maxBudget - suffix.length);
-      sessionMemory = sessionMemory.slice(0, cut) + suffix;
-    }
+    const sessionMemory = this.readSessionMemorySync(peer).trim();
 
     const parts: string[] = [];
     if (sessionMemory) {
@@ -319,33 +315,19 @@ export class MemoryStorage {
     }
 
     const userBlocks: string[] = [];
-    let currentLength = parts.length > 0 ? parts[0].length : 0;
+    let profileLength = 0;
     let truncated = false;
 
     if (isPrivate) {
-      // 私聊单用户画像全量注入（带独立预算截断保护）
+      // 私聊单用户画像全量注入
       const targetQQ =
         activeUsers[0]?.qq || currentQQ || peer.replace(/^(user_|qq-user-)/, '').split('-')[0];
       const targetName = activeUsers[0]?.name || targetQQ;
       const profile = this.readUserProfileSync(targetQQ).trim();
       if (profile) {
-        let block = profile.startsWith('#')
-          ? profile
-          : `### ${targetName} (${targetQQ})\n${profile}`;
-
-        const joinSeparatorLen = parts.length > 0 ? 2 : 0;
-        const availableBudget = maxBudget - (currentLength + joinSeparatorLen);
-        if (availableBudget > 0 && block.length > availableBudget) {
-          const suffix = '\n...(超预算截断)';
-          const cut = Math.max(0, availableBudget - suffix.length);
-          block = block.slice(0, cut) + suffix;
-        } else if (availableBudget <= 0) {
-          block = '';
-        }
-
-        if (block) {
-          userBlocks.push(block);
-        }
+        userBlocks.push(
+          profile.startsWith('#') ? profile : `### ${targetName} (${targetQQ})\n${profile}`
+        );
       }
     } else {
       // 群聊多用户：动态阶梯排序 + 快照稳定性保护
@@ -358,7 +340,7 @@ export class MemoryStorage {
         if (currentProfile) {
           // 模拟按自然活跃顺序装填，检查 normalizedCurrentQQ 是否能被完整/原子纳入预算
           let naturallyIncluded = false;
-          let simLength = currentLength;
+          let simLength = 0;
 
           for (const u of candidateUsers) {
             const p = this.readUserProfileSync(u.qq).trim();
@@ -371,7 +353,7 @@ export class MemoryStorage {
               break;
             }
 
-            if (simLength >= maxBudget) {
+            if (simLength >= groupUserProfilesBudget) {
               break;
             }
           }
@@ -389,7 +371,7 @@ export class MemoryStorage {
         }
       }
 
-      // 按确定的顺序装填用户画像
+      // 按确定的顺序装填用户画像（整块原子装填）
       for (let i = 0; i < candidateUsers.length; i++) {
         const user = candidateUsers[i];
         const profile = this.readUserProfileSync(user.qq).trim();
@@ -399,16 +381,16 @@ export class MemoryStorage {
           ? profile
           : `### ${user.name} (${user.qq})\n${profile}`;
 
-        // 若当前长度已达上限，停止装填并标记截断
-        if (currentLength >= maxBudget) {
+        // 已达/超过预算时，当前及后续用户均不注入（含"放完当前块后再判断"语义）
+        if (profileLength >= groupUserProfilesBudget) {
           truncated = true;
           break;
         }
 
         userBlocks.push(block);
-        currentLength += (currentLength > 0 ? 2 : 0) + block.length;
+        profileLength += (profileLength > 0 ? 2 : 0) + block.length;
 
-        if (currentLength >= maxBudget) {
+        if (profileLength >= groupUserProfilesBudget) {
           // 达到或突破预算，检查后续候选用户中是否还有未装入的有画像用户
           for (let j = i + 1; j < candidateUsers.length; j++) {
             if (this.readUserProfileSync(candidateUsers[j].qq).trim()) {

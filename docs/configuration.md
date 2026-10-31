@@ -16,7 +16,7 @@
 
 ## 2. WebUI 设置 Tab 分组与配置项清单
 
-WebUI 设置卡片分为 5 个分组 Tab，共包含 24 项有效运行时配置：
+WebUI 设置卡片分为 5 个分组 Tab，共包含 30 项有效运行时配置：
 
 ### 2.1 Tab 1: 连接身份 (Connection)
 
@@ -58,8 +58,9 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 24 项有效运行时配置
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `memory_storage_dir` | `string` | `".dsh/napcat/napcat_memory"` | 记忆 Markdown 文件的根存储目录。 |
-| `group_memory_budget_chars` | `number` | `2200` | 群聊场景下注入 System Prompt 的群规与群友画像字符总上限。 |
-| `private_memory_budget_chars` | `number` | `1500` | 私聊场景下单用户画像注入与单次写入的字符上限。 |
+| `user_profile_budget_chars` | `number` | `2200` | 单个用户画像文件的写入上限，跨群聊/私聊通用。 |
+| `session_memory_budget_chars` | `number` | `2200` | 单个 Session 规则文件的写入上限，群聊与私聊统一。 |
+| `group_memory_total_budget_chars` | `number` | `8000` | 群聊注入时所有活跃群友画像合计的字符预算；Session 规则全量注入，不计入该预算。 |
 
 ---
 
