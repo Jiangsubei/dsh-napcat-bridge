@@ -40,6 +40,7 @@ describe('契约测试: Web UI 设置卡「权限与安全」Tab (Security Setti
     expect(securityTab).toBeDefined();
     expect(securityTab?.label).toBe('权限与安全');
     expect(SETTINGS_TABS).toHaveLength(7);
+    expect(SETTINGS_TABS[3].id).toBe('security');
 
     const { html } = renderCard();
     expect(html).toContain('id="napcat-tab-security"');
@@ -59,13 +60,15 @@ describe('契约测试: Web UI 设置卡「权限与安全」Tab (Security Setti
     expect(html).toContain('新建会话权限模式');
     expect(html).toContain('napcat-session-permission-private-default');
     expect(html).toContain('napcat-session-permission-group-default');
-    expect(html).toContain('权限例外覆盖');
+    expect(html).toContain('私聊权限例外覆盖');
+    expect(html).toContain('群聊权限例外覆盖');
 
     // 分区 3: Coding 工具组装载控制
     expect(html).toContain('Coding 工具组装载');
     expect(html).toContain('napcat-coding-tools-private-default');
     expect(html).toContain('napcat-coding-tools-group-default');
-    expect(html).toContain('Coding 工具例外覆盖');
+    expect(html).toContain('私聊 Coding 工具例外覆盖');
+    expect(html).toContain('群聊 Coding 工具例外覆盖');
   });
 
   it('契约 3: security Tab 默认展示正确的初始默认权限与开关状态', () => {

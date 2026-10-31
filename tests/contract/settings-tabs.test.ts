@@ -76,10 +76,10 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
         'connection',
         'persona',
         'proactive',
+        'security',
         'memory',
         'face',
         'slang',
-        'security',
       ]);
       expect(SETTINGS_TABS).toHaveLength(7);
       expect(html).not.toContain('id="napcat-tab-reply"');
