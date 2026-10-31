@@ -11,6 +11,7 @@ import {
   type AgentHandle,
 } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { QQ_PRESET_ID } from '../../constants/preset.js';
 import type { WakeupPayload } from '../../types/index.js';
 import {
   RemoteError,
@@ -330,7 +331,7 @@ export class SessionAgentRunner {
         agentCtx?.get?.('agentPresets') || (this.ctx as any).agentPresets;
       if (presets?.mount) {
         return presets
-          .mount(agentCtx, 'qq-session')
+          .mount(agentCtx, QQ_PRESET_ID)
           .then(() => undefined)
           .catch((err: any) => {
             this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
@@ -420,7 +421,7 @@ export class SessionAgentRunner {
             model,
             ...(effort !== undefined ? { reasoningEffort: effort } : {}),
           },
-          meta: { cwd },
+          meta: { cwd, agentPreset: QQ_PRESET_ID },
           setup: setupFn,
         });
       } catch (createErr: any) {
@@ -452,7 +453,7 @@ export class SessionAgentRunner {
               model,
               ...(effort !== undefined ? { reasoningEffort: effort } : {}),
             },
-            meta: { cwd },
+            meta: { cwd, agentPreset: QQ_PRESET_ID },
             setup: setupFn,
           });
         } else {
@@ -479,6 +480,33 @@ export class SessionAgentRunner {
 
     // 锁定会话标题，防止 LLM 自动总结覆盖
     this.updateSessionTitle(handle.agent.session, peer, sessionId);
+
+    // 固化 agentPreset 投影至 session，确保冷重启恢复时绝不 fallback 至默认 coding 预设
+    const presets: any = (this.ctx as any).agentPresets || (this.ctx.root as any)?.agentPresets;
+    const sessionProjections: any =
+      (this.ctx as any).sessionProjections || (this.ctx.root as any)?.sessionProjections;
+    const currentPreset = sessionProjections?.stateOf?.(handle.agent.session, 'agentPreset');
+    if (currentPreset !== QQ_PRESET_ID) {
+      if (presets?.select && typeof presets.select === 'function') {
+        try {
+          await presets.select(handle.agent, QQ_PRESET_ID);
+        } catch (selErr: any) {
+          this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+            `[SessionAgentRunner] presets.select(${sessionId}, ${QQ_PRESET_ID}) 忽略非致命异常:`,
+            selErr?.message
+          );
+          if (handle.agent.session?.append && typeof handle.agent.session.append === 'function') {
+            try {
+              (handle.agent.session as any).append('agent-preset/selected', { agentPreset: QQ_PRESET_ID });
+            } catch {}
+          }
+        }
+      } else if (handle.agent.session?.append && typeof handle.agent.session.append === 'function') {
+        try {
+          (handle.agent.session as any).append('agent-preset/selected', { agentPreset: QQ_PRESET_ID });
+        } catch {}
+      }
+    }
 
     (handle.agent as any).modelSelection = selectionRef;
     this.delegate.onClearPendingCleared?.(peer, sessionId);
