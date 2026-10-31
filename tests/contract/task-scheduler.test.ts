@@ -109,27 +109,33 @@ describe('契约测试: TaskScheduler 调度引擎契约', () => {
     const now = new Date();
     now.setHours(baseHour, 0, 0, 0);
     const fixedNow = now.getTime();
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
 
-    // 先创建 5 个合法的 pending 任务（延迟 100s, 200s, ...）
-    for (let i = 1; i <= 5; i++) {
-      const res = await scheduler.scheduleTask({
-        peer: 'group_quota_test',
-        creator: '12345',
-        prompt: `任务 ${i}`,
-        delay_seconds: 100 * i,
-      });
-      expect(res.success).toBe(true);
+    try {
+      // 先创建 5 个合法的 pending 任务（延迟 100s, 200s, ...）
+      for (let i = 1; i <= 5; i++) {
+        const res = await scheduler.scheduleTask({
+          peer: 'group_quota_test',
+          creator: '12345',
+          prompt: `任务 ${i}`,
+          delay_seconds: 100 * i,
+        });
+        expect(res.success).toBe(true);
+      }
+
+      // 第 6 个应被配额拦截
+      await expect(
+        scheduler.scheduleTask({
+          peer: 'group_quota_test',
+          creator: '12345',
+          prompt: '第6个任务',
+          delay_seconds: 600,
+        })
+      ).rejects.toThrow(/待执行任务数量已达上限/);
+    } finally {
+      vi.useRealTimers();
     }
-
-    // 第 6 个应被配额拦截
-    await expect(
-      scheduler.scheduleTask({
-        peer: 'group_quota_test',
-        creator: '12345',
-        prompt: '第6个任务',
-        delay_seconds: 600,
-      })
-    ).rejects.toThrow(/待执行任务数量已达上限/);
   });
 
   it('契约 6: 周期任务下一次时间计算 (daily, weekdays, weekends, custom)', () => {
