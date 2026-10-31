@@ -84,6 +84,9 @@ NapCatGatewayServer 接收并解析 JSON
             │
             ├─► 消息持久化写入 SQLite (MessageDatabase)
             │
+            ├─► 发言黑名单门控判定 (private_blacklist / group_blacklist):
+            │       └─► 若命中: 记录日志并立即中断返回，绝不唤醒、不回复、不执行指令（管理员亦不豁免）
+            │
             ├─► 文本与卡片预处理 (提取 XML/JSON 卡片信息，下载私聊文件)
             │
             ├─► 检查是否被 wait_for_user_messages 挂起收集器捕获:
@@ -99,6 +102,9 @@ NapCatGatewayServer 接收并解析 JSON
             └─► 提交至 SessionManager:
                     │
                     ├─ 按 peerId（私聊 `user_<user_id>` / 群聊 `group_<group_id>`）分配或复用 DSH 会话
+                    ├─ 新建会话权限模式与工具隔离装配：
+                    │   ├─ 解析初始权限预设（默认配置与例外覆盖表），注入 permissionPresets
+                    │   └─ 解析 Coding 工具组开关及例外表，若关闭则通过 agentCtx.tools.restrict 彻底排除 7 个工程工具
                     ├─ 会话编号映射：支持空缺填补（gap-filling）与防撞短哈希
                     ├─ 构造入站上下文标头：显式注入 `[消息ID: <id>]`，为出站引用提供锚点
                     └─ 排队推入 DSH 消息流 (DSH Turn)

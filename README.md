@@ -20,7 +20,8 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
 - **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，6 大 Tab 分组（连接身份、人格与准则、回复配置、记忆、表情包、黑话学习），全部 30 项参数支持 volatile 动态热更新。
+- **发言黑名单与权限安全防线**：支持私聊与群聊发言黑名单（入库留存审计但永不唤醒与回复，管理员亦不豁免）；支持新建会话默认权限（私聊默认 `workspace-write`、群聊默认 `read-only`）及针对指定 QQ 号/群号的权限例外表；支持 Coding 工程工具组（bash/pwsh/read/write/edit/read_image/working_directory）按私聊/群聊及例外表裁剪硬隔离。
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接身份、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 38 项参数支持 volatile 动态热更新。
 
 ---
 
@@ -84,9 +85,9 @@ dsh plugin --profile web add link:.
 
 ---
 
-## ⚙️ 运行时配置 (30 项)
+## ⚙️ 运行时配置 (38 项)
 
-配置卡片在 WebUI 中分为 6 个 Tab：
+配置卡片在 WebUI 中分为 7 个 Tab：
 
 ### 1. 连接身份 (Connection)
 | 参数 | 类型 | 默认值 | 说明 |
@@ -118,7 +119,19 @@ dsh plugin --profile web add link:.
 | `proactive_idle_timeout_mins` | `number` | `120` | 潜水超时阈值（分钟） |
 | `proactive_night_dnd` | `boolean` | `true` | 夜间免打扰 (每日 23:00~08:00 暂停主动回复) |
 
-### 4. 记忆 (Memory)
+### 4. 权限与安全 (Security)
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `private_blacklist` | `BlacklistItem[]` | `[]` | 私聊发言黑名单列表（命中则不唤醒、不回复，管理员亦不例外） |
+| `group_blacklist` | `BlacklistItem[]` | `[]` | 群聊发言黑名单列表（命中则不唤醒、不回复，管理员亦不例外） |
+| `session_permission_private_default` | `string` | `"workspace-write"` | 私聊新建会话初始权限模式（`workspace-write` / `read-only` / `danger-full-access`） |
+| `session_permission_group_default` | `string` | `"read-only"` | 群聊新建会话初始权限模式（`read-only` / `workspace-write` / `danger-full-access`） |
+| `session_permission_overrides` | `SessionPermissionOverride[]` | `[]` | 针对特定 QQ 号或群号的新建会话初始权限例外覆盖表 |
+| `coding_tools_private_default` | `boolean` | `true` | 私聊新建会话是否默认装载 Coding 编码工具组 |
+| `coding_tools_group_default` | `boolean` | `false` | 群聊新建会话是否默认装载 Coding 编码工具组（默认关闭，安全推荐） |
+| `coding_tools_overrides` | `CodingToolsOverride[]` | `[]` | 针对特定 QQ 号或群号的 Coding 工具组装载例外覆盖表 |
+
+### 5. 记忆 (Memory)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `memory_storage_dir` | `string` | `".dsh/napcat/napcat_memory"` | 记忆 Markdown 文件根存储目录 |
@@ -126,7 +139,7 @@ dsh plugin --profile web add link:.
 | `session_memory_budget_chars` | `number` | `2200` | 单个 Session 规则文件的写入上限（群聊/私聊统一） |
 | `group_memory_total_budget_chars` | `number` | `8000` | 群聊注入时所有活跃群友画像合计的字符预算；Session 规则不计入 |
 
-### 5. 表情包 (Face)
+### 6. 表情包 (Face)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `face_enabled` | `boolean` | `false` | 控制新建会话是否在预设中装载表情包工具集（保存对后续新会话生效） |
@@ -135,7 +148,7 @@ dsh plugin --profile web add link:.
 | `face_sub_type` | `number` | `1` | OneBot 11 发送表情使用的 sub_type 字段值 |
 | `face_evict_policy` | `string` | `"evict_lru"` | 库容满额淘汰策略 (`reject` 拒绝 / `evict_lru` 淘汰最久未用) |
 
-### 6. 黑话学习 (Slang)
+### 7. 黑话学习 (Slang)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集与注入黑话上下文（保存对后续新会话生效） |
@@ -176,7 +189,7 @@ pnpm test:quick    # 快速执行测试（跳过 build）
 
 - [快速上手 (docs/getting-started.md)](docs/getting-started.md)：环境依赖、安装步骤、NapCat WS 配置与验证指南。
 - [系统架构 (docs/architecture.md)](docs/architecture.md)：模块总览、生命周期装配、用户侧静默出站体系、记忆与表情体系。
-- [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 6 大 Tab 完整配置项、默认值与迁移说明。
+- [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 7 大 Tab 完整配置项、默认值与迁移说明。
 - [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 13 个 Agent 工具契约与 9 个纯两字中文斜杠命令。
 - [故障排查 (docs/troubleshooting.md)](docs/troubleshooting.md)：出站静默未调用工具、预设隔离、连接异常等问题排查指引。
 

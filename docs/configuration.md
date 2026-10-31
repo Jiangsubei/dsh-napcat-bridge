@@ -16,7 +16,7 @@
 
 ## 2. WebUI 设置 Tab 分组与配置项清单
 
-WebUI 设置卡片分为 5 个分组 Tab，共包含 30 项有效运行时配置：
+WebUI 设置卡片分为 7 个分组 Tab，共包含 38 项有效运行时配置：
 
 ### 2.1 Tab 1: 连接身份 (Connection)
 
@@ -53,7 +53,22 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 30 项有效运行时配置
 
 ---
 
-### 2.4 Tab 4: 记忆 (Memory)
+### 2.4 Tab 4: 权限与安全 (Security)
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `private_blacklist` | `BlacklistItem[]` | `[]` | 私聊发言黑名单列表。命中者的私聊消息正常入库供审计，但永远阻断一切唤醒、回复与指令（管理员亦不豁免）。 |
+| `group_blacklist` | `BlacklistItem[]` | `[]` | 群聊发言黑名单列表。命中群的消息正常入库供审计，但永远阻断一切点名唤醒、指令与回复（管理员亦不豁免）。 |
+| `session_permission_private_default` | `string` | `"workspace-write"` | 私聊新建会话初始权限模式（可选：`workspace-write` 工作区读写 / `read-only` 只读 / `danger-full-access` 完全）。已有会话热恢复不强行覆盖。 |
+| `session_permission_group_default` | `string` | `"read-only"` | 群聊新建会话初始权限模式（可选：`read-only` 只读 / `workspace-write` 工作区读写 / `danger-full-access` 完全）。已有会话热恢复不强行覆盖。 |
+| `session_permission_overrides` | `SessionPermissionOverride[]` | `[]` | 针对特定 QQ 号或群号的新建会话初始权限例外覆盖表。优先级高于全局默认配置。 |
+| `coding_tools_private_default` | `boolean` | `true` | 私聊新建会话是否默认装载工程 Coding 工具组（`bash`、`pwsh`、`read`、`write`、`edit`、`read_image`、`working_directory`）。 |
+| `coding_tools_group_default` | `boolean` | `false` | 群聊新建会话是否默认装载工程 Coding 工具组。默认关闭以彻底隔离高危操作并节省群聊 Token。 |
+| `coding_tools_overrides` | `CodingToolsOverride[]` | `[]` | 针对特定 QQ 号或群号的 Coding 工具组装载例外覆盖表。优先级高于全局默认配置。 |
+
+---
+
+### 2.5 Tab 5: 记忆 (Memory)
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -64,7 +79,7 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 30 项有效运行时配置
 
 ---
 
-### 2.5 Tab 5: 表情包 (Face)
+### 2.6 Tab 6: 表情包 (Face)
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -73,6 +88,16 @@ WebUI 设置卡片分为 5 个分组 Tab，共包含 30 项有效运行时配置
 | `face_store_dir` | `string` | `".dsh/napcat/faces"` | 本地表情图片文件存储目录。 |
 | `face_sub_type` | `number` | `1` | OneBot 11 发送表情图片消息段使用的 sub_type 值。 |
 | `face_evict_policy` | `string` | `"evict_lru"` | 容量满额时的淘汰策略（`"reject"` 拒绝新增 / `"evict_lru"` 淘汰最久未用）。 |
+
+---
+
+### 2.7 Tab 7: 黑话学习 (Slang)
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集（`record_slang`、`manage_slang`）并向提示词注入黑话上下文。 |
+| `slang_budget_chars` | `number` | `5000` | 黑话知识库最大字符预算。 |
+| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 黑话词条 Markdown 文件的存储路径。 |
 
 ---
 
