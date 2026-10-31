@@ -1,5 +1,9 @@
 # dsh-napcat-bridge
 
+[![npm version](https://img.shields.io/npm/v/dsh-napcat-bridge.svg)](https://www.npmjs.com/package/dsh-napcat-bridge)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.2.0-4f46e5)](https://github.com/deepseek-ai/dsh)
+
 DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 私聊中对话、检索历史、收发图片文件。
 
 ---
@@ -16,7 +20,7 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
 - **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，5 大 Tab 分组（连接身份、人格与准则、主动回复、记忆、表情包），全部 30 项参数支持 volatile 动态热更新。
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，6 大 Tab 分组（连接身份、人格与准则、回复配置、记忆、表情包、黑话学习），全部 30 项参数支持 volatile 动态热更新。
 
 ---
 
@@ -26,10 +30,25 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/dsh) (`npm install -g @deepseek-ai/dsh`) `>= 0.2.0`
 - [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 机器人协议端）
-- Node.js `>= 22.12.0`（推荐 `22.x` LTS）
-- pnpm `>= 9.0.0`
+- Node.js `>= 22.12.0`（受 `better-sqlite3` 原生依赖约束，低于此版本无法加载）
+- pnpm `>= 9.0.0`（仅源码安装需要）
 
-### 克隆并构建
+### 方式一：从 npm 安装（推荐）
+
+```bash
+# 安装到 DSH 的 web profile
+dsh plugin --profile web add dsh-napcat-bridge
+
+# 或安装到全局默认环境
+dsh plugin add dsh-napcat-bridge
+```
+
+> [!NOTE]
+> **Desktop 版**没有 `dsh` CLI，请在 DSH「插件 → 添加插件」里直接输入包名 `dsh-napcat-bridge` 安装。
+
+npm 包已内置编译产物与 `cordis.patch.yml`，安装后重启 DSH 即生效，无需本地构建。`better-sqlite3` 自带 8 平台预编译二进制，常规安装不触发 node-gyp 编译。
+
+### 方式二：从源码安装（开发 / 调试）
 
 > [!IMPORTANT]
 > DSH 通过 `package.json` 的 `main -> dist/index.js` 与 `dsh.bundle.patch` 加载插件。**在执行 link 之前必须先运行 `pnpm build` 生成编译产物与预设同步补丁**。
@@ -65,9 +84,9 @@ dsh plugin --profile web add link:.
 
 ---
 
-## ⚙️ 运行时配置 (24 项)
+## ⚙️ 运行时配置 (30 项)
 
-配置卡片在 WebUI 中分为 5 个 Tab：
+配置卡片在 WebUI 中分为 6 个 Tab：
 
 ### 1. 连接身份 (Connection)
 | 参数 | 类型 | 默认值 | 说明 |
@@ -85,11 +104,15 @@ dsh plugin --profile web add link:.
 | `persona` | `string` | *(内置)* | 助手的人格设定（注入 System Prompt 动态段） |
 | `behavior` | `string` | *(内置)* | 行为约束准则（注入 System Prompt 动态段） |
 
-### 3. 主动回复 (Proactive)
+### 3. 回复配置 (Proactive)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `proactive_reply_enabled` | `boolean` | `false` | 启用群聊主动回复功能总开关 |
 | `proactive_interval_mins` | `number` | `3` | 主动回复轮询窗口期（分钟，期间有新消息才唤醒） |
+| `proactive_buffer_size` | `number` | `10` | 主动回复滑动窗口消息保留条数 |
+| `proactive_random_enabled` | `boolean` | `false` | 启用群聊普通消息随机概率唤醒 |
+| `proactive_random_probability` | `number` | `0.05` | 普通消息随机唤醒概率（0~1，`0.05` 即 5%） |
+| `proactive_cooldown_mins` | `number` | `10` | 主动回复冷却时间（分钟，防止频繁插话） |
 | `proactive_only_text` | `boolean` | `false` | 仅回复纯文本内容（多模态媒体消息不主动触发） |
 | `proactive_idle_enabled` | `boolean` | `false` | 启用潜水超时主动唤醒（冷场破冰冒泡） |
 | `proactive_idle_timeout_mins` | `number` | `120` | 潜水超时阈值（分钟） |
@@ -111,6 +134,13 @@ dsh plugin --profile web add link:.
 | `face_store_dir` | `string` | `".dsh/napcat/faces"` | 本地表情库文件存储目录 |
 | `face_sub_type` | `number` | `1` | OneBot 11 发送表情使用的 sub_type 字段值 |
 | `face_evict_policy` | `string` | `"evict_lru"` | 库容满额淘汰策略 (`reject` 拒绝 / `evict_lru` 淘汰最久未用) |
+
+### 6. 黑话学习 (Slang)
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集与注入黑话上下文（保存对后续新会话生效） |
+| `slang_budget_chars` | `number` | `5000` | 黑话知识库字符预算上限 |
+| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 黑话 Markdown 文档保存路径 |
 
 > **配置下线说明**：群聊强制引用/艾特死配置（`group_reply_quote`、`group_reply_at`）及空回复行为面板已下线。出站回复遵循「用户侧静默原则」，是否引用与艾特统一由大模型通过 `send_qq_message` 工具参数（`reply_to`、`at_user`）自主决策。独立后台 Agent 参数也已清退下线。
 
@@ -146,7 +176,7 @@ pnpm test:quick    # 快速执行测试（跳过 build）
 
 - [快速上手 (docs/getting-started.md)](docs/getting-started.md)：环境依赖、安装步骤、NapCat WS 配置与验证指南。
 - [系统架构 (docs/architecture.md)](docs/architecture.md)：模块总览、生命周期装配、用户侧静默出站体系、记忆与表情体系。
-- [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 5 大 Tab 完整配置项、默认值与迁移说明。
+- [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 6 大 Tab 完整配置项、默认值与迁移说明。
 - [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 13 个 Agent 工具契约与 9 个纯两字中文斜杠命令。
 - [故障排查 (docs/troubleshooting.md)](docs/troubleshooting.md)：出站静默未调用工具、预设隔离、连接异常等问题排查指引。
 
