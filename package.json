@@ -1,7 +1,7 @@
 {
   "name": "dsh-napcat-bridge",
   "version": "0.1.1",
-  "description": "DSH NapCat QQ bridge plugin — 接入 NapCat(OneBot 11) 让 DeepSeek Harness agent 在 QQ 群聊/私聊对话、检索历史、收发文件",
+  "description": "DeepSeek Harness × NapCat(OneBot 11) QQ 桥接：零手写配置、30 项参数全 WebUI 可视化，群聊/私聊开箱即用，内置两层记忆·表情包·黑话体系",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
