@@ -222,9 +222,9 @@ export interface ReadChatHistoryParams {
    * 'text' | 'image' | 'sticker' | 'file' | 'group_file' | 'forward' | 'record' | 'video' | 'poke' | 'reply' | 'emoji_like'
    */
   type?: string | string[];
-  /** 起始时间: 支持毫秒数字、秒级数字、相对时间字符串 ("30m", "2h", "1d", "7d") 或日期时间字符串 ("2026-08-30", "2026-08-30 12:00:00") */
+  /** 起始时间: 支持毫秒数字、秒级数字、相对时间字符串 ("30m", "2h", "1d", "7d")、裸时间 ("19:00", "19:00:00") 或日期时间字符串 ("10-30 19:00", "2026-10-30 12:00:00") */
   since?: number | string;
-  /** 截止时间: 支持毫秒数字、秒级数字、相对时间字符串或日期时间字符串 */
+  /** 截止时间: 支持毫秒数字、秒级数字、相对时间字符串、裸时间 ("20:00") 或日期时间字符串 */
   until?: number | string;
   /** 快捷相对时间窗口: 检索过去指定时间段内的消息 (如 "1h", "6h", "1d", "7d")，等效于 since = now - relative */
   relative?: string;

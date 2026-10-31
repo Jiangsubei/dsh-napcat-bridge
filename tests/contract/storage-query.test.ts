@@ -350,6 +350,88 @@ describe('契约测试: SQLite 消息存储与读记录多条件查询 (Storage 
     expect(res.messages).toHaveLength(1);
     expect(res.messages[0].msg_id).toBe(4001);
   });
+
+  it('契约 17: parseTimeValue 支持裸时间 ("19:00", "19:00:00")，自动补全本地当前日期且支持防未来跨天回退', async () => {
+    const { parseTimeValue } = await import('../../src/storage/database.js');
+    const now = new Date();
+
+    // 1. 裸时间 "HH:mm" 解析
+    const ts19 = parseTimeValue('19:00', false);
+    expect(ts19).toBeDefined();
+    const d19 = new Date(ts19!);
+    expect(d19.getHours()).toBe(19);
+    expect(d19.getMinutes()).toBe(0);
+    expect(d19.getSeconds()).toBe(0);
+    expect(d19.getMilliseconds()).toBe(0);
+
+    // 2. isEnd = true 时秒数与毫秒补齐为 59:999
+    const ts19End = parseTimeValue('19:00', true);
+    expect(ts19End).toBeDefined();
+    const d19End = new Date(ts19End!);
+    expect(d19End.getHours()).toBe(19);
+    expect(d19End.getMinutes()).toBe(0);
+    expect(d19End.getSeconds()).toBe(59);
+    expect(d19End.getMilliseconds()).toBe(999);
+
+    // 3. 跨天防未来回退校验：如果指定时间晚于当前时间（未来），since 自动回退至昨天
+    const futureHour = (now.getHours() + 2) % 24;
+    // 只有当 futureHour > now.getHours() 时才处于未来
+    if (futureHour > now.getHours()) {
+      const futureTimeStr = `${String(futureHour).padStart(2, '0')}:00`;
+      const tsFuture = parseTimeValue(futureTimeStr, false);
+      expect(tsFuture).toBeDefined();
+      expect(tsFuture!).toBeLessThan(now.getTime());
+      const dFuture = new Date(tsFuture!);
+      const yesterday = new Date(now.getTime() - 86400000);
+      expect(dFuture.getDate()).toBe(yesterday.getDate());
+    }
+  });
+
+  it('契约 18: parseTimeValue 支持省略年份的月日格式 ("10-30 19:00", "10-30") 并正确识别为当年', async () => {
+    const { parseTimeValue } = await import('../../src/storage/database.js');
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    const ts = parseTimeValue('10-30 19:00', false);
+    expect(ts).toBeDefined();
+    const d = new Date(ts!);
+    expect(d.getMonth()).toBe(9); // 10月 -> index 9
+    expect(d.getDate()).toBe(30);
+    expect(d.getHours()).toBe(19);
+    expect(d.getMinutes()).toBe(0);
+    // 不应被原生 Date.parse 误判为 2001 年
+    expect(d.getFullYear()).toBe(currentYear);
+  });
+
+  it('契约 19: readHistory 传入裸时间 since: "19:00" 正确生效，不再退回最早历史老消息', () => {
+    const now = new Date();
+    // 构造三条消息：
+    // 1) 很久以前的老消息 (模拟 2026-08-30 的历史第一条消息)
+    // 2) 今天 18:00 的消息
+    // 3) 今天 19:30 的消息
+    const oldTime = new Date('2026-08-30T08:40:00+08:00').getTime();
+    const today18 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0, 0).getTime();
+    const today1930 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 30, 0).getTime();
+
+    db.saveMessage({
+      msg_id: 5001, peer: 'group_test_time', user_id: 'u1', sender_name: 'U1', time: oldTime,
+      type: 'text', content: '8月30日历史老消息', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+    db.saveMessage({
+      msg_id: 5002, peer: 'group_test_time', user_id: 'u1', sender_name: 'U1', time: today18,
+      type: 'text', content: '今天18点消息', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+    db.saveMessage({
+      msg_id: 5003, peer: 'group_test_time', user_id: 'u1', sender_name: 'U1', time: today1930,
+      type: 'text', content: '今天19点半消息', raw: '{}', file_id: null, busid: null, local_path: null, fingerprint: null, recalled: 0, self: 0, reply_to: null,
+    });
+
+    // 传入 since: '19:00'，期望仅返回 19:30 的消息 (5003)，绝对不能回退到 5001 或 5002
+    const res = db.readHistory('group_test_time', { since: '19:00', order: 'asc' });
+    expect(res.messages).toHaveLength(1);
+    expect(res.messages[0].msg_id).toBe(5003);
+    expect(res.messages[0].content).toBe('今天19点半消息');
+  });
 });
 
 describe('契约测试: MediaStorageManager 媒体落盘与魔数推断 (Media Storage Contract)', () => {

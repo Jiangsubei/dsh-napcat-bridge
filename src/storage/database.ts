@@ -125,7 +125,47 @@ export function parseTimeValue(val: number | string | undefined | null, isEnd = 
     return Number.isNaN(ts) ? undefined : ts;
   }
 
-  // 6. ISO 8601 或其他标准日期格式
+  // 6. 裸时间格式 HH:mm(:ss)? (自动补全本地当前年月日，若 since 晚于当前时间则防未来回退 1 天)
+  const timeOnlyMatch = str.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (timeOnlyMatch) {
+    const hh = Number(timeOnlyMatch[1]);
+    const mm = Number(timeOnlyMatch[2]);
+    const ss = timeOnlyMatch[3] !== undefined ? Number(timeOnlyMatch[3]) : (isEnd ? 59 : 0);
+    const ms = isEnd ? 999 : 0;
+    if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60 && ss >= 0 && ss < 60) {
+      const now = new Date();
+      const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, ss, ms);
+      // 聊天历史记录属于过去。若起始时间晚于当前时刻，说明是指昨天的该时刻，自动回退 1 天
+      if (!isEnd && targetDate.getTime() > now.getTime()) {
+        targetDate.setDate(targetDate.getDate() - 1);
+      }
+      const ts = targetDate.getTime();
+      return Number.isNaN(ts) ? undefined : ts;
+    }
+  }
+
+  // 7. 省略年份的月日或月日时间格式 MM-DD 或 MM-DD HH:mm(:ss)? (自动补全当前年份，若 since 晚于当前时间则回退 1 年)
+  const monthDayMatch = str.match(/^(\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if (monthDayMatch) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = Number(monthDayMatch[1]) - 1;
+    const d = Number(monthDayMatch[2]);
+    const hh = monthDayMatch[3] !== undefined ? Number(monthDayMatch[3]) : (isEnd ? 23 : 0);
+    const mm = monthDayMatch[4] !== undefined ? Number(monthDayMatch[4]) : (isEnd ? 59 : 0);
+    const ss = monthDayMatch[5] !== undefined ? Number(monthDayMatch[5]) : (isEnd ? 59 : 0);
+    const ms = isEnd ? 999 : 0;
+    if (m >= 0 && m < 12 && d >= 1 && d <= 31 && hh >= 0 && hh < 24 && mm >= 0 && mm < 60 && ss >= 0 && ss < 60) {
+      const targetDate = new Date(y, m, d, hh, mm, ss, ms);
+      if (!isEnd && targetDate.getTime() > now.getTime()) {
+        targetDate.setFullYear(y - 1);
+      }
+      const ts = targetDate.getTime();
+      return Number.isNaN(ts) ? undefined : ts;
+    }
+  }
+
+  // 8. ISO 8601 或其他标准日期格式
   const parsed = Date.parse(str);
   if (!Number.isNaN(parsed)) {
     return parsed;
@@ -392,6 +432,13 @@ export class MessageDatabase {
     // 5. 友好时间解析与范围筛选
     let sinceTs = parseTimeValue(params.since, false);
     const untilTs = parseTimeValue(params.until, true);
+
+    if (params.since !== undefined && params.since !== null && String(params.since).trim() !== '' && sinceTs === undefined) {
+      console.warn(`[MessageDatabase] readHistory: 无法解析 since 时间参数 "${params.since}"，该筛选条件已被忽略`);
+    }
+    if (params.until !== undefined && params.until !== null && String(params.until).trim() !== '' && untilTs === undefined) {
+      console.warn(`[MessageDatabase] readHistory: 无法解析 until 时间参数 "${params.until}"，该筛选条件已被忽略`);
+    }
 
     if (params.relative && sinceTs === undefined) {
       sinceTs = parseTimeValue(params.relative, false);
