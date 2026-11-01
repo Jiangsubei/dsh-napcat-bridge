@@ -60,7 +60,7 @@ export function registerSlangPromptContext(
       }
       return [
         '# 社群黑话与网络流行语知识库 (Slang & Memes)',
-        '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（若仅凭标题和标签无法理解含义，请使用 query_slang 工具查询完整释义与例句）：',
+        '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（如果已经有对应条目的话，请先使用 query_slang 工具查询详细释义与例句）：',
         rawMarkdown.trim(),
       ].join('\n\n');
     },
