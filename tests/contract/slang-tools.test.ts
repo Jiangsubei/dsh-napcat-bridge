@@ -358,4 +358,68 @@ describe('Slang Tools Contract Tests', () => {
       expect(resNotFound.error).toContain('未找到');
     });
   });
+
+  describe('DSH Lossless JSON 契约测试 (Lossless JSON Compliance)', () => {
+    it('record_slang execute 输出严格符合 DSH Lossless JSON 约束 (无任何 undefined 键)', async () => {
+      const defs = createSlangToolDefinitions(storage);
+      const recordDef = defs.find((d) => d.name === 'record_slang')!;
+
+      const result = await (recordDef as any).execute({
+        term: '猫娘=猫粮',
+        tags: '谐音梗、亲密调侃',
+        definition: '猫娘与猫粮谐音',
+        example: '你是一袋猫粮',
+      });
+
+      expect(result.success).toBe(true);
+      // 遍历所有顶层及嵌套属性，绝无 undefined
+      for (const [key, value] of Object.entries(result)) {
+        expect(value).not.toBeUndefined();
+      }
+      // 未触发淘汰时，evicted_term 经过清洗后绝不存在
+      expect(result.hasOwnProperty('evicted_term')).toBe(false);
+      // 无损 JSON 序列化幂等验证
+      expect(JSON.stringify(result)).toBe(JSON.stringify(JSON.parse(JSON.stringify(result))));
+    });
+
+    it('query_slang execute 输出严格符合 DSH Lossless JSON 约束', async () => {
+      const defs = createSlangToolDefinitions(storage);
+      const queryDef = defs.find((d) => d.name === 'query_slang')!;
+
+      await recordSlang({ term: '牢大', tags: '科比', definition: '梗', example: '例' }, storage);
+
+      // 1. 成功查询
+      const resSuccess = await (queryDef as any).execute({ term: '牢大' });
+      expect(resSuccess.success).toBe(true);
+      for (const [_k, v] of Object.entries(resSuccess)) {
+        expect(v).not.toBeUndefined();
+      }
+
+      // 2. 失败查询
+      const resFail = await (queryDef as any).execute({ term: '未收录词' });
+      expect(resFail.success).toBe(false);
+      for (const [_k, v] of Object.entries(resFail)) {
+        expect(v).not.toBeUndefined();
+      }
+    });
+
+    it('manage_slang execute 输出严格符合 DSH Lossless JSON 约束', async () => {
+      const defs = createSlangToolDefinitions(storage);
+      const manageDef = defs.find((d) => d.name === 'manage_slang')!;
+
+      // 1. list
+      const resList = await (manageDef as any).execute({ action: 'list' });
+      expect(resList.success).toBe(true);
+      for (const [_k, v] of Object.entries(resList)) {
+        expect(v).not.toBeUndefined();
+      }
+
+      // 2. delete
+      const resDel = await (manageDef as any).execute({ action: 'delete', term: '不存在的词' });
+      expect(resDel.success).toBe(false);
+      for (const [_k, v] of Object.entries(resDel)) {
+        expect(v).not.toBeUndefined();
+      }
+    });
+  });
 });

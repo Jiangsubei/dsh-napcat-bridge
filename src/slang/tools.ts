@@ -16,6 +16,15 @@ import type {
 } from '../types/index.js';
 
 /**
+ * 清洗对象以确保严格符合 DSH Lossless JSON 约束 (递归剥离所有 undefined 字段)
+ * 彻底避免 DSH snapshotJsonValue 抛出 "value is not lossless JSON" 错误
+ */
+export function toLosslessJson<T>(val: T): T {
+  if (val === undefined || val === null) return val;
+  return JSON.parse(JSON.stringify(val));
+}
+
+/**
  * 查询黑话完整释义与例句
  */
 export async function querySlang(
@@ -70,7 +79,7 @@ export async function recordSlang(
       entry: res.entry,
       total: res.total,
       max_entries: res.maxEntries,
-      evicted_term: res.evictedTerm,
+      ...(res.evictedTerm ? { evicted_term: res.evictedTerm } : {}),
       message:
         res.action === 'created'
           ? `成功收录黑话词条 "${res.entry.term}" (当前总容量 ${res.total}/${res.maxEntries} 条)${evictedNotice}`
@@ -202,13 +211,15 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
         ],
       },
       async execute(args: any) {
-        return querySlang(
+        const res = await querySlang(
           {
             term: String(args.term || ''),
           },
           storage
-        ) as any;
+        );
+        return toLosslessJson(res) as any;
       },
+
     }),
     defineTool({
       name: 'record_slang',
@@ -246,7 +257,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
         ],
       },
       async execute(args: any) {
-        return recordSlang(
+        const res = await recordSlang(
           {
             term: String(args.term || ''),
             tags: String(args.tags || ''),
@@ -254,8 +265,10 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
             example: String(args.example || ''),
           },
           storage
-        ) as any;
+        );
+        return toLosslessJson(res) as any;
       },
+
     }),
     defineTool({
       name: 'manage_slang',
@@ -326,7 +339,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
         },
       },
       async execute(args: any) {
-        return manageSlang(
+        const res = await manageSlang(
           {
             action: args.action,
             term: args.term ? String(args.term) : undefined,
@@ -338,8 +351,10 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
             limit: typeof args.limit === 'number' ? args.limit : undefined,
           },
           storage
-        ) as any;
+        );
+        return toLosslessJson(res) as any;
       },
+
     }),
   ];
 }
