@@ -302,16 +302,22 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
   const [addingSlangLoading, setAddingSlangLoading] = useState(false);
 
   // Security Tab 本地添加表单状态
+  const [isAddingPrivateBlacklist, setIsAddingPrivateBlacklist] = useState(false);
   const [newPrivateBlacklistId, setNewPrivateBlacklistId] = useState('');
+  const [isAddingGroupBlacklist, setIsAddingGroupBlacklist] = useState(false);
   const [newGroupBlacklistId, setNewGroupBlacklistId] = useState('');
 
+  const [isAddingPrivatePermOverride, setIsAddingPrivatePermOverride] = useState(false);
   const [newPrivatePermOverrideId, setNewPrivatePermOverrideId] = useState('');
   const [newPrivatePermOverrideLevel, setNewPrivatePermOverrideLevel] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('workspace-write');
+  const [isAddingGroupPermOverride, setIsAddingGroupPermOverride] = useState(false);
   const [newGroupPermOverrideId, setNewGroupPermOverrideId] = useState('');
-  const [newGroupPermOverrideLevel, setNewGroupPermOverrideLevel] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('read-only');
+  const [newGroupPermOverrideLevel, setNewGroupPermOverrideLevel] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('workspace-write');
 
+  const [isAddingPrivateCodingOverride, setIsAddingPrivateCodingOverride] = useState(false);
   const [newPrivateCodingOverrideId, setNewPrivateCodingOverrideId] = useState('');
   const [newPrivateCodingOverrideEnabled, setNewPrivateCodingOverrideEnabled] = useState(true);
+  const [isAddingGroupCodingOverride, setIsAddingGroupCodingOverride] = useState(false);
   const [newGroupCodingOverrideId, setNewGroupCodingOverrideId] = useState('');
   const [newGroupCodingOverrideEnabled, setNewGroupCodingOverrideEnabled] = useState(false);
 
@@ -949,46 +955,76 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               {/* 私聊黑名单 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊黑名单</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="QQ 号 (如: 1000000003)"
-                    value={newPrivateBlacklistId}
-                    onChange={(e) => setNewPrivateBlacklistId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊黑名单</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-private-blacklist-btn ${faceStyle.actionBtn}`}
                     title="添加私聊黑名单"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingPrivateBlacklist}
                     onClick={() => {
-                      const id = newPrivateBlacklistId.trim();
-                      if (!id) return;
-                      const list = [...(draft.private_blacklist || [])];
-                      if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
-                        list.push({ id });
-                        handleFieldChange('private_blacklist', list);
-                      }
+                      setIsAddingPrivateBlacklist(true);
                       setNewPrivateBlacklistId('');
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingPrivateBlacklist && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="QQ 号 (如: 1000000003)"
+                      value={newPrivateBlacklistId}
+                      onChange={(e) => setNewPrivateBlacklistId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingPrivateBlacklist(false);
+                          setNewPrivateBlacklistId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newPrivateBlacklistId.trim();
+                          if (!id) return;
+                          const list = [...(draft.private_blacklist || [])];
+                          if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
+                            list.push({ id });
+                            handleFieldChange('private_blacklist', list);
+                          }
+                          setIsAddingPrivateBlacklist(false);
+                          setNewPrivateBlacklistId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {(draft.private_blacklist || []).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1001,9 +1037,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1011,9 +1047,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{id}</strong>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除黑名单"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.private_blacklist || []).filter((i: any) => (typeof i === 'string' ? i : i.id) !== id);
                               handleFieldChange('private_blacklist', list);
@@ -1025,53 +1060,83 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                       );
                     })}
                   </div>
-                ) : (
+                ) : !isAddingPrivateBlacklist ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无私聊黑名单</div>
-                )}
+                ) : null}
               </div>
 
               {/* 群聊黑名单 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊黑名单</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="群号 (如: 8000000001)"
-                    value={newGroupBlacklistId}
-                    onChange={(e) => setNewGroupBlacklistId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊黑名单</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-group-blacklist-btn ${faceStyle.actionBtn}`}
                     title="添加群聊黑名单"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingGroupBlacklist}
                     onClick={() => {
-                      const id = newGroupBlacklistId.trim();
-                      if (!id) return;
-                      const list = [...(draft.group_blacklist || [])];
-                      if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
-                        list.push({ id });
-                        handleFieldChange('group_blacklist', list);
-                      }
+                      setIsAddingGroupBlacklist(true);
                       setNewGroupBlacklistId('');
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingGroupBlacklist && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="群号 (如: 8000000001)"
+                      value={newGroupBlacklistId}
+                      onChange={(e) => setNewGroupBlacklistId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingGroupBlacklist(false);
+                          setNewGroupBlacklistId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newGroupBlacklistId.trim();
+                          if (!id) return;
+                          const list = [...(draft.group_blacklist || [])];
+                          if (!list.some((item: any) => (typeof item === 'string' ? item : item.id) === id)) {
+                            list.push({ id });
+                            handleFieldChange('group_blacklist', list);
+                          }
+                          setIsAddingGroupBlacklist(false);
+                          setNewGroupBlacklistId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {(draft.group_blacklist || []).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1084,9 +1149,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1094,9 +1159,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{id}</strong>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除黑名单"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.group_blacklist || []).filter((i: any) => (typeof i === 'string' ? i : i.id) !== id);
                               handleFieldChange('group_blacklist', list);
@@ -1108,9 +1172,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                       );
                     })}
                   </div>
-                ) : (
+                ) : !isAddingGroupBlacklist ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无群聊黑名单</div>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -1141,60 +1205,91 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               {/* 私聊权限例外覆盖 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊权限例外覆盖</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="QQ 号 (如: 1000000003)"
-                    value={newPrivatePermOverrideId}
-                    onChange={(e) => setNewPrivatePermOverrideId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
-                  <select
-                    value={newPrivatePermOverrideLevel}
-                    onChange={(e) => setNewPrivatePermOverrideLevel(e.target.value as any)}
-                    className={fieldStyle.input}
-                    style={{ width: '130px', height: '32px', fontSize: '12px', flexShrink: 0 }}
-                  >
-                    <option value="workspace-write">工作区读写</option>
-                    <option value="read-only">只读</option>
-                    <option value="danger-full-access">完全</option>
-                  </select>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊权限例外覆盖</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-private-perm-btn ${faceStyle.actionBtn}`}
                     title="添加私聊权限例外"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingPrivatePermOverride}
                     onClick={() => {
-                      const id = newPrivatePermOverrideId.trim();
-                      if (!id) return;
-                      const list = [...(draft.session_permission_overrides || [])];
-                      const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'user');
-                      const item = { id, type: 'user' as const, permission: newPrivatePermOverrideLevel };
-                      if (existingIdx >= 0) {
-                        list[existingIdx] = item;
-                      } else {
-                        list.push(item);
-                      }
-                      handleFieldChange('session_permission_overrides', list);
+                      setIsAddingPrivatePermOverride(true);
                       setNewPrivatePermOverrideId('');
+                      setNewPrivatePermOverrideLevel('workspace-write');
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingPrivatePermOverride && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="QQ 号 (如: 1000000003)"
+                      value={newPrivatePermOverrideId}
+                      onChange={(e) => setNewPrivatePermOverrideId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <select
+                      value={newPrivatePermOverrideLevel}
+                      onChange={(e) => setNewPrivatePermOverrideLevel(e.target.value as any)}
+                      className={fieldStyle.input}
+                      style={{ width: '130px', height: '30px', fontSize: '12px', flexShrink: 0 }}
+                    >
+                      <option value="workspace-write">工作区读写</option>
+                      <option value="read-only">只读</option>
+                      <option value="danger-full-access">完全</option>
+                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingPrivatePermOverride(false);
+                          setNewPrivatePermOverrideId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newPrivatePermOverrideId.trim();
+                          if (!id) return;
+                          const list = [...(draft.session_permission_overrides || [])];
+                          const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'user');
+                          const item = { id, type: 'user' as const, permission: newPrivatePermOverrideLevel };
+                          if (existingIdx >= 0) {
+                            list[existingIdx] = item;
+                          } else {
+                            list.push(item);
+                          }
+                          handleFieldChange('session_permission_overrides', list);
+                          setIsAddingPrivatePermOverride(false);
+                          setNewPrivatePermOverrideId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {((draft.session_permission_overrides || []).filter((i: any) => i.type === 'user')).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1207,9 +1302,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1222,9 +1317,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           </div>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除权限例外"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.session_permission_overrides || []).filter((i: any) => !(i.id === item.id && i.type === 'user'));
                               handleFieldChange('session_permission_overrides', list);
@@ -1235,9 +1329,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         </div>
                       ))}
                   </div>
-                ) : (
+                ) : !isAddingPrivatePermOverride ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无私聊权限例外</div>
-                )}
+                ) : null}
               </div>
 
               {/* 群聊权限设置 */}
@@ -1260,60 +1354,91 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               {/* 群聊权限例外覆盖 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊权限例外覆盖</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="群号 (如: 8000000001)"
-                    value={newGroupPermOverrideId}
-                    onChange={(e) => setNewGroupPermOverrideId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
-                  <select
-                    value={newGroupPermOverrideLevel}
-                    onChange={(e) => setNewGroupPermOverrideLevel(e.target.value as any)}
-                    className={fieldStyle.input}
-                    style={{ width: '130px', height: '32px', fontSize: '12px', flexShrink: 0 }}
-                  >
-                    <option value="workspace-write">工作区读写</option>
-                    <option value="read-only">只读</option>
-                    <option value="danger-full-access">完全</option>
-                  </select>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊权限例外覆盖</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-group-perm-btn ${faceStyle.actionBtn}`}
                     title="添加群聊权限例外"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingGroupPermOverride}
                     onClick={() => {
-                      const id = newGroupPermOverrideId.trim();
-                      if (!id) return;
-                      const list = [...(draft.session_permission_overrides || [])];
-                      const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'group');
-                      const item = { id, type: 'group' as const, permission: newGroupPermOverrideLevel };
-                      if (existingIdx >= 0) {
-                        list[existingIdx] = item;
-                      } else {
-                        list.push(item);
-                      }
-                      handleFieldChange('session_permission_overrides', list);
+                      setIsAddingGroupPermOverride(true);
                       setNewGroupPermOverrideId('');
+                      setNewGroupPermOverrideLevel('workspace-write');
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingGroupPermOverride && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="群号 (如: 8000000001)"
+                      value={newGroupPermOverrideId}
+                      onChange={(e) => setNewGroupPermOverrideId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <select
+                      value={newGroupPermOverrideLevel}
+                      onChange={(e) => setNewGroupPermOverrideLevel(e.target.value as any)}
+                      className={fieldStyle.input}
+                      style={{ width: '130px', height: '30px', fontSize: '12px', flexShrink: 0 }}
+                    >
+                      <option value="workspace-write">工作区读写</option>
+                      <option value="read-only">只读</option>
+                      <option value="danger-full-access">完全</option>
+                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingGroupPermOverride(false);
+                          setNewGroupPermOverrideId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newGroupPermOverrideId.trim();
+                          if (!id) return;
+                          const list = [...(draft.session_permission_overrides || [])];
+                          const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'group');
+                          const item = { id, type: 'group' as const, permission: newGroupPermOverrideLevel };
+                          if (existingIdx >= 0) {
+                            list[existingIdx] = item;
+                          } else {
+                            list.push(item);
+                          }
+                          handleFieldChange('session_permission_overrides', list);
+                          setIsAddingGroupPermOverride(false);
+                          setNewGroupPermOverrideId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {((draft.session_permission_overrides || []).filter((i: any) => i.type === 'group')).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1326,9 +1451,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1341,9 +1466,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           </div>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除权限例外"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.session_permission_overrides || []).filter((i: any) => !(i.id === item.id && i.type === 'group'));
                               handleFieldChange('session_permission_overrides', list);
@@ -1354,9 +1478,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         </div>
                       ))}
                   </div>
-                ) : (
+                ) : !isAddingGroupPermOverride ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无群聊权限例外</div>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -1381,59 +1505,90 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               {/* 私聊 Coding 工具例外覆盖 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', marginTop: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊 Coding 工具例外覆盖</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="QQ 号 (如: 1000000003)"
-                    value={newPrivateCodingOverrideId}
-                    onChange={(e) => setNewPrivateCodingOverrideId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
-                  <select
-                    value={newPrivateCodingOverrideEnabled ? 'true' : 'false'}
-                    onChange={(e) => setNewPrivateCodingOverrideEnabled(e.target.value === 'true')}
-                    className={fieldStyle.input}
-                    style={{ width: '90px', height: '32px', fontSize: '12px', flexShrink: 0 }}
-                  >
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>私聊 Coding 工具例外覆盖</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-private-coding-btn ${faceStyle.actionBtn}`}
                     title="添加私聊工具例外"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingPrivateCodingOverride}
                     onClick={() => {
-                      const id = newPrivateCodingOverrideId.trim();
-                      if (!id) return;
-                      const list = [...(draft.coding_tools_overrides || [])];
-                      const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'user');
-                      const item = { id, type: 'user' as const, enabled: newPrivateCodingOverrideEnabled };
-                      if (existingIdx >= 0) {
-                        list[existingIdx] = item;
-                      } else {
-                        list.push(item);
-                      }
-                      handleFieldChange('coding_tools_overrides', list);
+                      setIsAddingPrivateCodingOverride(true);
                       setNewPrivateCodingOverrideId('');
+                      setNewPrivateCodingOverrideEnabled(true);
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingPrivateCodingOverride && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="QQ 号 (如: 1000000003)"
+                      value={newPrivateCodingOverrideId}
+                      onChange={(e) => setNewPrivateCodingOverrideId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <select
+                      value={newPrivateCodingOverrideEnabled ? 'true' : 'false'}
+                      onChange={(e) => setNewPrivateCodingOverrideEnabled(e.target.value === 'true')}
+                      className={fieldStyle.input}
+                      style={{ width: '90px', height: '30px', fontSize: '12px', flexShrink: 0 }}
+                    >
+                      <option value="true">开启</option>
+                      <option value="false">关闭</option>
+                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingPrivateCodingOverride(false);
+                          setNewPrivateCodingOverrideId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newPrivateCodingOverrideId.trim();
+                          if (!id) return;
+                          const list = [...(draft.coding_tools_overrides || [])];
+                          const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'user');
+                          const item = { id, type: 'user' as const, enabled: newPrivateCodingOverrideEnabled };
+                          if (existingIdx >= 0) {
+                            list[existingIdx] = item;
+                          } else {
+                            list.push(item);
+                          }
+                          handleFieldChange('coding_tools_overrides', list);
+                          setIsAddingPrivateCodingOverride(false);
+                          setNewPrivateCodingOverrideId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {((draft.coding_tools_overrides || []).filter((i: any) => i.type === 'user')).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1446,9 +1601,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1461,9 +1616,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           </div>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除工具例外"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.coding_tools_overrides || []).filter((i: any) => !(i.id === item.id && i.type === 'user'));
                               handleFieldChange('coding_tools_overrides', list);
@@ -1474,9 +1628,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         </div>
                       ))}
                   </div>
-                ) : (
+                ) : !isAddingPrivateCodingOverride ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无私聊 Coding 工具例外</div>
-                )}
+                ) : null}
               </div>
 
               {/* 群聊 Coding 工具默认设置 */}
@@ -1493,59 +1647,90 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
               {/* 群聊 Coding 工具例外覆盖 */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊 Coding 工具例外覆盖</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    placeholder="群号 (如: 8000000001)"
-                    value={newGroupCodingOverrideId}
-                    onChange={(e) => setNewGroupCodingOverrideId(e.target.value)}
-                    className={fieldStyle.input}
-                    style={{ flex: 1, height: '32px', fontSize: '12px' }}
-                  />
-                  <select
-                    value={newGroupCodingOverrideEnabled ? 'true' : 'false'}
-                    onChange={(e) => setNewGroupCodingOverrideEnabled(e.target.value === 'true')}
-                    className={fieldStyle.input}
-                    style={{ width: '90px', height: '32px', fontSize: '12px', flexShrink: 0 }}
-                  >
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }}>群聊 Coding 工具例外覆盖</div>
                   <button
                     type="button"
-                    className={faceStyle.actionBtn}
+                    className={`napcat-security-add-group-coding-btn ${faceStyle.actionBtn}`}
                     title="添加群聊工具例外"
-                    style={{
-                      height: '32px',
-                      padding: '0 12px',
-                      fontSize: '12px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap',
-                      minWidth: '72px',
-                      justifyContent: 'center',
-                    }}
+                    disabled={isAddingGroupCodingOverride}
                     onClick={() => {
-                      const id = newGroupCodingOverrideId.trim();
-                      if (!id) return;
-                      const list = [...(draft.coding_tools_overrides || [])];
-                      const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'group');
-                      const item = { id, type: 'group' as const, enabled: newGroupCodingOverrideEnabled };
-                      if (existingIdx >= 0) {
-                        list[existingIdx] = item;
-                      } else {
-                        list.push(item);
-                      }
-                      handleFieldChange('coding_tools_overrides', list);
+                      setIsAddingGroupCodingOverride(true);
                       setNewGroupCodingOverrideId('');
+                      setNewGroupCodingOverrideEnabled(false);
                     }}
                   >
-                    <IconPlus size={12} /> 添加
+                    <IconPlus size={12} />
                   </button>
                 </div>
+
+                {isAddingGroupCodingOverride && (
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: '8px',
+                      background: 'var(--dsw-alias-bg-layer-2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="群号 (如: 8000000001)"
+                      value={newGroupCodingOverrideId}
+                      onChange={(e) => setNewGroupCodingOverrideId(e.target.value)}
+                      className={fieldStyle.input}
+                      style={{ flex: 1, height: '30px', fontSize: '12px' }}
+                      autoFocus
+                    />
+                    <select
+                      value={newGroupCodingOverrideEnabled ? 'true' : 'false'}
+                      onChange={(e) => setNewGroupCodingOverrideEnabled(e.target.value === 'true')}
+                      className={fieldStyle.input}
+                      style={{ width: '90px', height: '30px', fontSize: '12px', flexShrink: 0 }}
+                    >
+                      <option value="true">开启</option>
+                      <option value="false">关闭</option>
+                    </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className={cardStyle.discard}
+                        style={{ height: '30px', padding: '0 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          setIsAddingGroupCodingOverride(false);
+                          setNewGroupCodingOverrideId('');
+                        }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className={cardStyle.save}
+                        style={{ height: '30px', padding: '0 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => {
+                          const id = newGroupCodingOverrideId.trim();
+                          if (!id) return;
+                          const list = [...(draft.coding_tools_overrides || [])];
+                          const existingIdx = list.findIndex((i: any) => i.id === id && i.type === 'group');
+                          const item = { id, type: 'group' as const, enabled: newGroupCodingOverrideEnabled };
+                          if (existingIdx >= 0) {
+                            list[existingIdx] = item;
+                          } else {
+                            list.push(item);
+                          }
+                          handleFieldChange('coding_tools_overrides', list);
+                          setIsAddingGroupCodingOverride(false);
+                          setNewGroupCodingOverrideId('');
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {((draft.coding_tools_overrides || []).filter((i: any) => i.type === 'group')).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1558,9 +1743,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '6px 10px',
+                            padding: '8px 10px',
                             border: '1px solid var(--dsw-alias-border-l2)',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             background: 'var(--dsw-alias-bg-layer-2)',
                             fontSize: '12px',
                           }}
@@ -1573,9 +1758,8 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                           </div>
                           <button
                             type="button"
-                            className={faceStyle.actionBtn}
+                            className={`${faceStyle.actionBtn} ${faceStyle.actionDelete}`}
                             title="移除工具例外"
-                            style={{ padding: '2px 6px', color: 'var(--dsw-alias-label-error)' }}
                             onClick={() => {
                               const list = (draft.coding_tools_overrides || []).filter((i: any) => !(i.id === item.id && i.type === 'group'));
                               handleFieldChange('coding_tools_overrides', list);
@@ -1586,9 +1770,9 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
                         </div>
                       ))}
                   </div>
-                ) : (
+                ) : !isAddingGroupCodingOverride ? (
                   <div style={{ fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>暂无群聊 Coding 工具例外</div>
-                )}
+                ) : null}
               </div>
             </div>
           </div>

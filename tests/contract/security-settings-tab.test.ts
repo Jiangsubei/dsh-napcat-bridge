@@ -81,4 +81,48 @@ describe('契约测试: Web UI 设置卡「权限与安全」Tab (Security Setti
     expect(html).toContain('id="napcat-coding-tools-private-default"');
     expect(html).toContain('id="napcat-coding-tools-group-default"');
   });
+
+  it('契约 4: security Tab 头部右对齐渲染 6 处加号图标按钮，且默认不常驻输入框', () => {
+    const { html } = renderCard({ initialTab: 'security' });
+
+    // 6 处头部加号图标按钮
+    expect(html).toContain('title="添加私聊黑名单"');
+    expect(html).toContain('title="添加群聊黑名单"');
+    expect(html).toContain('title="添加私聊权限例外"');
+    expect(html).toContain('title="添加群聊权限例外"');
+    expect(html).toContain('title="添加私聊工具例外"');
+    expect(html).toContain('title="添加群聊工具例外"');
+
+    // 默认折叠状态下，不应常驻显示输入框 placeholder
+    expect(html).not.toContain('placeholder="QQ 号 (如: 1000000003)"');
+    expect(html).not.toContain('placeholder="群号 (如: 8000000001)"');
+  });
+
+  it('契约 5: security Tab 已有条目渲染卡片，右侧右对齐垃圾桶删除图标按钮', () => {
+    const { html } = renderCard({
+      initialTab: 'security',
+      initialConfig: {
+        private_blacklist: ['1000000002'],
+        group_blacklist: ['8000000002'],
+        session_permission_overrides: [
+          { id: '1000000003', type: 'user', permission: 'read-only' },
+          { id: '8000000003', type: 'group', permission: 'workspace-write' },
+        ],
+        coding_tools_overrides: [
+          { id: '1000000004', type: 'user', enabled: true },
+          { id: '8000000004', type: 'group', enabled: false },
+        ],
+      },
+    });
+
+    expect(html).toContain('1000000002');
+    expect(html).toContain('8000000002');
+    expect(html).toContain('1000000003');
+    expect(html).toContain('8000000003');
+    expect(html).toContain('1000000004');
+    expect(html).toContain('8000000004');
+    expect(html).toContain('title="移除黑名单"');
+    expect(html).toContain('title="移除权限例外"');
+    expect(html).toContain('title="移除工具例外"');
+  });
 });
