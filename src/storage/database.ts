@@ -18,6 +18,7 @@ import type {
   ReadChatHistoryResult,
   FaceRecord,
   FaceQueryOptions,
+  FaceMoodSummary,
   ScheduledTaskRecord,
   ScheduledTaskStatus,
   RecurringRule,
@@ -989,6 +990,38 @@ export class MessageDatabase {
     return row ? this.mapFaceRow(row) : null;
   }
 
+  /**
+   * 获取表情包库容概览与情绪统计 (按情绪频次降序)
+   */
+  getFaceMoodSummary(limitMoods: number = 8): FaceMoodSummary {
+    const db = this.ensureDb();
+    const countRow = db
+      .prepare(`SELECT COUNT(*) as cnt FROM faces WHERE deleted_at IS NULL AND enabled = 1`)
+      .get() as any;
+    const total = Number(countRow?.cnt ?? 0);
+
+    const safeLimit = Math.max(1, limitMoods);
+    const rows = db
+      .prepare(
+        `
+      SELECT mood, COUNT(*) as cnt
+      FROM faces
+      WHERE deleted_at IS NULL AND enabled = 1 AND mood IS NOT NULL AND TRIM(mood) != ''
+      GROUP BY mood
+      ORDER BY cnt DESC, mood ASC
+      LIMIT ?
+    `
+      )
+      .all(safeLimit) as any[];
+
+    const moods = rows.map((r) => ({
+      mood: String(r.mood),
+      count: Number(r.cnt ?? 0),
+    }));
+
+    return { total, moods };
+  }
+
   queryFaces(options: FaceQueryOptions = {}): { faces: FaceRecord[]; total: number; has_more: boolean } {
     const db = this.ensureDb();
     const whereClauses: string[] = [];
@@ -1002,16 +1035,22 @@ export class MessageDatabase {
       whereClauses.push('enabled = 1');
     }
 
-    if (options.mood) {
-      whereClauses.push('mood = ?');
-      params.push(options.mood.trim());
+    if (options.mood && options.mood.trim()) {
+      whereClauses.push('mood LIKE ?');
+      params.push(`%${options.mood.trim()}%`);
     }
 
     if (options.untagged) {
       whereClauses.push(`(tags IS NULL OR tags = '' OR tags = '[]')`);
-    } else if (options.tag) {
+    } else if (options.tag && options.tag.trim()) {
       whereClauses.push('tags LIKE ?');
-      params.push(`%"${options.tag.trim()}"%`);
+      params.push(`%${options.tag.trim()}%`);
+    }
+
+    if (options.query && options.query.trim()) {
+      const q = options.query.trim();
+      whereClauses.push('(tags LIKE ? OR mood LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`);
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';

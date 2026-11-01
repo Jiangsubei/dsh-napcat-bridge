@@ -92,6 +92,44 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(res.faces[0].file_path).toBe('/secret/path/cat.png');
   });
 
+  it('契约 1.1: list_faces 支持 query 综合模糊关键词与 tag/mood 模糊检索', async () => {
+    db.insertFace({
+      id: 'face_active_1',
+      file_path: '/secret/path/cat.png',
+      md5: 'md5_1',
+      source: 'manual',
+      tags: ['猫猫', '可爱'],
+      mood: '卖萌',
+      enabled: true,
+      size: 1024,
+      format: 'png',
+    });
+    db.insertFace({
+      id: 'face_active_2',
+      file_path: '/secret/path/panda.jpg',
+      md5: 'md5_2',
+      source: 'collect',
+      tags: ['熊猫头', '问号'],
+      mood: '疑惑',
+      enabled: true,
+      size: 2048,
+      format: 'jpg',
+    });
+
+    // 1. query 模糊匹配
+    const resQuery = await listFaces({ query: '问号' }, { db });
+    expect(resQuery.faces.map((f) => f.id)).toContain('face_active_2');
+    expect(resQuery.faces.map((f) => f.id)).not.toContain('face_active_1');
+
+    // 2. tag 模糊匹配 (搜 "猫" 可命中 "猫猫")
+    const resTag = await listFaces({ tag: '猫' }, { db });
+    expect(resTag.faces.map((f) => f.id)).toContain('face_active_1');
+
+    // 3. Lossless JSON 检验: 无 undefined，返回值序列化往返一致
+    const serialized = JSON.stringify(resQuery);
+    expect(JSON.parse(serialized)).toEqual(resQuery);
+  });
+
   it('契约 2: send_face 构造 sub_type=1 并接入串行队列与更新使用频次', async () => {
     const testImgPath = path.join(faceDir, 'doge.png');
     fs.writeFileSync(testImgPath, 'fake-doge-image-binary');

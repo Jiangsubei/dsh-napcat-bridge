@@ -514,7 +514,13 @@ export interface FaceRecord {
   deleted_at?: number | null; // 软删除时间戳（7 天后悔期保留），null/undefined 表示活跃
 }
 
+export interface FaceMoodSummary {
+  total: number;
+  moods: Array<{ mood: string; count: number }>;
+}
+
 export interface FaceQueryOptions {
+  query?: string;
   tag?: string;
   mood?: string;
   untagged?: boolean;
@@ -536,6 +542,7 @@ export interface FaceSummaryItem {
 }
 
 export interface ListFacesParams {
+  query?: string;
   tag?: string;
   mood?: string;
   untagged?: boolean;

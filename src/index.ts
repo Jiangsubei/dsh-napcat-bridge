@@ -36,7 +36,7 @@ import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
-import { registerNapCatDynamicPrompt } from './prompt/dynamic.js';
+import { registerNapCatDynamicPrompt, registerFacePromptContext } from './prompt/dynamic.js';
 import { setupMemoryService } from './memory/index.js';
 import { getRuntimePresetDefinition, QQ_PRESET_ID } from './constants/preset.js';
 
@@ -267,6 +267,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const dbPath = resolveDshPath(dshHome, undefined, DEFAULT_DATABASE_PATH);
   const db = new MessageDatabase(dbPath);
   db.init();
+
+  // 2.2 注册表情包动态情绪锚点上下文段 (napcat:face_summary, order: 48)
+  const unregisterFaceDynamicPrompt = registerFacePromptContext(
+    ctx,
+    db,
+    () => Boolean(currentConfig().face_enabled)
+  );
 
   // 启动时自动规范化存量表情包存储路径，并从工作区 profiles 目录自愈找回物理文件
   try {
@@ -1358,6 +1365,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
     if (typeof unregisterDynamicPrompt === 'function') {
       unregisterDynamicPrompt();
+    }
+    if (typeof unregisterFaceDynamicPrompt === 'function') {
+      unregisterFaceDynamicPrompt();
     }
     await server.stop().catch(() => {});
     await sessionManager.dispose().catch(() => {});

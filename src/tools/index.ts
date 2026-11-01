@@ -922,6 +922,7 @@ export async function listFaces(
   }
   const limit = Math.min(Math.max(params?.limit ?? 100, 1), 100);
   const queryRes = ctx.db.queryFaces({
+    query: params?.query,
     mood: params?.mood,
     tag: params?.tag,
     untagged: params?.untagged,
@@ -1897,13 +1898,17 @@ export function registerAgentTools(
             description:
               '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；返回合法 face_id、标签、情绪及本地路径。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
             parameters: {
+              query: {
+                type: 'string',
+                description: '综合模糊检索关键词，同时匹配表情的情绪或标签内容（如 "问号", "猫猫", "委屈"）',
+              },
               mood: {
                 type: 'string',
-                description: '按情绪或语境筛选，如 "嘲讽", "卖萌", "赞同", "无奈", "开心"',
+                description: '按情绪或语境筛选（支持包含匹配，如 "嘲讽", "卖萌", "赞同", "无奈", "开心"）',
               },
               tag: {
                 type: 'string',
-                description: '按画面元素或文字标签筛选，如 "猫猫", "熊猫头", "问号"',
+                description: '按画面元素或文字标签筛选（支持包含匹配，如 "猫猫", "熊猫头", "问号"）',
               },
               untagged: {
                 type: 'boolean',

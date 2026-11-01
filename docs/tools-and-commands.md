@@ -67,7 +67,7 @@
 
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
-| `list_faces` | 在机器人本地表情库中检索可用的表情包。支持按情绪（mood）或标签（tag）查验可用库存，返回合法 `face_id`、标签、情绪及本地路径。 | `mood` (string, 按情绪筛选，如"嘲讽"、"卖萌"、"开心")<br>`tag` (string, 按画面元素筛选，如"猫猫"、"问号")<br>`untagged` (boolean, 是否只查未打标表情)<br>`limit` (number: 默认 100) |
+| `list_faces` | 在机器人本地表情库中检索可用的表情包。支持按情绪（mood）、标签（tag）或自由关键词（query）查验可用库存，返回合法 `face_id`、标签、情绪及本地路径。 | `query` (string, 综合模糊检索，同时匹配标签与情绪)<br>`mood` (string, 按情绪筛选，支持模糊包含匹配)<br>`tag` (string, 按画面元素筛选，支持模糊包含匹配)<br>`untagged` (boolean, 是否只查未打标表情)<br>`limit` (number: 默认 100) |
 | `send_face` | 根据表情 ID 将一张本地表情包作为独立表情消息发送到聊天中。用于表达情绪、接梗斗图。 | `face_id` (string, 必填: 目标表情 ID，来自 `list_faces` 结果) |
 | `collect_face` | 将聊天中的图片收录入本地表情库，并打上初始标签与情绪。用于用户要求“把这图存成表情”或聊天中出现好梗图时。 | `tags` (string[], 必填: 画面内容与文字标签列表)<br>`mood` (string, 必填: 情绪与语境意图)<br>`message_id` (number, 可选: 目标消息 ID，默认绑定当前入站消息) |
 | `manage_faces` | 管理与维护本地表情包库：更新已有表情标签/情绪、删除表情、查询存储配额占用、或按 LRU 淘汰冷门表情。 | `action` (string, 必填: `update`/`delete`/`query_quota`/`evict`)<br>`face_id` (string, update 或 delete 时必填)<br>`tags` (string[], update 时可选)<br>`mood` (string, update 时可选)<br>`count` (number, evict 时可选淘汰数量) |
