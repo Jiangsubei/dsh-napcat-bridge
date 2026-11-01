@@ -1354,7 +1354,7 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             <div style={{ padding: '12px 0 8px', borderTop: '1px solid var(--dsw-alias-border-l2)' }}>
               <h4 style={{ margin: '4px 0 6px', fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>Coding 工具组装载</h4>
               <p className={fieldStyle.hint} style={{ margin: '0 0 12px' }}>
-                控制新建会话是否装载 7 个工程编码工具 (bash/pwsh/read/write/edit/read_image/working_directory)。关闭可彻底隔离高危操作并大幅节省 Token。
+                控制新建会话是否装载 5 个工程编码工具 (bash/pwsh/read/write/edit)。关闭可彻底隔离高危操作并大幅节省 Token（视觉识图 read_image 与目录感知 working_directory 作为只读工具始终保留）。
               </p>
 
               {/* 私聊 Coding 工具默认设置 */}

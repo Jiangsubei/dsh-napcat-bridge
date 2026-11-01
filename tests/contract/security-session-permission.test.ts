@@ -243,9 +243,9 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
   });
 
   describe('3. Coding 工具组装载与硬隔离契约 (CHK-05)', () => {
-    const CODING_TOOLS = ['bash', 'pwsh', 'read', 'write', 'edit', 'read_image', 'working_directory'];
+    const CODING_TOOLS = ['bash', 'pwsh', 'read', 'write', 'edit'];
 
-    it('群聊默认关闭 Coding 工具组：assemble 的 tools 列表中彻底排除 7 个工程工具，保留 QQ 与 Web 工具', async () => {
+    it('群聊默认关闭 Coding 工具组：assemble 的 tools 列表中排除 5 个工程工具，保留只读工具 (read_image, working_directory) 以及 QQ/Web 工具', async () => {
       const sessionManager = (booted.ctx as any)['napcat-session'] || new SessionManager(booted.ctx, tmpHome);
       // 普通群 999999999 -> coding_tools_group_default = false
       const agent = await sessionManager.getOrCreateAgent('group_999999999');
@@ -253,10 +253,14 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
       const asm = await booted.ctx.systemPrompt.assemble({ scope: agent, agent } as any);
       const toolNames = new Set((asm.tools as any[]).map((t) => t.name));
 
-      // 7 个 Coding 工具必须全部被排除
+      // 5 个 Coding 工具必须全部被排除
       for (const t of CODING_TOOLS) {
         expect(toolNames.has(t), `工具 ${t} 应当在非 Coding 会话中被裁剪`).toBe(false);
       }
+
+      // 只读视觉与目录工具必须保留，不被误剔除
+      expect(toolNames.has('read_image')).toBe(true);
+      expect(toolNames.has('working_directory')).toBe(true);
 
       // 核心业务/QQ交互/Web工具仍正常保留
       expect(toolNames.has('send_qq_message')).toBe(true);
@@ -264,7 +268,7 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
       expect(toolNames.has('read_chat_history')).toBe(true);
     });
 
-    it('特例群覆盖开启 Coding 工具组：7 个工程工具正常保留装载', async () => {
+    it('特例群覆盖开启 Coding 工具组：5 个工程工具正常保留装载', async () => {
       const sessionManager = (booted.ctx as any)['napcat-session'] || new SessionManager(booted.ctx, tmpHome);
       // 特例群 NORMAL_GROUP_ID -> coding_tools_overrides 设为 true
       const agent = await sessionManager.getOrCreateAgent(`group_${NORMAL_GROUP_ID}`);
@@ -276,6 +280,8 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
       expect(toolNames.has('read')).toBe(true);
       expect(toolNames.has('write')).toBe(true);
       expect(toolNames.has('edit')).toBe(true);
+      expect(toolNames.has('read_image')).toBe(true);
+      expect(toolNames.has('working_directory')).toBe(true);
       if (process.platform === 'win32') {
         expect(toolNames.has('pwsh')).toBe(true);
       } else {

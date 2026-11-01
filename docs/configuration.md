@@ -62,7 +62,7 @@ WebUI 设置卡片分为 7 个分组 Tab，共包含 38 项有效运行时配置
 | `session_permission_private_default` | `string` | `"workspace-write"` | 私聊新建会话初始权限模式（可选：`workspace-write` 工作区读写 / `read-only` 只读 / `danger-full-access` 完全）。已有会话热恢复不强行覆盖。 |
 | `session_permission_group_default` | `string` | `"read-only"` | 群聊新建会话初始权限模式（可选：`read-only` 只读 / `workspace-write` 工作区读写 / `danger-full-access` 完全）。已有会话热恢复不强行覆盖。 |
 | `session_permission_overrides` | `SessionPermissionOverride[]` | `[]` | 针对特定 QQ 号或群号的新建会话初始权限例外覆盖表。优先级高于全局默认配置。 |
-| `coding_tools_private_default` | `boolean` | `true` | 私聊新建会话是否默认装载工程 Coding 工具组（`bash`、`pwsh`、`read`、`write`、`edit`、`read_image`、`working_directory`）。 |
+| `coding_tools_private_default` | `boolean` | `true` | 私聊新建会话是否默认装载工程 Coding 工具组（`bash`、`pwsh`、`read`、`write`、`edit`；只读视觉工具 `read_image` 与目录感知 `working_directory` 始终保留不受此开关影响）。 |
 | `coding_tools_group_default` | `boolean` | `false` | 群聊新建会话是否默认装载工程 Coding 工具组。默认关闭以彻底隔离高危操作并节省群聊 Token。 |
 | `coding_tools_overrides` | `CodingToolsOverride[]` | `[]` | 针对特定 QQ 号或群号的 Coding 工具组装载例外覆盖表。优先级高于全局默认配置。 |
 

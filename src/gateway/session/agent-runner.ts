@@ -414,7 +414,7 @@ export class SessionAgentRunner {
     const applyCodingToolsRestriction = (agentCtx: any) => {
       const toolsSvc: any = agentCtx?.tools || (agentCtx?.get && agentCtx.get('tools'));
       if (toolsSvc && typeof toolsSvc.restrict === 'function') {
-        const potential = ['bash', 'pwsh', 'read', 'write', 'edit', 'read_image', 'working_directory'];
+        const potential = ['bash', 'pwsh', 'read', 'write', 'edit'];
         const known: string[] | undefined = Array.isArray(toolsSvc.names) ? toolsSvc.names : undefined;
         const deny = known
           ? potential.filter((t) => known.includes(t))
