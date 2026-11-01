@@ -126,3 +126,15 @@
      - **可编辑文件清单**（只能修改哪些文件，严禁触碰其他文件）；
      - **依赖服务与接口**（调用什么接口）；
      - **验收标准与测试用例**（如何验证）。
+
+---
+
+## 6. DSH 工具开发规范与 Lossless JSON 红线
+
+在开发或重构供 DSH 调用的 Agent 工具（`defineTool`）时，**必须严格遵守 DSH Lossless JSON 输出约束**，彻底杜绝 `Error: tool returned invalid output: value is not lossless JSON` 报错：
+
+- **严禁向 DSH 返回包含 `undefined` 字段的对象**：可选字段严禁直接赋值 `undefined`，必须使用条件展开语法 `...(cond ? { key: val } : {})`；
+- **强制使用 `toLosslessJson` 清洗**：所有 `defineTool` 的 `execute` 方法返回前，**必须统一包裹 `toLosslessJson(res)`** 递归剥离所有 `undefined` 字段；
+- **契约测试必须覆盖无损 JSON 校验**：为工具编写契约测试时，必须遍历断言 `execute` 返回结果的所有键值绝不含 `undefined`。
+
+> 踩坑案例、欺骗性现象与底层根因考究详见：[devlog/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md](file:///f:/Project/dsh-napcat-bridge/devlog/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md)（参考提交 `cd2b848`、`9c26493`、`e0f94e3`）。
