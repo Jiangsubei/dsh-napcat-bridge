@@ -95,9 +95,10 @@ WebUI 设置卡片分为 7 个分组 Tab，共包含 38 项有效运行时配置
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集（`record_slang`、`manage_slang`）并向提示词注入黑话上下文。 |
-| `slang_budget_chars` | `number` | `5000` | 黑话知识库最大字符预算。 |
-| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 黑话词条 Markdown 文件的存储路径。 |
+| `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集（`query_slang`、`record_slang`、`manage_slang`）并向提示词注入 L1 常驻索引。 |
+| `slang_max_entries` | `number` | `300` | 黑话知识库最大允许收录条数上限。 |
+| `slang_evict_policy` | `'reject' \| 'evict_lru'` | `'reject'` | 黑话满额策略（`reject`: 拒绝新增并提示手动清理, `evict_lru`: 自动淘汰模型查阅次数最少的最冷门词条）。 |
+| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 存量旧版黑话 Markdown 迁移源路径 (启动时自动平滑迁入 SQLite，不删除原物理文件)。 |
 
 ---
 

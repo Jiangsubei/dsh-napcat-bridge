@@ -45,17 +45,20 @@ describe('契约测试: Web UI 设置卡「黑话学习」Tab (Slang Settings Ta
     expect(html).toContain('黑话学习');
   });
 
-  it('契约 2: 切换至 slang Tab，默认渲染总开关 slang_enabled (默认开启) 及配置字段', () => {
+  it('契约 2: 切换至 slang Tab，默认渲染总开关 slang_enabled (默认开启) 及条数上限与淘汰策略', () => {
     const { html } = renderCard({ initialTab: 'slang' });
 
     expect(html).toContain('napcat-tabpanel-slang');
     expect(html).toContain('装载黑话学习套件');
     expect(html).toContain('id="napcat-slang-enabled"');
 
-    // 默认开启，展示预算上限与保存路径
-    expect(html).toContain('id="napcat-slang-budget-chars"');
-    expect(html).toContain('id="napcat-slang-storage-path"');
-    expect(html).toContain('字符占用:');
+    // 默认开启，展示条数容量上限与满额淘汰策略
+    expect(html).toContain('id="napcat-slang-max-entries"');
+    expect(html).toContain('id="napcat-slang-evict-policy"');
+    expect(html).toContain('容量状态:');
+
+    // 确认已废弃的字符预算配置项已彻底清理
+    expect(html).not.toContain('id="napcat-slang-budget-chars"');
   });
 
   it('契约 3: 当 slang_enabled 为 false 时，折叠下级配置与词条列表', () => {
@@ -66,16 +69,16 @@ describe('契约测试: Web UI 设置卡「黑话学习」Tab (Slang Settings Ta
 
     expect(html).toContain('napcat-tabpanel-slang');
     expect(html).toContain('id="napcat-slang-enabled"');
-    expect(html).not.toContain('id="napcat-slang-budget-chars"');
-    expect(html).not.toContain('id="napcat-slang-storage-path"');
-    expect(html).not.toContain('字符占用:');
+    expect(html).not.toContain('id="napcat-slang-max-entries"');
+    expect(html).not.toContain('id="napcat-slang-evict-policy"');
+    expect(html).not.toContain('容量状态:');
   });
 
-  it('契约 4: 渲染「+ 添加黑话」图标按钮且位于字符占用右侧', () => {
+  it('契约 4: 渲染「+ 添加黑话」图标按钮且位于容量状态右侧', () => {
     const { html } = renderCard({ initialTab: 'slang' });
 
     expect(html).toContain('napcat-slang-add-btn');
     expect(html).toContain('title="添加黑话词条"');
-    expect(html).toMatch(/字符占用[\s\S]*?napcat-slang-add-btn/);
+    expect(html).toMatch(/容量状态[\s\S]*?napcat-slang-add-btn/);
   });
 });

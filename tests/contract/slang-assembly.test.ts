@@ -7,9 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { EventEmitter } from 'node:events';
 import { SlangStorage } from '../../src/slang/storage.js';
-import { setupSlangService, registerSlangPromptContext } from '../../src/slang/index.js';
+import { setupSlangService } from '../../src/slang/index.js';
 import { registerAgentTools } from '../../src/tools/index.js';
 import { MessageDatabase } from '../../src/storage/database.js';
 
@@ -68,9 +67,9 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
     } catch {}
   });
 
-  it('契约 1: setupSlangService 正确注册 napcat:slang 动态提示词且 order 为 45', async () => {
-    const storage = new SlangStorage(testFilePath, 5000);
+  it('契约 1: setupSlangService 正确注册 napcat:slang 动态提示词且 order 为 45，注入 L1 紧凑常驻索引', async () => {
     const service = setupSlangService(mockCtx, {
+      db,
       storagePath: testFilePath,
       registerGlobalTools: false,
     });
@@ -84,24 +83,25 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
     // 未添加词条时，Prompt 为空
     expect(promptObj.text()).toBe('');
 
-    // 添加词条后，Prompt 同步包含最新黑话
+    // 添加词条后，Prompt 同步包含最新黑话的 L1 索引与 query_slang 指引
     await service.storage.recordEntry({
       term: '牢大',
-      definition: '科比梗',
+      tags: '科比、坠机调侃',
+      definition: '科比梗详细释义',
       example: '想你了牢大',
     });
 
     const activePrompt = promptObj.text();
     expect(activePrompt).toContain('社群黑话与网络流行语知识库');
-    expect(activePrompt).toContain('**牢大**');
-    expect(activePrompt).toContain('科比梗');
+    expect(activePrompt).toContain('query_slang');
+    expect(activePrompt).toContain('- 牢大：科比、坠机调侃');
 
     service.dispose();
     expect(registeredPrompts.has('napcat:slang')).toBe(false);
   });
 
-  it('契约 2: registerAgentTools 在 slang_enabled !== false 时装配 record_slang 与 manage_slang', () => {
-    const storage = new SlangStorage(testFilePath, 5000);
+  it('契约 2: registerAgentTools 在 slang_enabled !== false 时装配 query_slang, record_slang 与 manage_slang', () => {
+    const storage = new SlangStorage(db, 300, 'reject');
     const unregister = registerAgentTools(mockCtx, {
       db,
       dshHome: tmpDir,
@@ -109,16 +109,18 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
       configGetter: () => ({ slang_enabled: true }),
     });
 
+    expect(registeredTools.has('query_slang')).toBe(true);
     expect(registeredTools.has('record_slang')).toBe(true);
     expect(registeredTools.has('manage_slang')).toBe(true);
 
     unregister();
+    expect(registeredTools.has('query_slang')).toBe(false);
     expect(registeredTools.has('record_slang')).toBe(false);
     expect(registeredTools.has('manage_slang')).toBe(false);
   });
 
   it('契约 3: registerAgentTools 在 slang_enabled === false 时跳过黑话工具装配', () => {
-    const storage = new SlangStorage(testFilePath, 5000);
+    const storage = new SlangStorage(db, 300, 'reject');
     const unregister = registerAgentTools(mockCtx, {
       db,
       dshHome: tmpDir,
@@ -126,6 +128,7 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
       configGetter: () => ({ slang_enabled: false }),
     });
 
+    expect(registeredTools.has('query_slang')).toBe(false);
     expect(registeredTools.has('record_slang')).toBe(false);
     expect(registeredTools.has('manage_slang')).toBe(false);
 

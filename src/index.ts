@@ -50,7 +50,7 @@ import { TaskScheduler } from './scheduler/index.js';
 export * from './memory/index.js';
 import { setupSlangService } from './slang/index.js';
 import { registerSlangRoutes } from './server/slang-routes.js';
-import { DEFAULT_SLANG_STORAGE_PATH, DEFAULT_SLANG_BUDGET_CHARS } from './constants/index.js';
+import { DEFAULT_SLANG_STORAGE_PATH, DEFAULT_SLANG_MAX_ENTRIES, DEFAULT_SLANG_EVICT_POLICY } from './constants/index.js';
 export * from './slang/index.js';
 
 
@@ -284,11 +284,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const rawSlangPath = currentConfig().slang_storage_path;
   const normalizedSlangPath = resolveDshPath(dshHome, rawSlangPath, DEFAULT_SLANG_STORAGE_PATH);
   slangService = setupSlangService(ctx, {
+    db,
     storagePath: normalizedSlangPath,
     dshHome,
     registerGlobalTools: false,
-    budgetChars: currentConfig().slang_budget_chars,
-    getBudgetChars: () => currentConfig().slang_budget_chars ?? DEFAULT_SLANG_BUDGET_CHARS,
+    maxEntries: currentConfig().slang_max_entries,
+    getMaxEntries: () => currentConfig().slang_max_entries ?? DEFAULT_SLANG_MAX_ENTRIES,
+    evictPolicy: currentConfig().slang_evict_policy,
+    getEvictPolicy: () => currentConfig().slang_evict_policy ?? DEFAULT_SLANG_EVICT_POLICY,
     enabled: currentConfig().slang_enabled,
     getEnabled: () => currentConfig().slang_enabled ?? true,
   });

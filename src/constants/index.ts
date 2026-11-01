@@ -56,7 +56,8 @@ export const DEFAULT_FACE_EVICT_POLICY = 'evict_lru';
 export const DEFAULT_FACE_GRACE_PERIOD_DAYS = 7;
 
 export const DEFAULT_SLANG_ENABLED = true;
-export const DEFAULT_SLANG_BUDGET_CHARS = 5000;
+export const DEFAULT_SLANG_MAX_ENTRIES = 300;
+export const DEFAULT_SLANG_EVICT_POLICY = 'reject';
 export const DEFAULT_SLANG_STORAGE_PATH = '.dsh/napcat/slang/slang.md';
 
 

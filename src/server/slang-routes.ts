@@ -1,6 +1,7 @@
 /**
  * dsh-napcat-bridge: 黑话管理 HTTP REST API 路由
  * 为 Web UI 设置卡提供黑话列表获取、二次编辑与删除。
+ * 遵循四参数体系：标题 (term) + 标签 (tags) + 释义 (definition) + 例句 (example)。
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -20,7 +21,7 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
   let unregisterList: Array<() => void> = [];
   let isDisposed = false;
 
-  // 1. GET /plugins/dsh-napcat-bridge/slang
+  // 1. GET & POST /plugins/dsh-napcat-bridge/slang
   const slangCollectionHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const method = (req.method || 'GET').toUpperCase();
     if (method === 'GET') {
@@ -31,8 +32,8 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
           ok: true,
           entries,
           total: stats.total,
-          char_count: stats.charCount,
-          budget_chars: stats.budgetChars,
+          max_entries: stats.maxEntries,
+          evict_policy: stats.evictPolicy,
         });
       } catch (err: any) {
         sendJson(res, 500, { ok: false, error: err?.message || '获取黑话列表失败' });
@@ -42,26 +43,37 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
     if (method === 'POST') {
       try {
         const body = (await parseJsonBody(req)) || {};
-        const { term, definition, example } = body;
+        const { term, tags, definition, example } = body;
         if (!term || typeof term !== 'string' || !term.trim()) {
           sendJson(res, 400, { ok: false, error: '缺少词条名称 (term)' });
+          return;
+        }
+        if (!tags || typeof tags !== 'string' || !tags.trim()) {
+          sendJson(res, 400, { ok: false, error: '缺少简要概述标签 (tags)' });
           return;
         }
         if (!definition || typeof definition !== 'string' || !definition.trim()) {
           sendJson(res, 400, { ok: false, error: '缺少核心释义 (definition)' });
           return;
         }
+        if (!example || typeof example !== 'string' || !example.trim()) {
+          sendJson(res, 400, { ok: false, error: '缺少典型例句 (example)' });
+          return;
+        }
+
         const recordRes = await storage.recordEntry({
           term: term.trim(),
+          tags: tags.trim(),
           definition: definition.trim(),
-          example: typeof example === 'string' ? example.trim() : '',
+          example: example.trim(),
         });
         sendJson(res, 200, {
           ok: true,
           entry: recordRes.entry,
           action: recordRes.action,
-          char_count: recordRes.charCount,
-          budget_chars: recordRes.budgetChars,
+          total: recordRes.total,
+          max_entries: recordRes.maxEntries,
+          evicted_term: recordRes.evictedTerm,
         });
       } catch (err: any) {
         sendJson(res, 400, { ok: false, error: err?.message || '添加词条失败' });
@@ -80,14 +92,16 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
     }
     try {
       const body = (await parseJsonBody(req)) || {};
-      const { term, new_term, definition, example } = body;
+      const { term, new_term, tags, definition, example } = body;
       if (!term || typeof term !== 'string' || !term.trim()) {
         sendJson(res, 400, { ok: false, error: '缺少词条名称 (term)' });
         return;
       }
+
       try {
         const updated = await storage.editEntry(term, {
-          newTerm: new_term,
+          new_term,
+          tags: typeof tags === 'string' ? tags.trim() : undefined,
           definition,
           example,
         });
@@ -95,8 +109,8 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
         sendJson(res, 200, {
           ok: true,
           entry: updated,
-          char_count: stats.charCount,
-          budget_chars: stats.budgetChars,
+          total: stats.total,
+          max_entries: stats.maxEntries,
         });
       } catch (err: any) {
         if (err?.message?.includes('未找到')) {
@@ -132,8 +146,8 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
       const stats = storage.getStats();
       sendJson(res, 200, {
         ok: true,
-        char_count: stats.charCount,
-        budget_chars: stats.budgetChars,
+        total: stats.total,
+        max_entries: stats.maxEntries,
       });
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: err?.message || '删除黑话失败' });
@@ -158,13 +172,13 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
   if (directServer) {
     doRegister(directServer);
   } else if (typeof ctx.inject === 'function') {
-    ctx.inject(['webServer'], (subCtx: any) => {
-      const server = subCtx?.webServer ?? (typeof (ctx as any).get === 'function' ? (ctx as any).get('webServer') : undefined);
-      doRegister(server);
+    ctx.inject(['webServer'], (injectedCtx: any) => {
+      const s = typeof injectedCtx.get === 'function' ? injectedCtx.get('webServer') : undefined;
+      if (s) doRegister(s);
     });
   }
 
-  const dispose = () => {
+  return () => {
     isDisposed = true;
     for (const unreg of unregisterList) {
       try {
@@ -173,12 +187,4 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
     }
     unregisterList = [];
   };
-
-  if (typeof ctx.effect === 'function') {
-    ctx.effect(() => () => {
-      dispose();
-    });
-  }
-
-  return dispose;
 }

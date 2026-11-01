@@ -21,7 +21,7 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 
 - **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
 - **发言黑名单与权限安全防线**：支持私聊与群聊发言黑名单（入库留存审计但永不唤醒与回复，管理员亦不豁免）；支持新建会话默认权限（私聊默认 `workspace-write`、群聊默认 `read-only`）及针对指定 QQ 号/群号的权限例外表；支持 Coding 工程工具组（bash/pwsh/read/write/edit）按私聊/群聊及例外表裁剪硬隔离（只读工具 `read_image` 与 `working_directory` 始终保留）。
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接设置、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 38 项参数支持 volatile 动态热更新。
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接设置、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 39 项参数支持 volatile 动态热更新。
 
 ---
 
@@ -85,7 +85,7 @@ dsh plugin --profile web add link:.
 
 ---
 
-## ⚙️ 运行时配置 (38 项)
+## ⚙️ 运行时配置 (39 项)
 
 配置卡片在 WebUI 中分为 7 个 Tab：
 
@@ -152,8 +152,9 @@ dsh plugin --profile web add link:.
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `slang_enabled` | `boolean` | `true` | 控制新建会话是否装载黑话工具集与注入黑话上下文（保存对后续新会话生效） |
-| `slang_budget_chars` | `number` | `5000` | 黑话知识库字符预算上限 |
-| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 黑话 Markdown 文档保存路径 |
+| `slang_max_entries` | `number` | `300` | 黑话知识库条数容量上限 (默认 300 条) |
+| `slang_evict_policy` | `'reject' \| 'evict_lru'` | `'reject'` | 黑话满额策略（`reject`: 拒绝新增, `evict_lru`: 淘汰模型查阅最少词条） |
+| `slang_storage_path` | `string` | `".dsh/napcat/slang/slang.md"` | 存量旧版黑话 Markdown 迁移源路径 (仅启动时迁移，不删原文件) |
 
 > **配置下线说明**：群聊强制引用/艾特死配置（`group_reply_quote`、`group_reply_at`）及空回复行为面板已下线。出站回复遵循「用户侧静默原则」，是否引用与艾特统一由大模型通过 `send_qq_message` 工具参数（`reply_to`、`at_user`）自主决策。独立后台 Agent 参数也已清退下线。
 

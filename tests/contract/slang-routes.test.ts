@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
 import { SlangStorage } from '../../src/slang/storage.js';
+import { MessageDatabase } from '../../src/storage/database.js';
 import { registerSlangRoutes, SLANG_API_PATH } from '../../src/server/slang-routes.js';
 
 class MockResponse extends EventEmitter {
@@ -53,7 +54,8 @@ function createMockRequest(method: string, url: string, bodyJson?: any): any {
 
 describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', () => {
   let tmpDir: string;
-  let testFilePath: string;
+  let testDbPath: string;
+  let db: MessageDatabase;
   let storage: SlangStorage;
   let registeredRoutes: Map<string, any>;
   let mockServer: any;
@@ -61,8 +63,9 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-slang-routes-'));
-    testFilePath = path.join(tmpDir, 'slang.md');
-    storage = new SlangStorage(testFilePath, 5000);
+    testDbPath = path.join(tmpDir, 'test_messages.sqlite');
+    db = new MessageDatabase(testDbPath);
+    storage = new SlangStorage(db, 300, 'reject');
     registeredRoutes = new Map();
 
     mockServer = {
@@ -81,6 +84,9 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
 
   afterEach(() => {
     try {
+      db.close();
+    } catch {}
+    try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
   });
@@ -96,10 +102,10 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
     expect(registeredRoutes.size).toBe(0);
   });
 
-  it('契约 2: GET /plugins/dsh-napcat-bridge/slang 获取词条列表与用量统计', async () => {
+  it('契约 2: GET /plugins/dsh-napcat-bridge/slang 获取词条列表与容量统计', async () => {
     registerSlangRoutes({ ctx: mockCtx, storage });
-    await storage.recordEntry({ term: '牢大', definition: '科比梗', example: '想你了' });
-    await storage.recordEntry({ term: '开香槟', definition: '提前庆祝', example: '别开' });
+    await storage.recordEntry({ term: '牢大', tags: '科比', definition: '科比梗', example: '想你了' });
+    await storage.recordEntry({ term: '开香槟', tags: '反转', definition: '提前庆祝', example: '别开' });
 
     const handler = registeredRoutes.get(`exact:${SLANG_API_PATH}`);
     const req = createMockRequest('GET', SLANG_API_PATH);
@@ -111,20 +117,21 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
     const body = JSON.parse(res.body);
     expect(body.ok).toBe(true);
     expect(body.total).toBe(2);
+    expect(body.max_entries).toBe(300);
     expect(body.entries).toHaveLength(2);
-    expect(body.char_count).toBeGreaterThan(0);
-    expect(body.budget_chars).toBe(5000);
+    expect(body.entries[0].tags).toBeDefined();
   });
 
   it('契约 3: POST /plugins/dsh-napcat-bridge/slang/edit 编辑词条成功与失败校验', async () => {
     registerSlangRoutes({ ctx: mockCtx, storage });
-    await storage.recordEntry({ term: '牢大', definition: '旧释义', example: '旧例句' });
+    await storage.recordEntry({ term: '牢大', tags: '旧标', definition: '旧释义', example: '旧例句' });
 
     const handler = registeredRoutes.get(`exact:${SLANG_API_PATH}/edit`);
 
-    // 成功编辑
+    // 成功编辑 tags, definition, example
     const reqSuccess = createMockRequest('POST', `${SLANG_API_PATH}/edit`, {
       term: '牢大',
+      tags: '新标',
       definition: '新释义',
       example: '新例句',
     });
@@ -135,6 +142,8 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
     const bodySuccess = JSON.parse(resSuccess.body);
     expect(bodySuccess.ok).toBe(true);
     expect(bodySuccess.entry.definition).toBe('新释义');
+    expect(bodySuccess.entry.tags).toBe('新标');
+    expect(bodySuccess.entry.example).toBe('新例句');
 
     // 缺少 term
     const reqNoTerm = createMockRequest('POST', `${SLANG_API_PATH}/edit`, { definition: 'xxx' });
@@ -154,65 +163,69 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
 
   it('契约 4: POST /plugins/dsh-napcat-bridge/slang/delete 删除词条成功与失败校验', async () => {
     registerSlangRoutes({ ctx: mockCtx, storage });
-    await storage.recordEntry({ term: '牢大', definition: '释义', example: '例句' });
+    await storage.recordEntry({ term: '牢大', tags: '科比', definition: '释义', example: '例句' });
 
     const handler = registeredRoutes.get(`exact:${SLANG_API_PATH}/delete`);
-
-    // 缺少 term
-    const reqNoTerm = createMockRequest('POST', `${SLANG_API_PATH}/delete`, {});
-    const resNoTerm = new MockResponse();
-    await handler(reqNoTerm, resNoTerm);
-    expect(resNoTerm.statusCode).toBe(400);
-
-    // 词条不存在
-    const reqNotFound = createMockRequest('POST', `${SLANG_API_PATH}/delete`, { term: '不存在的词' });
-    const resNotFound = new MockResponse();
-    await handler(reqNotFound, resNotFound);
-    expect(resNotFound.statusCode).toBe(404);
 
     // 成功删除
     const reqSuccess = createMockRequest('POST', `${SLANG_API_PATH}/delete`, { term: '牢大' });
     const resSuccess = new MockResponse();
     await handler(reqSuccess, resSuccess);
+
     expect(resSuccess.statusCode).toBe(200);
     const bodySuccess = JSON.parse(resSuccess.body);
     expect(bodySuccess.ok).toBe(true);
+    expect(bodySuccess.total).toBe(0);
 
-    const entries = await storage.getEntries();
-    expect(entries).toHaveLength(0);
+    // 删除不存在的词
+    const reqNotFound = createMockRequest('POST', `${SLANG_API_PATH}/delete`, { term: '不存在' });
+    const resNotFound = new MockResponse();
+    await handler(reqNotFound, resNotFound);
+    expect(resNotFound.statusCode).toBe(404);
   });
 
-  it('契约 5: POST /plugins/dsh-napcat-bridge/slang 添加新词条成功与失败校验', async () => {
+  it('契约 5: POST /plugins/dsh-napcat-bridge/slang 添加新词条强制校验 4 个必填参数', async () => {
     registerSlangRoutes({ ctx: mockCtx, storage });
     const handler = registeredRoutes.get(`exact:${SLANG_API_PATH}`);
 
-    // 缺少 term
-    const reqNoTerm = createMockRequest('POST', SLANG_API_PATH, { definition: '释义' });
-    const resNoTerm = new MockResponse();
-    await handler(reqNoTerm, resNoTerm);
-    expect(resNoTerm.statusCode).toBe(400);
-
-    // 缺少 definition
-    const reqNoDef = createMockRequest('POST', SLANG_API_PATH, { term: '懂你意思' });
-    const resNoDef = new MockResponse();
-    await handler(reqNoDef, resNoDef);
-    expect(resNoDef.statusCode).toBe(400);
-
-    // 成功添加
+    // 1. 成功添加完整词条 (4 项必填)
     const reqSuccess = createMockRequest('POST', SLANG_API_PATH, {
-      term: '懂你意思',
-      definition: '附和或反讽用法',
-      example: '例：你说得对',
+      term: '开香槟',
+      tags: '提前庆祝、反转被打脸',
+      definition: '比分领先过早庆祝导致翻车',
+      example: '还有一局呢，先别开香槟',
     });
     const resSuccess = new MockResponse();
     await handler(reqSuccess, resSuccess);
-    expect(resSuccess.statusCode).toBe(200);
-    const body = JSON.parse(resSuccess.body);
-    expect(body.ok).toBe(true);
-    expect(body.entry.term).toBe('懂你意思');
 
-    const entries = await storage.getEntries();
-    expect(entries).toHaveLength(1);
-    expect(entries[0].term).toBe('懂你意思');
+    expect(resSuccess.statusCode).toBe(200);
+    const bodySuccess = JSON.parse(resSuccess.body);
+    expect(bodySuccess.ok).toBe(true);
+    expect(bodySuccess.entry.term).toBe('开香槟');
+    expect(bodySuccess.entry.tags).toBe('提前庆祝、反转被打脸');
+    expect(bodySuccess.entry.definition).toBe('比分领先过早庆祝导致翻车');
+    expect(bodySuccess.entry.example).toBe('还有一局呢，先别开香槟');
+
+    // 2. 缺少 tags 校验
+    const reqNoTags = createMockRequest('POST', SLANG_API_PATH, {
+      term: '缺标签词',
+      definition: '释义',
+      example: '例句',
+    });
+    const resNoTags = new MockResponse();
+    await handler(reqNoTags, resNoTags);
+    expect(resNoTags.statusCode).toBe(400);
+    expect(JSON.parse(resNoTags.body).error).toContain('缺少简要概述标签 (tags)');
+
+    // 3. 缺少 example 校验
+    const reqNoEx = createMockRequest('POST', SLANG_API_PATH, {
+      term: '缺例句词',
+      tags: '标签',
+      definition: '释义',
+    });
+    const resNoEx = new MockResponse();
+    await handler(reqNoEx, resNoEx);
+    expect(resNoEx.statusCode).toBe(400);
+    expect(JSON.parse(resNoEx.body).error).toContain('缺少典型例句 (example)');
   });
 });

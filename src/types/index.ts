@@ -669,13 +669,32 @@ export interface ManageScheduledTasksResult {
 // ==================== 4.6 黑话学习与管理契约 ====================
 
 export interface SlangEntry {
+  id?: number;
   term: string;
+  tags?: string;
   definition: string;
-  example: string;
+  example?: string;
+  query_count?: number;
+  last_queried_at?: number | null;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface QuerySlangParams {
+  term: string;
+}
+
+export interface QuerySlangResult {
+  [key: string]: any;
+  success: boolean;
+  entry?: SlangEntry;
+  message?: string;
+  error?: string;
 }
 
 export interface RecordSlangParams {
   term: string;
+  tags: string;
   definition: string;
   example: string;
 }
@@ -685,8 +704,9 @@ export interface RecordSlangResult {
   success: boolean;
   entry?: SlangEntry;
   action: 'created' | 'updated';
-  char_count: number;
-  budget_chars: number;
+  total: number;
+  max_entries: number;
+  evicted_term?: string;
   message?: string;
   error?: string;
 }
@@ -694,9 +714,12 @@ export interface RecordSlangResult {
 export interface ManageSlangParams {
   action: 'list' | 'edit' | 'delete';
   term?: string;
+  new_term?: string;
+  tags?: string;
   definition?: string;
   example?: string;
   keyword?: string;
+  limit?: number;
 }
 
 export interface ManageSlangResult {
@@ -706,8 +729,7 @@ export interface ManageSlangResult {
   entries?: SlangEntry[];
   entry?: SlangEntry;
   total?: number;
-  char_count?: number;
-  budget_chars?: number;
+  max_entries?: number;
   message?: string;
   error?: string;
 }
@@ -763,8 +785,10 @@ export interface BridgePluginConfig {
   face_evict_policy?: 'reject' | 'evict_lru';
   /** 控制新建会话是否装载黑话工具集与注入黑话上下文，对后续新会话生效 */
   slang_enabled?: boolean;
-  /** 黑话知识库字符预算上限 (默认 5000 字符) */
-  slang_budget_chars?: number;
+  /** 黑话知识库条数上限 (默认 300 条) */
+  slang_max_entries?: number;
+  /** 黑话库满额淘汰策略 ('reject' 拒绝新增 / 'evict_lru' 淘汰查阅最少词条，默认 'reject') */
+  slang_evict_policy?: 'reject' | 'evict_lru';
   /** 黑话 Markdown 文档保存路径 (默认 .dsh/napcat/slang/slang.md) */
   slang_storage_path?: string;
   /** 私聊发言黑名单列表 (命中则不唤醒、不回复，管理员亦不例外) */

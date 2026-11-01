@@ -7,17 +7,27 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { SlangStorage } from './storage.js';
 import { createSlangToolDefinitions } from './tools.js';
-import { DEFAULT_SLANG_BUDGET_CHARS, DEFAULT_SLANG_STORAGE_PATH } from '../constants/index.js';
+import {
+  DEFAULT_SLANG_MAX_ENTRIES,
+  DEFAULT_SLANG_EVICT_POLICY,
+  DEFAULT_SLANG_STORAGE_PATH,
+  DEFAULT_DATABASE_PATH,
+} from '../constants/index.js';
 import { resolveDshPath } from '../utils/path.js';
+import type { MessageDatabase } from '../storage/database.js';
+import { migrateSlangStorage } from '../storage/slang-migration.js';
 
 export * from './storage.js';
 export * from './tools.js';
 
 export interface SlangServiceOptions {
+  db?: MessageDatabase;
   storagePath?: string;
   dshHome?: string;
-  budgetChars?: number | (() => number);
-  getBudgetChars?: () => number;
+  maxEntries?: number | (() => number);
+  getMaxEntries?: () => number;
+  evictPolicy?: 'reject' | 'evict_lru' | (() => 'reject' | 'evict_lru');
+  getEvictPolicy?: () => 'reject' | 'evict_lru';
   enabled?: boolean | (() => boolean);
   getEnabled?: () => boolean;
   /** 是否向 root ctx.tools 注册全局 Slang 工具（默认 true） */
@@ -50,7 +60,7 @@ export function registerSlangPromptContext(
       }
       return [
         '# 社群黑话与网络流行语知识库 (Slang & Memes)',
-        '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法，请在理解群友发言与交流时自如参考：',
+        '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（若仅凭标题和标签无法理解含义，请使用 query_slang 工具查询完整释义与例句）：',
         rawMarkdown.trim(),
       ].join('\n\n');
     },
@@ -69,22 +79,42 @@ export function setupSlangService(
   dispose: () => void;
 } {
   const effectiveDshHome = resolveDshPath(options.dshHome);
-  const getBudget = () =>
-    options.getBudgetChars?.() ??
-    (typeof options.budgetChars === 'function' ? options.budgetChars() : options.budgetChars) ??
-    DEFAULT_SLANG_BUDGET_CHARS;
+  const getMaxEntries = () =>
+    options.getMaxEntries?.() ??
+    (typeof options.maxEntries === 'function' ? options.maxEntries() : options.maxEntries) ??
+    DEFAULT_SLANG_MAX_ENTRIES;
+
+  const getEvictPolicy = () =>
+    options.getEvictPolicy?.() ??
+    (typeof options.evictPolicy === 'function' ? options.evictPolicy() : options.evictPolicy) ??
+    DEFAULT_SLANG_EVICT_POLICY;
 
   const getEnabled = () =>
     options.getEnabled?.() ??
     (typeof options.enabled === 'function' ? options.enabled() : options.enabled) ??
     true;
 
-  const storage = new SlangStorage(options.storagePath || DEFAULT_SLANG_STORAGE_PATH, getBudget, effectiveDshHome);
-  const toolDefs = createSlangToolDefinitions(storage);
+  // 1. 初始化 Storage
+  const storage = new SlangStorage(
+    options.db || options.storagePath || DEFAULT_DATABASE_PATH,
+    getMaxEntries,
+    getEvictPolicy,
+    effectiveDshHome
+  );
 
+  // 2. 存量旧版 Markdown 平滑迁移（若有且不删物理文件）
+  try {
+    migrateSlangStorage({
+      db: storage.getDatabase(),
+      dshHome: effectiveDshHome,
+      storagePath: options.storagePath || DEFAULT_SLANG_STORAGE_PATH,
+    });
+  } catch {}
+
+  const toolDefs = createSlangToolDefinitions(storage);
   const unregisters: Array<() => void> = [];
 
-  // 1. 注册 Slang 工具到 DSH ctx.tools
+  // 3. 注册 Slang 工具到 DSH ctx.tools
   const doRegisterTools = (toolsService: any) => {
     if (!toolsService || typeof toolsService.register !== 'function') return;
     for (const def of toolDefs) {
@@ -112,7 +142,7 @@ export function setupSlangService(
     (ctx as any).on?.('ready', checkReadyTools);
   }
 
-  // 2. 注册 systemPrompt.context 动态黑话段
+  // 4. 注册 systemPrompt.context 动态黑话段
   const promptDisposer = registerSlangPromptContext(ctx, storage, getEnabled);
   unregisters.push(promptDisposer);
 

@@ -2126,8 +2126,9 @@ export function registerAgentTools(
       const storage =
         options.slangStorage ||
         new SlangStorage(
-          getConfig().slang_storage_path,
-          () => getConfig().slang_budget_chars ?? 5000,
+          options.db || getConfig().slang_storage_path,
+          () => getConfig().slang_max_entries ?? 300,
+          () => getConfig().slang_evict_policy ?? 'reject',
           options.dshHome
         );
       const slangDefs = createSlangToolDefinitions(storage);
