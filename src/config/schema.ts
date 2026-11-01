@@ -36,6 +36,7 @@ import {
   DEFAULT_SESSION_PERMISSION_GROUP,
   DEFAULT_CODING_TOOLS_PRIVATE,
   DEFAULT_CODING_TOOLS_GROUP,
+  DEFAULT_NEW_MESSAGE_BEHAVIOR,
 } from '../constants/index.js';
 import type { BridgePluginConfig } from '../types/index.js';
 
@@ -79,6 +80,7 @@ export const BridgeConfigSchema: z<any> = z.object({
   coding_tools_private_default: z.boolean().default(DEFAULT_CODING_TOOLS_PRIVATE).volatile().description('私聊新建会话默认是否装载 Coding 工具组 (默认 true)'),
   coding_tools_group_default: z.boolean().default(DEFAULT_CODING_TOOLS_GROUP).volatile().description('群聊新建会话默认是否装载 Coding 工具组 (默认 false)'),
   coding_tools_overrides: z.array(z.object({ id: z.string(), type: z.union([z.const('user'), z.const('group')]), enabled: z.boolean(), remark: z.string().default('') })).default([]).volatile().description('Coding 工具组自定义覆盖例外列表'),
+  new_message_behavior: z.union([z.const('steer'), z.const('queue')]).default(DEFAULT_NEW_MESSAGE_BEHAVIOR).volatile().description('运行中收到新消息的行为模式 (steer: 及时插话并在当前 Step 完成后接纳; queue: 加入队列等待整轮结束)'),
 });
 
 export type { BridgePluginConfig };

@@ -55,6 +55,7 @@ import {
 } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { QQ_PRESET_ID } from '../../constants/preset.js';
+import { DEFAULT_NEW_MESSAGE_BEHAVIOR } from '../../constants/index.js';
 import type { WakeupPayload } from '../../types/index.js';
 import {
   RemoteError,
@@ -99,9 +100,18 @@ export class SessionAgentRunner {
     private readonly options?: SessionManagerOptions
   ) {}
 
-  private resolveSessionPermission(peer: string): string {
+  private getConfig(): any {
     const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
-    const config: any = (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
+    return (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
+  }
+
+  private resolveNewMessageBehavior(): 'steer' | 'queue' {
+    const config = this.getConfig();
+    return config?.new_message_behavior || DEFAULT_NEW_MESSAGE_BEHAVIOR;
+  }
+
+  private resolveSessionPermission(peer: string): string {
+    const config = this.getConfig();
     const { type, id } = parsePeerTarget(peer);
 
     // 1. 特例覆盖优先
@@ -122,8 +132,7 @@ export class SessionAgentRunner {
   }
 
   private resolveCodingToolsEnabled(peer: string): boolean {
-    const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
-    const config: any = (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
+    const config = this.getConfig();
     const { type, id } = parsePeerTarget(peer);
 
     // 1. 特例覆盖优先
@@ -701,7 +710,13 @@ export class SessionAgentRunner {
     this.markSessionBusy(sessionId, true);
     try {
       options?.onMessageCreated?.(userMsg);
-      agent.followup(userMsg);
+      const isAgentRunning = (agent as any).status === 'running';
+      const behavior = this.resolveNewMessageBehavior();
+      if (isAgentRunning && behavior === 'steer' && typeof (agent as any).steer === 'function') {
+        (agent as any).steer(userMsg);
+      } else {
+        agent.followup(userMsg);
+      }
       return userMsg;
     } finally {
       this.markSessionBusy(sessionId, false);

@@ -96,7 +96,8 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
   describe('1. 单一真相源与纯函数自愈清洗契约 (sanitizeConfigPayload)', () => {
     it('getValidConfigKeys 动态返回 BridgeConfigSchema 中声明的 38 项合法键', () => {
       const validKeys = getValidConfigKeys();
-      expect(validKeys.size).toBe(39);
+      expect(validKeys.size).toBe(40);
+      expect(validKeys.has('new_message_behavior')).toBe(true);
       expect(validKeys.has('proactive_interval_mins')).toBe(true);
       expect(validKeys.has('proactive_buffer_size')).toBe(true);
       expect(validKeys.has('ws_port')).toBe(true);

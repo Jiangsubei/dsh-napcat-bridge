@@ -43,6 +43,7 @@ import {
   DEFAULT_SESSION_PERMISSION_GROUP,
   DEFAULT_CODING_TOOLS_PRIVATE,
   DEFAULT_CODING_TOOLS_GROUP,
+  DEFAULT_NEW_MESSAGE_BEHAVIOR,
   SETTINGS_NAMESPACE,
 } from '../constants/index.js';
 
@@ -88,6 +89,7 @@ export const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   coding_tools_private_default: DEFAULT_CODING_TOOLS_PRIVATE,
   coding_tools_group_default: DEFAULT_CODING_TOOLS_GROUP,
   coding_tools_overrides: [],
+  new_message_behavior: DEFAULT_NEW_MESSAGE_BEHAVIOR,
 };
 
 export function sendJson(res: ServerResponse, status: number, data: unknown): void {

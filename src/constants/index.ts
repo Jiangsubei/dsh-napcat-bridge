@@ -65,3 +65,4 @@ export const DEFAULT_SESSION_PERMISSION_PRIVATE = 'workspace-write';
 export const DEFAULT_SESSION_PERMISSION_GROUP = 'read-only';
 export const DEFAULT_CODING_TOOLS_PRIVATE = true;
 export const DEFAULT_CODING_TOOLS_GROUP = false;
+export const DEFAULT_NEW_MESSAGE_BEHAVIOR = 'steer';

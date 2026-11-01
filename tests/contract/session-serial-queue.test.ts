@@ -68,7 +68,9 @@ describe('契约测试: 入站消息串行排队与复用不取消 (Inbound Seri
     const resumeSpy = vi.spyOn((booted.ctx as any).agents, 'resume');
     const createSpy = vi.spyOn((booted.ctx as any).agents, 'create');
 
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const sessionManager = new SessionManager(booted.ctx, tmpHome, undefined, {
+      configGetter: () => ({ new_message_behavior: 'queue' }),
+    });
     const reused = await sessionManager.getOrCreateAgent('group_3200000001');
 
     expect(reused).toBe(liveAgent);
@@ -89,7 +91,9 @@ describe('契约测试: 入站消息串行排队与复用不取消 (Inbound Seri
     const resumeSpy = vi.spyOn((booted.ctx as any).agents, 'resume');
     const createSpy = vi.spyOn((booted.ctx as any).agents, 'create');
 
-    const sessionManager = new SessionManager(booted.ctx, tmpHome);
+    const sessionManager = new SessionManager(booted.ctx, tmpHome, undefined, {
+      configGetter: () => ({ new_message_behavior: 'queue' }),
+    });
 
     // 第一条消息：唤醒上一条回合
     const first = await sessionManager.dispatchWakeup({

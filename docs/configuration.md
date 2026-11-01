@@ -16,7 +16,7 @@
 
 ## 2. WebUI 设置 Tab 分组与配置项清单
 
-WebUI 设置卡片分为 7 个分组 Tab，共包含 38 项有效运行时配置：
+WebUI 设置卡片分为 7 个分组 Tab，共包含 40 项有效运行时配置：
 
 ### 2.1 Tab 1: 连接设置 (Connection)
 
@@ -40,10 +40,12 @@ WebUI 设置卡片分为 7 个分组 Tab，共包含 38 项有效运行时配置
 
 ---
 
-### 2.3 Tab 3: 主动回复 (Proactive)
+### 2.3 Tab 3: 回复配置 (Proactive)
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
+| `proactive_buffer_size` | `number` | `10` | 群聊滑动窗口队列保留条数，为被动唤醒与主动回复共同提供短程前序上下文。 |
+| `new_message_behavior` | `'steer' \| 'queue'` | `'steer'` | 运行中收到新消息的行为模式。`steer`（及时插话）：等待当前 Step 执行完成后立即接纳新消息调整行动；`queue`（加入队列）：等待整轮对话（Turn）彻底完成后排队执行。 |
 | `proactive_reply_enabled` | `boolean` | `false` | 群聊主动回复的总开关。 |
 | `proactive_interval_mins` | `number` | `3` | 主动回复巡检窗口期（单位：分钟）。定时检查群聊期间新消息，有新消息才聚合唤醒 Agent 研读并决策是否回复。 |
 | `proactive_only_text` | `boolean` | `false` | 仅对纯文本消息判定主动回复。开启后，包含图片、视频、表情包等多模态消息不缓冲入待读池。 |

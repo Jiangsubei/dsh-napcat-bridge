@@ -161,6 +161,7 @@ const DEFAULT_BASE_CONFIG: Partial<BridgePluginConfig> = {
   coding_tools_private_default: true,
   coding_tools_group_default: false,
   coding_tools_overrides: [],
+  new_message_behavior: 'steer',
 };
 
 function formatArrayToString(arr?: string[]): string {
@@ -858,6 +859,37 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
             onReset={() => handleResetField('proactive_buffer_size')}
             onChange={(val) => handleFieldChange('proactive_buffer_size', parseInt(val, 10) || 10)}
           />
+
+          <div className={fieldStyle.field}>
+            <div className={fieldStyle.head}>
+              <label htmlFor="napcat-new-message-behavior" className={fieldStyle.label}>
+                新消息行为 (new_message_behavior)
+              </label>
+              {model.isOverridden('new_message_behavior') && (
+                <div className={fieldStyle.badges}>
+                  <span className={fieldStyle.badge}>已自定义</span>
+                  <button
+                    type="button"
+                    className={fieldStyle.reset}
+                    onClick={() => handleResetField('new_message_behavior')}
+                  >
+                    重置
+                  </button>
+                </div>
+              )}
+            </div>
+            <select
+              id="napcat-new-message-behavior"
+              className={fieldStyle.input}
+              disabled={saving}
+              value={draft.new_message_behavior || 'steer'}
+              onChange={(e) => handleFieldChange('new_message_behavior', e.target.value as any)}
+            >
+              <option value="steer">及时插话 (steer) - 等待当前 Step 完成后立即接纳新消息并调整行动</option>
+              <option value="queue">加入队列 (queue) - 等待当前轮次（Turn）完全结束后依次排队执行</option>
+            </select>
+            <p className={fieldStyle.hint}>一轮 Agent 循环正在进行时收到新消息的处理行为。在即时聊天场景下推荐“及时插话”。</p>
+          </div>
 
           <SwitchField
             id="napcat-proactive-reply-enabled"

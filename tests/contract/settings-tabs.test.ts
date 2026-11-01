@@ -201,6 +201,9 @@ describe('契约测试: Web UI 设置卡 Tab 分区与跨 Tab 保存 (Settings T
       expect(proactiveHtml).toContain('id="napcat-proactive-buffer-size"');
       expect(proactiveHtml).toContain('滑动窗口保留条数 (proactive_buffer_size)');
 
+      expect(proactiveHtml).toContain('id="napcat-new-message-behavior"');
+      expect(proactiveHtml).toContain('新消息行为 (new_message_behavior)');
+
       expect(proactiveHtml).toContain('id="napcat-proactive-only-text"');
       expect(proactiveHtml).toContain('仅回复文本内容 (proactive_only_text)');
 

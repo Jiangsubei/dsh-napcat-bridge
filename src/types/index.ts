@@ -807,6 +807,8 @@ export interface BridgePluginConfig {
   coding_tools_group_default?: boolean;
   /** Coding 工具组自定义覆盖例外列表 */
   coding_tools_overrides?: CodingToolsOverride[];
+  /** 一轮 Agent 循环正在进行时收到新消息的行为模式 ('steer' 及时插话并在当前 Step 完成后接纳; 'queue' 加入队列等待整轮结束，默认 'steer') */
+  new_message_behavior?: 'steer' | 'queue';
 }
 
 export type DshPermissionPreset = 'read-only' | 'workspace-write' | 'danger-full-access';
