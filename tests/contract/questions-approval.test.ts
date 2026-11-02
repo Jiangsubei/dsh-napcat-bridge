@@ -253,4 +253,33 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     const decision = await approvalPromise;
     expect(decision).toBe('allowed-once');
   });
+
+  it('契约 11: 群聊审批未配置管理员白名单时，采取 Fail-Closed 防护，普通群友无法冒充放行，仅允许发起人批准', async () => {
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+      } as any,
+      admins: [], // 未配置任何管理员
+    });
+
+    const approvalPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_sensitive_tool',
+      reason: '敏感操作',
+      targetUserId: '1000000001', // 指定发起人
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // 普通群友（QQ: 2000000002）回复 y 坚决拒绝放行 (Fail-Closed)
+    const handledStranger = responder.handleInboundReply('group_3000000001', 'y', { userId: '2000000002' });
+    expect(handledStranger).toBe(false);
+
+    // 发起人本尊（QQ: 1000000001）回复 y 正常放行
+    const handledTarget = responder.handleInboundReply('group_3000000001', 'y', { userId: '1000000001' });
+    expect(handledTarget).toBe(true);
+
+    const decision = await approvalPromise;
+    expect(decision).toBe('allowed-once');
+  });
 });

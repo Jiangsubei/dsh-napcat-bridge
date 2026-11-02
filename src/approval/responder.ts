@@ -549,18 +549,28 @@ export class NapCatApprovalResponder {
       return false;
     }
 
-    // 群聊鉴权 (B4/B11)：当配置了管理员列表时，仅允许管理员或指定发起人批准
+    // 群聊鉴权 (B4/B11)：当配置了管理员列表时，仅允许管理员或指定发起人批准；未配置管理员时，严格仅允许指定发起人批准 (Fail-Closed)
     if (peer.startsWith('group_') && options?.userId !== undefined) {
-      const uid = String(options.userId);
-      const admins = this.options?.admins || [];
-      const isTargetUser = pending.req.targetUserId && String(pending.req.targetUserId) === uid;
+      const uid = String(options.userId).trim();
+      const admins = (this.options?.admins || []).map((a) => String(a).trim()).filter(Boolean);
+      const isTargetUser = Boolean(pending.req.targetUserId && String(pending.req.targetUserId).trim() === uid);
       const isAdmin = admins.includes(uid);
 
-      if (admins.length > 0 && !isAdmin && !isTargetUser) {
-        this.options?.logger?.warn?.(
-          `[NapCatApprovalResponder] 群聊非授权用户 ${uid} 尝试审批决策，已被忽略`
-        );
-        return false;
+      if (admins.length > 0) {
+        if (!isAdmin && !isTargetUser) {
+          this.options?.logger?.warn?.(
+            `[NapCatApprovalResponder] 群聊非授权用户 ${uid} 尝试审批决策，已被忽略`
+          );
+          return false;
+        }
+      } else {
+        // 未配置管理员白名单时，群聊采取 Fail-Closed 策略：严禁任意群员冒充审批，仅允许发起人批准
+        if (!isTargetUser) {
+          this.options?.logger?.warn?.(
+            `[NapCatApprovalResponder] 群聊未配置 admins 白名单，非发起人 ${uid} 尝试审批决策已被拒绝 (Fail-Closed)`
+          );
+          return false;
+        }
       }
     }
 

@@ -516,6 +516,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         toolName: req.toolName,
         callId: req.callId,
         reason: req.reason,
+        targetUserId: req.targetUserId || req.userId || (currentSpeakers.get(peer) ? String(currentSpeakers.get(peer)) : undefined),
         signal: req.signal,
       });
     },
