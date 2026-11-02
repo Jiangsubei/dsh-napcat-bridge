@@ -70,16 +70,17 @@ dsh plugin --profile web add link:.
 
 1. **NapCat 添加反向 WebSocket 客户端**：
    在 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）的网络配置中新增反向 WebSocket 客户端：
-   - **URL**：`ws://127.0.0.1:8080/`（需与插件 `ws_port` 对齐）
-   - **Token**：与插件 `ws_token` 保持一致（若留空则此处留空）
+   - **URL**：`ws://127.0.0.1:8080/`（插件显式绑定本地环回地址 `127.0.0.1`，端口需与插件 `ws_port` 对齐）
+   - **Token**：**必填项**，必须与插件 `ws_token` 保持一致（严禁留空；若未配置或两端不一致，网关握手将直接拒绝连接并返回 401 Unauthorized）
    - **心跳周期**：`30000` ms，**重连间隔**：`3000` ms
 2. **启动 DSH**：
    ```bash
    dsh --profile web
    ```
 3. **DSH WebUI 配置核心参数**：
-   访问 DSH Web UI（默认 `http://127.0.0.1:3080/`），进入 **dsh-napcat-bridge** 设置卡片：
-   - **`bot_qq`**（**必填项**）：填写机器人的 QQ 号，用于过滤自身消息防死循环，并作为群聊识别 @机器人的基准。
+   访问 DSH Web UI（默认 `http://127.0.0.1:3080/`），进入 **dsh-napcat-bridge** 设置卡片（标有 `*` 的为必填字段）：
+   - **`ws_token`**（**核心必填项**）：NapCat 连接鉴权 Token。用于网关握手安全鉴权，留空时网关将直接拒绝连接并产生警告；WebUI 保存时服务端亦会强校验拦截空 Token（返回 400 Bad Request）。
+   - **`bot_qq`**（**核心必填项**）：填写机器人的 QQ 号，用于过滤自身消息防死循环，并作为群聊识别 @机器人的基准。
    - **`admins`**：填写管理员 QQ 号，授权执行斜杠命令。
    - 其他可选参数（人设、主动回复、记忆预算、表情包开关等）按需调整，保存即时热更新生效。
 
@@ -93,7 +94,7 @@ dsh plugin --profile web add link:.
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `ws_port` | `number` | `8080` | WebSocket 监听端口（NapCat 连接目标，变更时服务热重启） |
-| `ws_token` | `string` | `""` | 连接鉴权 Token（留空不鉴权） |
+| `ws_token` | `string` | `""` | 连接鉴权 Token（必填项，空着直接拒绝连接） |
 | `bot_qq` | `string` | `""` | 机器人自身 QQ 号（**核心必填项**，自循环防护与识别锚点） |
 | `admins` | `string[]` | `[]` | 管理员 QQ 号白名单（斜杠命令授权） |
 | `aliases` | `string[]` | `[]` | 助手点名别名（群聊点名唤醒） |

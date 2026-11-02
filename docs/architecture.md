@@ -8,6 +8,8 @@
 
 dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ 协议端 (NapCat) 与 DSH 核心运行时之间构建消息中继与会话代理。
 
+反向 WebSocket 服务端 (`NapCatGatewayServer`) 默认显式绑定到本地环回接口 `127.0.0.1:8080`（避免意外暴露至 `0.0.0.0` 全网接口），并开启 Token 强鉴权门禁（`ws_token` 为必填项，空 Token 或不匹配直接 401 拒连）。
+
 ```
 +-----------------------------------------------------------------------------------------+
 |                                 DeepSeek Harness (DSH)                                  |
@@ -35,7 +37,7 @@ dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ
 |                                             v                                           |
 |  +-----------------------------------------------------------------------------------+  |
 |  |                                NapCatGatewayServer                                 |  |
-|  |                            (反向 WebSocket 服务端 :8080)                            |  |
+|  |                       (反向 WebSocket 服务端 127.0.0.1:8080)                         |  |
 |  +-----------------------------------------------------------------------------------+  |
 +-----------------------------------------------------------------------------------------+
                                              ^
@@ -57,7 +59,7 @@ dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ
 - `apply(ctx, config)`: 插件装配函数，依次执行以下初始化：
   1. **配置读取与合并**：依次合并启动参数、WebUI 设置与遗留配置，注册配置监听与 Reconciler 热对齐机制。
   2. **存储初始化**：初始化 SQLite 消息数据库 (`MessageDatabase`)、媒体存储管理器 (`MediaStorageManager`) 与表情包路径自愈迁移 (`migrateFaceStoragePaths`)。
-  3. **网关服务端启动**：启动反向 WebSocket 服务端 (`NapCatGatewayServer`)，挂载消息等待收集器 (`MessageWaitRegistry`)。
+  3. **网关服务端启动**：启动反向 WebSocket 服务端 (`NapCatGatewayServer`)，挂载消息等待收集器 (`MessageWaitRegistry`)。服务端默认显式安全绑定至本地环回接口 `127.0.0.1:8080`，并开启 Token 强鉴权门禁（`ws_token` 为必填项，未配置 Token 或握手凭据不匹配时直接返回 401 Unauthorized 阻断连接；启动时若缺失 Token 输出 Warning 安全告警）。
   4. **对端管理与解析器**：初始化群成员缓存解析器 (`CachedGroupMemberResolver`)、主动回复管理器 (`ProactiveManager`) 与会话映射管理器 (`SessionManager`)。
   5. **两层记忆体系与人设注入**：挂载记忆服务 (`setupMemoryService`) 与动态提示词注入器 (`registerNapCatDynamicPrompt`)。
   6. **工具插件化与预设装配（SSOT）**：
@@ -66,7 +68,7 @@ dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ
      - 通过单一真相源 (`src/constants/preset.ts`) 与 `agentPresets` 服务，动态注册 `qq-session` 专属预设，自动为 QQ 会话配置工具集、Shell（pwsh/bash）、工作区与技能系统。
   7. **出站桥接与串行下发**：启动出方向事件流桥接器 (`OutboundStreamBridge`) 与单对端串行发送器 (`PerPeerSerialSender`)。
   8. **审批与交互响应**：初始化审批瀑布流响应器 (`NapCatApprovalResponder`)。
-  9. **WebUI 设置卡片与 REST 路由**：挂载插件设置路由与表情包管理端点。
+  9. **WebUI 设置卡片与 REST 路由**：挂载插件设置路由（`/plugins/dsh-napcat-bridge/config`）与表情包管理端点。配置 REST 路由全面接入宿主 `connection` 服务鉴权（严格遵循 Fail-Closed 策略，无合法身份或宿主鉴权不可用即返回 403 Forbidden 彻底阻断，防御 CSRF 与 DNS Rebinding 风险），并在保存端执行 `ws_token` 必填强校验与过时配置项自愈清理。
 
 ---
 

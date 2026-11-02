@@ -32,12 +32,12 @@
 
 ## 3. NapCat 无法连接反向 WebSocket
 
-- **现象**：NapCat 控制台输出连接拒绝 (`ECONNREFUSED`) 或 DSH 控制台未见连接成功日志。
+- **现象**：NapCat 控制台输出连接拒绝 (`ECONNREFUSED`)、HTTP 401 鉴权拒绝，或 DSH 控制台未见连接握手成功日志。
 - **排查步骤**：
-  1. 检查 DSH 是否已正常启动，且控制台输出 `[NapCat Bridge] OneBot 11 反向 WS 服务端已在端口 8080 成功启动`；
+  1. 检查 DSH 是否已正常启动，且控制台输出包含 `[GatewayServer] OneBot 11 反向 WS 服务端已监听 127.0.0.1:8080`；
   2. 确认端口冲突：使用 `netstat -ano | findstr :8080`（Windows）检查 `8080` 端口是否被其他进程占用；
-  3. 检查 NapCat 客户端配置中的 URL 是否为 `ws://127.0.0.1:8080/`；
-  4. 检查鉴权 Token：若插件配置了 `ws_token`，NapCat 配置中必须填写完全一致的 Token；反之若插件未配 Token，NapCat 端应留空。
+  3. 检查 NapCat 客户端配置中的 URL 是否为本地环回 `ws://127.0.0.1:8080/`（**服务端默认仅安全绑定到本地环回地址 127.0.0.1**，避免暴露公网；若 NapCat 与 DSH 位于不同机器或容器，需配置安全隧道、反向代理或同机网络映射）；
+  4. 检查鉴权 Token（`ws_token`）：**`ws_token` 为必填鉴权项**，未配置或 Token 不一致会导致服务端直接返回 `401 Unauthorized` 拒绝连接握手并关闭会话；必须确保 NapCat 配置的鉴权 Token 与插件 WebUI 设置中的 `ws_token` 完全一致（支持 NapCat 请求头 `Authorization: Bearer <token>` 或 URL Query `?access_token=<token>`）。
 
 ---
 
@@ -114,4 +114,28 @@
   清理当前用户目录下的 Chromium Cookies 数据库（清理已废弃的历史端口认证 Cookie）：
   - 路径：`%APPDATA%\@deepseek-ai\dsh-desktop\Network\Cookies`
   - 使用 SQLite 工具执行 `DELETE FROM cookies WHERE name LIKE 'dsh-auth-%';` 或直接删除该文件（重新打开 DSH 会自动重新初始化）。
+
+---
+
+## 11. WebUI 保存配置返回 400 Bad Request
+
+- **现象**：在 DSH 设置面板修改配置并点击保存时，控制台报错或弹窗提示 `400 Bad Request`（如 `WebSocket 鉴权 Token (ws_token) 为必填项，不能为空`）。
+- **原因**：**保存端强校验非空防线**。
+  - 为防止未鉴权空口令暴露反向 WebSocket，`ws_token` 为必填安全参数；
+  - 若在 WebUI 保存时留空且系统中此前未保存过有效 Token，服务端配置接口（`POST /plugins/dsh-napcat-bridge/config`）直接拒绝保存并返回 400 状态码。
+- **处理步骤**：
+  进入 WebUI 设置卡片的「连接设置 (Connection)」Tab，在 `ws_token` 中填入强随机字符串作为鉴权凭证（NapCat 端需同步配置完全一致的 Token），然后重试保存。
+
+---
+
+## 12. 配置接口返回 403 Forbidden
+
+- **现象**：在浏览器或客户端调用 `/plugins/dsh-napcat-bridge/config` 时，收到 `403 Forbidden` 或 `Forbidden: host connection authentication service unavailable` 错误。
+- **原因**：**宿主 Connection 鉴权门控拦截（严格 Fail-Closed）**。
+  - 插件配置 REST 路由全面接入宿主 `connection` 服务鉴权（`ctx.connection.requestRejection(req)`），用于防范跨站 CSRF、DNS Rebinding 及非授权配置篡改；
+  - 遵循严格的 Fail-Closed 原则：当请求未携带有效宿主会话凭证、存在跨域/非法来源嫌疑，或当前宿主环境未能提供 `connection` 鉴权服务时，接口一律直接阻断并返回 403 Forbidden。
+- **排查步骤**：
+  1. 确认是否通过官方 DSH 桌面端或已鉴权的 DSH Web 前端正常进入设置面板；
+  2. 避免通过未经认证的裸浏览器标签页、第三方调试脚本直接发起非授权跨站调用；
+  3. 检查 DSH 宿主版本及 `connection` 基础服务状态是否正常。
 

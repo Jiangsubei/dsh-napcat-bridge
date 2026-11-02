@@ -4,13 +4,19 @@
 
 ---
 
-## 1. 配置途径与优先级
+## 1. 配置途径与管理机制
 
+### 1.1 配置来源与优先级
 插件支持以下配置来源，按优先级从高到低合并：
 
 1. **DSH WebUI 设置卡片**：在 `http://127.0.0.1:3080/` 设置面板中动态修改并实时保存至 DSH 配置存储（全部字段均标记为 `.volatile()`，支持即时热更新）。
 2. **启动配置 (`apply` 传入对象)**：DSH 挂载插件时传入的配置。
 3. **内置默认值**：定义于 `src/constants/index.ts` 与 `src/config/schema.ts`。
+
+### 1.2 配置路由宿主鉴权防护（严格 Fail-Closed）与保存校验
+服务端配置 REST API 路由（`GET /plugins/dsh-napcat-bridge/config` 与 `POST /plugins/dsh-napcat-bridge/config`）具备严密的安全防护与强校验保障：
+- **宿主 Connection 鉴权门禁（严格 Fail-Closed）**：配置 REST API 全面接入宿主 `connection` 鉴权服务（`ctx.connection.requestRejection(req)`），有效防御跨站请求伪造（CSRF）、DNS Rebinding 与非授权越权访问；严格遵循 **Fail-Closed 原则**：若宿主未提供 `connection` 认证服务或认证失败，接口直接返回 `403 Forbidden`（或 `401 Unauthorized`）彻底阻断访问，杜绝未鉴权绕过。
+- **保存端强校验与非空防线**：WebUI 面板保存配置（`POST`）时，服务端会对提交的配置执行格式与非空强校验；其中 `ws_token` 为必填安全参数，若 Token 为空且系统无既有 Token，服务端直接返回 `400 Bad Request` 拒绝保存，杜绝存盘空 Token。此外，保存时还会自动触发过时配置项自愈过滤（`sanitizeConfigPayload`），保障配置干净规范。
 
 ---
 
@@ -22,8 +28,8 @@ WebUI 设置卡片分为 7 个分组 Tab，共包含 40 项有效运行时配置
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `ws_port` | `number` | `8080` | 反向 WebSocket 服务端监听端口，NapCat 连接此端口。端口变更时触发服务自动热重启。 |
-| `ws_token` | `string` | `""` | 连接鉴权 Token。若填写，NapCat 必须在请求头或 URL 中携带相同的 Token。 |
+| `ws_port` | `number` | `8080` | 反向 WebSocket 服务端监听端口，默认安全绑定到本地环回接口 `127.0.0.1`，NapCat 连接此目标端口。端口变更时触发服务自动热重启。 |
+| `ws_token` | `string` | `""` | **连接鉴权 Token（必填项，空着直接拒绝连接）**。NapCat 必须在请求头 (`Authorization: Bearer <token>`) 或 URL Query (`?access_token=<token>`) 中携带相同的 Token；保存配置时若 Token 为空将被接口直接拒绝 (400 Bad Request)。 |
 | `bot_qq` | `string` | `""` | **核心必填项**。机器人自身 QQ 号，用于过滤自身发出的消息（自循环防护）并作为群聊中判定 @机器人 的基准。 |
 | `admins` | `string[]` | `[]` | 管理员 QQ 号白名单。仅名单内的 QQ 号有权限触发管理类斜杠命令。 |
 | `aliases` | `string[]` | `[]` | 助手在群聊中的别名列表。群消息以别名开头时可直接唤醒助手。 |
