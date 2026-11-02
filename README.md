@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.2.0-4f46e5)](https://github.com/deepseek-ai/dsh)
 
-DeepSeek Harness × NapCat QQ 接入插件 —— 让 DSH Agent 在 QQ 群聊 / 私聊中对话、检索历史、收发图片文件。
+DeepSeek Harness × NapCat QQ 接入插件 —— 既是随叫随到的专业助手，也是懂梗斗图、能学黑话、主动冒泡的灵魂群友。让 DSH Agent 在 QQ 群聊 / 私聊中开箱即用。
 
 ---
 
