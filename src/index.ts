@@ -130,6 +130,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     );
   }
 
+  if (!String(currentConfig().ws_token || '').trim()) {
+    logger.warn?.(
+      '[Plugin] 配置缺失 ws_token（WebSocket 鉴权 Token，必填）：当前未配置鉴权 Token，反向 WS 服务端将直接拒绝一切未经鉴权的连接，请尽快在设置卡片中配置并与 NapCat 对齐'
+    );
+  }
+
   // A3: 共享 per-peer 串行发送器 (Spec §7.3)：正文、提问、审批、发文件全部经由同一队列下发
   const serialSender = new PerPeerSerialSender();
 

@@ -87,9 +87,9 @@ describe('契约测试: 入站图片落盘真实装配闭环 (Inbound Image Asse
     actions = [];
     servers = [];
     booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
-    await booted.ctx.plugin(NapCatBridgePlugin, { bot_qq: BOT_QQ, ws_port: WS_PORT });
+    await booted.ctx.plugin(NapCatBridgePlugin, { bot_qq: BOT_QQ, ws_port: WS_PORT, ws_token: 'test-token' });
 
-    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}?access_token=test-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', reject);

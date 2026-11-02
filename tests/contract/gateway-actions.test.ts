@@ -29,10 +29,10 @@ describe('契约测试: Gateway Action 接入点 (v2 预留 + 成员信息)', ()
 
   beforeEach(async () => {
     received = [];
-    server = new NapCatGatewayServer({ port: 0, logger: noopLogger() });
+    server = new NapCatGatewayServer({ port: 0, token: 'test-mock-token', logger: noopLogger() });
     await server.start();
     const addr: any = (server as any).wss.address();
-    client = new WebSocket(`ws://127.0.0.1:${addr.port}`);
+    client = new WebSocket(`ws://127.0.0.1:${addr.port}?access_token=test-mock-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', reject);
@@ -173,7 +173,7 @@ describe('契约测试: Gateway Action 接入点 (v2 预留 + 成员信息)', ()
 
     // 模拟新连接
     const addr: any = (server as any).wss.address();
-    const c2 = new WebSocket(`ws://127.0.0.1:${addr.port}`);
+    const c2 = new WebSocket(`ws://127.0.0.1:${addr.port}?access_token=test-mock-token`);
     await new Promise<void>((resolve, reject) => {
       c2.once('open', () => resolve());
       c2.once('error', reject);

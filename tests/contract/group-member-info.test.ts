@@ -43,10 +43,10 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
 
     beforeEach(async () => {
       received = [];
-      server = new NapCatGatewayServer({ port: 0, logger: noopLogger() });
+      server = new NapCatGatewayServer({ port: 0, token: 'test-mock-token', logger: noopLogger() });
       await server.start();
       const addr: any = (server as any).wss.address();
-      client = new WebSocket(`ws://127.0.0.1:${addr.port}`);
+      client = new WebSocket(`ws://127.0.0.1:${addr.port}?access_token=test-mock-token`);
       await new Promise<void>((resolve, reject) => {
         client.once('open', () => resolve());
         client.once('error', reject);

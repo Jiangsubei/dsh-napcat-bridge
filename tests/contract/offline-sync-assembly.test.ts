@@ -18,6 +18,7 @@ describe('契约测试: 离线消息补全端到端装配与闭环验证 (Offlin
       dshHome: tmpHome,
       config: {
         bot_qq: '1000000000',
+        ws_token: 'test-token',
         ws_port: testPort,
       },
     });
@@ -40,7 +41,7 @@ describe('契约测试: 离线消息补全端到端装配与闭环验证 (Offlin
     const receivedActions: Array<{ action: string; echo: string; params: any }> = [];
 
     // 建立模拟 NapCat 客户端连接
-    client = new WebSocket(`ws://127.0.0.1:${testPort}`);
+    client = new WebSocket(`ws://127.0.0.1:${testPort}?access_token=test-token`);
 
     await new Promise<void>((resolve, reject) => {
       client!.once('open', () => resolve());

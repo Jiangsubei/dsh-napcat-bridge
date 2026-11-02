@@ -216,10 +216,11 @@ describe('契约测试: EN-005 wait_for_user_messages 装配闭环（真实装�
     booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
+      ws_token: 'test-token',
       ws_port: WS_PORT,
     });
 
-    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}?access_token=test-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', reject);

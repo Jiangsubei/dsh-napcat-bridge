@@ -359,6 +359,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
     const fullBooted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
     await fullBooted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
+      ws_token: 'test-token',
       ws_port: WS_PORT,
     });
 
@@ -375,7 +376,7 @@ describe('契约测试: 主动触发回复引用陈旧消息修复 (Stale Inboun
       capturedUserMsgs.push(msg);
     };
 
-    const client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    const client = new WebSocket(`ws://127.0.0.1:${WS_PORT}?access_token=test-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', reject);

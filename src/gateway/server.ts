@@ -13,6 +13,7 @@ import type {
 } from '../types/index.js';
 
 export interface GatewayServerOptions {
+  host?: string;
   port: number;
   token?: string;
   logger?: {
@@ -80,7 +81,7 @@ export class NapCatGatewayServer {
 
   private authenticate(req: IncomingMessage): boolean {
     const expectedToken = (this.options.token || '').trim();
-    if (!expectedToken) return true; // 未配置 Token 则放行
+    if (!expectedToken) return false; // 鉴权 Token 必填：未配置直接拒绝连接
 
     let token = '';
     const authHeader = req.headers['authorization'];
@@ -111,7 +112,9 @@ export class NapCatGatewayServer {
 
     return new Promise<void>((resolve, reject) => {
       try {
+        const host = this.options.host || '127.0.0.1';
         this.wss = new WebSocketServer({
+          host,
           port: this.options.port,
           verifyClient: (info, callback) => {
             const authenticated = this.authenticate(info.req);
@@ -125,7 +128,7 @@ export class NapCatGatewayServer {
         });
 
         this.wss.on('listening', () => {
-          this.options.logger?.info?.(`[GatewayServer] OneBot 11 反向 WS 服务端已监听端口 ${this.options.port}`);
+          this.options.logger?.info?.(`[GatewayServer] OneBot 11 反向 WS 服务端已监听 ${host}:${this.options.port}`);
           resolve();
         });
 
@@ -564,6 +567,9 @@ export class NapCatGatewayServer {
   async restart(options?: Partial<GatewayServerOptions>): Promise<void> {
     await this.stop();
     if (options) {
+      if (options.host !== undefined) {
+        this.options.host = options.host;
+      }
       if (options.port !== undefined) {
         this.options.port = options.port;
       }

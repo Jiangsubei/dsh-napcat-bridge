@@ -88,7 +88,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
 
       expect(CONFIG_ROUTE_PATH).toBe('/plugins/dsh-napcat-bridge/config');
 
-      registerConfigRoute(mockCtx, () => ({} as BridgePluginConfig), async () => {});
+      registerConfigRoute(mockCtx, () => ({ ws_token: 'existing_token' } as BridgePluginConfig), async () => {});
 
       expect(registerMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -151,16 +151,18 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
     it('返回 200 JSON，ws_token 存在时 hasSecret 为 true 且 ws_token 必须脱敏为空字符串', async () => {
       let handler: any;
       const mockCtx: any = {
-        get: vi.fn((name) =>
-          name === 'webServer'
-            ? {
-                register: (route: any) => {
-                  handler = route.handler;
-                  return () => {};
-                },
-              }
-            : undefined
-        ),
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
         inject: vi.fn(),
       };
 
@@ -198,16 +200,18 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
     it('当 ws_token 为空或未设置时，hasSecret 为 false 且 ws_token 为空字符串', async () => {
       let handler: any;
       const mockCtx: any = {
-        get: vi.fn((name) =>
-          name === 'webServer'
-            ? {
-                register: (route: any) => {
-                  handler = route.handler;
-                  return () => {};
-                },
-              }
-            : undefined
-        ),
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
         inject: vi.fn(),
       };
 
@@ -238,6 +242,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const mutateMock = vi.fn().mockResolvedValue({ ok: true });
       const mockCtx: any = {
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -301,6 +306,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const mutateMock = vi.fn().mockResolvedValue({ ok: true });
       const mockCtx: any = {
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -353,6 +359,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const updateMock = vi.fn().mockResolvedValue({ ok: true });
       const mockCtx: any = {
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -370,7 +377,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       };
 
       const reconcileMock = vi.fn().mockResolvedValue(undefined);
-      registerConfigRoute(mockCtx, () => ({} as BridgePluginConfig), reconcileMock);
+      registerConfigRoute(mockCtx, () => ({ ws_token: 'existing_token' } as BridgePluginConfig), reconcileMock);
 
       const req = createMockReq('POST', { ws_port: 9000 });
       const { res, getResult } = createMockRes();
@@ -389,6 +396,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const mockCtx: any = {
         logger: () => ({ error: errorMock, info: vi.fn(), warn: vi.fn() }),
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -407,7 +415,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
         inject: vi.fn(),
       };
 
-      registerConfigRoute(mockCtx, () => ({} as BridgePluginConfig), async () => {});
+      registerConfigRoute(mockCtx, () => ({ ws_token: 'existing_token_999' } as BridgePluginConfig), async () => {});
 
       const req = createMockReq('POST', { ws_port: 9000 });
       const { res, getResult } = createMockRes();
@@ -438,12 +446,14 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
 
       let currentConfig: BridgePluginConfig = {
         ws_port: 8080,
+        ws_token: 'existing_token',
         bot_qq: '',
         persona: '',
       };
 
       const mockCtx: any = {
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -500,16 +510,18 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
     it('不支持的 HTTP 方法返回 405 Method Not Allowed', async () => {
       let handler: any;
       const mockCtx: any = {
-        get: vi.fn((name) =>
-          name === 'webServer'
-            ? {
-                register: (route: any) => {
-                  handler = route.handler;
-                  return () => {};
-                },
-              }
-            : undefined
-        ),
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
         inject: vi.fn(),
       };
 

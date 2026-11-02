@@ -68,6 +68,7 @@ describe('契约测试: 回合锚定锁定与合成 ID 隔离防御修复 (Turn 
     booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
+      ws_token: 'test-token',
       ws_port: WS_PORT,
     });
 
@@ -83,7 +84,7 @@ describe('契约测试: 回合锚定锁定与合成 ID 隔离防御修复 (Turn 
       capturedUserMsgs.push(msg);
     };
 
-    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}?access_token=test-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', reject);
@@ -198,6 +199,7 @@ describe('契约测试: 回合锚定锁定与合成 ID 隔离防御修复 (Turn 
     booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
+      ws_token: 'test-token',
       ws_port: WS_PORT + 1,
     });
 

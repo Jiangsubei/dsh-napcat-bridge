@@ -508,6 +508,7 @@ describe('契约测试: 群聊主动回复 (滑动窗口消息队列 & Per-Group
       booted = await bootDshNapcatBridge({ dshHome: tmpHome, mountPlugin: false });
       await booted.ctx.plugin(NapCatBridgePlugin, {
         bot_qq: BOT_QQ,
+      ws_token: 'test-token',
         ws_port: ASYNC_PORT,
         proactive_reply_enabled: true,
         proactive_interval_mins: 3,
@@ -529,7 +530,7 @@ describe('契约测试: 群聊主动回复 (滑动窗口消息队列 & Per-Group
       };
 
       const WebSocket = (await import('ws')).default;
-      client = new WebSocket(`ws://127.0.0.1:${ASYNC_PORT}`);
+      client = new WebSocket(`ws://127.0.0.1:${ASYNC_PORT}?access_token=test-token`);
       await new Promise<void>((resolve, reject) => {
         client.once('open', () => resolve());
         client.once('error', reject);

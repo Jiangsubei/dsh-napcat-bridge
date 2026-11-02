@@ -123,6 +123,50 @@ export function parseJsonBody<T = any>(req: IncomingMessage): Promise<T> {
   });
 }
 
+
+/**
+ * 校验请求是否来自可信宿主身份 (DSH Connection 门控)
+ * 遵循方案 B：对接 ctx.connection.requestRejection，防御 CSRF、DNS Rebinding 与非授权访问。
+ * 若鉴权未通过，向 res 输出 401/403 响应并返回 false；若通过或宿主未提供 connection（独立测试场景），返回 true 放行。
+ */
+export function assertHostAuthentication(
+  ctx: Context,
+  req: IncomingMessage,
+  res: ServerResponse
+): boolean {
+  let connection: any;
+  if (typeof (ctx as any).get === 'function') {
+    connection = (ctx as any).get('connection');
+  }
+  if (!connection) {
+    try {
+      connection = (ctx as any).connection;
+    } catch {
+      // 忽略未 inject 时 Cordis Proxy get trap 抛出的异常
+    }
+  }
+
+  // 严格 Fail-Closed：若宿主未提供 connection 认证服务，坚决拒绝访问 (403 Forbidden)
+  if (!connection || typeof connection.requestRejection !== 'function') {
+    sendJson(res, 403, {
+      ok: false,
+      error: 'Forbidden: host connection authentication service unavailable',
+    });
+    return false;
+  }
+
+  const rejection = connection.requestRejection(req);
+  if (rejection !== undefined) {
+    sendJson(res, rejection, {
+      ok: false,
+      error: rejection === 401 ? 'Unauthorized' : 'Forbidden',
+    });
+    return false;
+  }
+
+  return true;
+}
+
 export function registerConfigRoute(
   ctx: Context,
   currentConfigGetter: () => BridgePluginConfig,
@@ -133,6 +177,11 @@ export function registerConfigRoute(
   let isDisposed = false;
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 方案 B：宿主身份认证强门控 (防跨站 CSRF / DNS Rebinding / 越权配置读取与篡改)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     const method = (req.method || 'GET').toUpperCase();
 
     if (method === 'GET') {
@@ -172,6 +221,15 @@ export function registerConfigRoute(
 
         // 自愈过滤：提取 100% 符合当前 Schema 的干净配置字段，剔除任何已下线或未知字段
         const { valid: cleanPayload, removed } = sanitizeConfigPayload(mergedCandidate);
+
+        // ws_token 必填非空强校验：杜绝存盘空 Token
+        if (!cleanPayload.ws_token || String(cleanPayload.ws_token).trim().length === 0) {
+          sendJson(res, 400, {
+            ok: false,
+            error: 'WebSocket 鉴权 Token (ws_token) 为必填项，不能为空',
+          });
+          return;
+        }
 
         if (removed.length > 0) {
           logger.info?.(

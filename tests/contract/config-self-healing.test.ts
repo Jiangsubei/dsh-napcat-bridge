@@ -284,8 +284,9 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
         return { ok: true };
       });
 
-      const mockCtx: any = {
+            const mockCtx: any = {
         get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
           if (name === 'webServer') {
             return {
               register: (route: any) => {
@@ -302,8 +303,9 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
         inject: vi.fn(),
       };
 
-      let currentCfg: BridgePluginConfig = {
+            let currentCfg: BridgePluginConfig = {
         ws_port: 8080,
+        ws_token: 'test_token',
         bot_qq: '12345678',
       };
 
@@ -343,17 +345,19 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
 
     it('GET 请求下发配置时，仅下发 Schema 范围内的干净字段，避免向前端渗透脏数据', async () => {
       let handler: any;
-      const mockCtx: any = {
-        get: vi.fn((name) =>
-          name === 'webServer'
-            ? {
-                register: (route: any) => {
-                  handler = route.handler;
-                  return () => {};
-                },
-              }
-            : undefined
-        ),
+            const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
+          if (name === 'webServer') {
+            return {
+              register: (route: any) => {
+                handler = route.handler;
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
         inject: vi.fn(),
       };
 

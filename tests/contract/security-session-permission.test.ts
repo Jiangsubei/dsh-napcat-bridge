@@ -51,6 +51,7 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
 
     await booted.ctx.plugin(NapCatBridgePlugin, {
       bot_qq: BOT_QQ,
+      ws_token: 'test-token',
       ws_port: WS_PORT,
       ws_host: '127.0.0.1',
       admins: [ADMIN_QQ],
@@ -73,7 +74,7 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
       ],
     });
 
-    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    client = new WebSocket(`ws://127.0.0.1:${WS_PORT}?access_token=test-token`);
     await new Promise<void>((resolve, reject) => {
       client.once('open', () => resolve());
       client.once('error', (err) => reject(err));

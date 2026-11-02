@@ -734,13 +734,13 @@ export function NapCatSettingsCard(props: CardProps): React.JSX.Element {
 
         <ValueField
           id="napcat-ws-token"
-          label="WebSocket 鉴权 Token (ws_token)"
+          label="WebSocket 鉴权 Token (ws_token) *"
           hint={
             hasSecret
               ? '当前已配置鉴权 Token；留空保存将保留现有 Token，输入新值将覆盖更新'
-              : 'NapCat 请求 Authorization 头 Bearer Token 鉴权 (可选)'
+              : 'NapCat 请求 Authorization 头 Bearer Token 鉴权 (必填，空着直接拒绝连接)'
           }
-          placeholder={hasSecret ? '已配置（已脱敏，留空保持不变）' : '留空不鉴权'}
+          placeholder={hasSecret ? '已配置（已脱敏，留空保持不变）' : '必填，请输入与 NapCat 一致的 Token'}
           value={draft.ws_token || ''}
           disabled={saving}
           overridden={model.isOverridden('ws_token')}
