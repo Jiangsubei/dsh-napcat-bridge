@@ -11,6 +11,8 @@ import {
   registerConfigRoute,
   CONFIG_ROUTE_PATH,
 } from '../../src/server/routes.js';
+import { registerFacesRoutes, FACES_API_PATH, FACES_PREVIEW_API_PREFIX } from '../../src/server/face-routes.js';
+import { registerSlangRoutes, SLANG_API_PATH } from '../../src/server/slang-routes.js';
 import { BridgeConfigSchema } from '../../src/config/schema.js';
 import type { BridgePluginConfig } from '../../src/types/index.js';
 
@@ -260,6 +262,300 @@ describe('契约测试: 配置路由宿主身份认证门控 (Host Connection Au
       expect(result.status).toBe(400);
       expect(result.body.ok).toBe(false);
       expect(result.body.error).toContain('不能为空');
+    });
+  });
+
+  describe('face-routes 宿主身份认证门控 (Face Routes Host Connection Fence)', () => {
+    it('当 ctx.connection 不存在时，所有 face 路由严格 Fail-Closed 返回 403 Forbidden', async () => {
+      const handlers = new Map<string, any>();
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'webServer') {
+            return {
+              register: (r: any) => {
+                handlers.set(r.path, r.handler);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      const mockDb: any = {
+        queryFaces: vi.fn(),
+        insertFace: vi.fn(),
+        updateFace: vi.fn(),
+        deleteFace: vi.fn(),
+        getFaceById: vi.fn(),
+      };
+
+      registerFacesRoutes({
+        ctx: mockCtx,
+        db: mockDb,
+        getConfig: () => ({ face_enabled: true } as any),
+        dshHome: '/tmp/test',
+      });
+
+      // 1. GET /faces
+      const getHandler = handlers.get(FACES_API_PATH);
+      expect(getHandler).toBeDefined();
+      const reqGet = createMockReq('GET');
+      const { res: resGet, getResult: getResultGet } = createMockRes();
+      await getHandler(reqGet, resGet);
+      const resGetResult = await getResultGet();
+      expect(resGetResult.status).toBe(403);
+      expect(resGetResult.body.error).toContain('Forbidden');
+
+      // 2. POST /faces
+      const reqPost = createMockReq('POST', { data: 'xxx' });
+      const { res: resPost, getResult: getResultPost } = createMockRes();
+      await getHandler(reqPost, resPost);
+      const resPostResult = await getResultPost();
+      expect(resPostResult.status).toBe(403);
+
+      // 3. POST /faces/edit
+      const editHandler = handlers.get(`${FACES_API_PATH}/edit`);
+      expect(editHandler).toBeDefined();
+      const reqEdit = createMockReq('POST', { id: 'face_123', tags: ['a'] });
+      const { res: resEdit, getResult: getResultEdit } = createMockRes();
+      await editHandler(reqEdit, resEdit);
+      const resEditResult = await getResultEdit();
+      expect(resEditResult.status).toBe(403);
+
+      // 4. POST /faces/delete
+      const delHandler = handlers.get(`${FACES_API_PATH}/delete`);
+      expect(delHandler).toBeDefined();
+      const reqDel = createMockReq('POST', { id: 'face_123' });
+      const { res: resDel, getResult: getResultDel } = createMockRes();
+      await delHandler(reqDel, resDel);
+      const resDelResult = await getResultDel();
+      expect(resDelResult.status).toBe(403);
+
+      // 5. GET /faces/preview/:id
+      const previewHandler = handlers.get(FACES_PREVIEW_API_PREFIX);
+      expect(previewHandler).toBeDefined();
+      const reqPreview = createMockReq('GET');
+      (reqPreview as any).url = `${FACES_PREVIEW_API_PREFIX}/face_123`;
+      const { res: resPreview, getResult: getResultPreview } = createMockRes();
+      await previewHandler(reqPreview, resPreview);
+      const resPreviewResult = await getResultPreview();
+      expect(resPreviewResult.status).toBe(403);
+    });
+
+    it('当 requestRejection 返回 401/403 时准确阻断，返回 undefined 时正常放行', async () => {
+      let rejectionCode: number | undefined = 401;
+      const handlers = new Map<string, any>();
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => rejectionCode };
+          if (name === 'webServer') {
+            return {
+              register: (r: any) => {
+                handlers.set(r.path, r.handler);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      const mockDb: any = {
+        queryFaces: vi.fn(() => ({ faces: [], total: 0 })),
+      };
+
+      registerFacesRoutes({
+        ctx: mockCtx,
+        db: mockDb,
+        getConfig: () => ({ face_enabled: true } as any),
+        dshHome: '/tmp/test',
+      });
+
+      const getHandler = handlers.get(FACES_API_PATH);
+
+      // 401 拦截
+      const req401 = createMockReq('GET');
+      const { res: res401, getResult: getResult401 } = createMockRes();
+      await getHandler(req401, res401);
+      const res401Result = await getResult401();
+      expect(res401Result.status).toBe(401);
+      expect(mockDb.queryFaces).not.toHaveBeenCalled();
+
+      // 放行
+      rejectionCode = undefined;
+      const reqPass = createMockReq('GET');
+      const { res: resPass, getResult: getResultPass } = createMockRes();
+      await getHandler(reqPass, resPass);
+      const resPassResult = await getResultPass();
+      expect(resPassResult.status).toBe(200);
+      expect(mockDb.queryFaces).toHaveBeenCalled();
+    });
+
+    it('图片上传格式扩展名白名单防线: 恶意或未知扩展名安全规范化为 png，杜绝路径穿越', async () => {
+      const handlers = new Map<string, any>();
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => undefined };
+          if (name === 'webServer') {
+            return {
+              register: (r: any) => {
+                handlers.set(r.path, r.handler);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      let insertedRecord: any = null;
+      const mockDb: any = {
+        insertFace: vi.fn((record) => {
+          insertedRecord = record;
+          return { ...record, duplicated: false };
+        }),
+      };
+
+      registerFacesRoutes({
+        ctx: mockCtx,
+        db: mockDb,
+        getConfig: () => ({ face_enabled: true, face_store_max: 10 } as any),
+        dshHome: '/tmp/test_white_ext',
+      });
+
+      const postHandler = handlers.get(FACES_API_PATH);
+      const fakeBase64 = Buffer.from('hello-image-white').toString('base64');
+
+      // 尝试传入含路径穿越的恶意扩展名
+      const reqMalicious = createMockReq('POST', {
+        data: fakeBase64,
+        format: '../../evil.sh',
+      });
+      const { res: resMalicious, getResult: getResultMalicious } = createMockRes();
+      await postHandler(reqMalicious, resMalicious);
+      const resResult = await getResultMalicious();
+
+      expect(resResult.status).toBe(200);
+      expect(insertedRecord).toBeDefined();
+      // 扩展名被严格收敛至合法白名单 (默认 png)，绝不包含路径穿越字符
+      expect(insertedRecord.format).toBe('png');
+      expect(insertedRecord.file_path).toMatch(/\.png$/);
+      expect(insertedRecord.file_path).not.toContain('..');
+    });
+  });
+
+  describe('slang-routes 宿主身份认证门控 (Slang Routes Host Connection Fence)', () => {
+    it('当 ctx.connection 不存在时，所有 slang 路由严格 Fail-Closed 返回 403 Forbidden', async () => {
+      const handlers = new Map<string, any>();
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'webServer') {
+            return {
+              register: (r: any) => {
+                handlers.set(r.path, r.handler);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      const mockStorage: any = {
+        getEntries: vi.fn(),
+        getStats: vi.fn(),
+        recordEntry: vi.fn(),
+        editEntry: vi.fn(),
+        deleteEntry: vi.fn(),
+      };
+
+      registerSlangRoutes({ ctx: mockCtx, storage: mockStorage });
+
+      // 1. GET /slang
+      const getHandler = handlers.get(SLANG_API_PATH);
+      expect(getHandler).toBeDefined();
+      const reqGet = createMockReq('GET');
+      const { res: resGet, getResult: getResultGet } = createMockRes();
+      await getHandler(reqGet, resGet);
+      const resGetResult = await getResultGet();
+      expect(resGetResult.status).toBe(403);
+      expect(resGetResult.body.error).toContain('Forbidden');
+
+      // 2. POST /slang
+      const reqPost = createMockReq('POST', { term: 'a', tags: 'b', definition: 'c', example: 'd' });
+      const { res: resPost, getResult: getResultPost } = createMockRes();
+      await getHandler(reqPost, resPost);
+      const resPostResult = await getResultPost();
+      expect(resPostResult.status).toBe(403);
+
+      // 3. POST /slang/edit
+      const editHandler = handlers.get(`${SLANG_API_PATH}/edit`);
+      expect(editHandler).toBeDefined();
+      const reqEdit = createMockReq('POST', { term: 'a', definition: 'new' });
+      const { res: resEdit, getResult: getResultEdit } = createMockRes();
+      await editHandler(reqEdit, resEdit);
+      const resEditResult = await getResultEdit();
+      expect(resEditResult.status).toBe(403);
+
+      // 4. POST /slang/delete
+      const delHandler = handlers.get(`${SLANG_API_PATH}/delete`);
+      expect(delHandler).toBeDefined();
+      const reqDel = createMockReq('POST', { term: 'a' });
+      const { res: resDel, getResult: getResultDel } = createMockRes();
+      await delHandler(reqDel, resDel);
+      const resDelResult = await getResultDel();
+      expect(resDelResult.status).toBe(403);
+    });
+
+    it('当 requestRejection 返回 401/403 时准确阻断，返回 undefined 时放行', async () => {
+      let rejectionCode: number | undefined = 403;
+      const handlers = new Map<string, any>();
+      const mockCtx: any = {
+        get: vi.fn((name) => {
+          if (name === 'connection') return { requestRejection: () => rejectionCode };
+          if (name === 'webServer') {
+            return {
+              register: (r: any) => {
+                handlers.set(r.path, r.handler);
+                return () => {};
+              },
+            };
+          }
+          return undefined;
+        }),
+        inject: vi.fn(),
+      };
+
+      const mockStorage: any = {
+        getEntries: vi.fn().mockResolvedValue([]),
+        getStats: vi.fn().mockReturnValue({ total: 0, maxEntries: 300, evictPolicy: 'reject' }),
+      };
+
+      registerSlangRoutes({ ctx: mockCtx, storage: mockStorage });
+
+      const getHandler = handlers.get(SLANG_API_PATH);
+
+      // 403 拦截
+      const req403 = createMockReq('GET');
+      const { res: res403, getResult: getResult403 } = createMockRes();
+      await getHandler(req403, res403);
+      const res403Result = await getResult403();
+      expect(res403Result.status).toBe(403);
+      expect(mockStorage.getEntries).not.toHaveBeenCalled();
+
+      // 放行
+      rejectionCode = undefined;
+      const reqPass = createMockReq('GET');
+      const { res: resPass, getResult: getResultPass } = createMockRes();
+      await getHandler(reqPass, resPass);
+      const resPassResult = await getResultPass();
+      expect(resPassResult.status).toBe(200);
+      expect(mockStorage.getEntries).toHaveBeenCalled();
     });
   });
 });

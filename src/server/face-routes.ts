@@ -10,12 +10,15 @@ import * as crypto from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from '../storage/database.js';
 import type { BridgePluginConfig } from '../types/index.js';
-import { sendJson, parseJsonBody } from './routes.js';
+import { sendJson, parseJsonBody, assertHostAuthentication } from './routes.js';
 import { resolveDshPath } from '../utils/path.js';
 import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 
 export const FACES_API_PATH = '/plugins/dsh-napcat-bridge/faces';
 export const FACES_PREVIEW_API_PREFIX = '/plugins/dsh-napcat-bridge/faces/preview';
+
+/** 上传表情包允许的安全图片格式白名单 (杜绝路径穿越与非图片文件注入) */
+export const ALLOWED_FACE_FORMATS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
 
 export interface FaceRoutesOptions {
   ctx: Context;
@@ -38,6 +41,11 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
    * 1. 列表与上传路由处理器 (GET / POST /plugins/dsh-napcat-bridge/faces)
    */
   const facesCollectionHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     const method = (req.method || 'GET').toUpperCase();
 
     // GET: 获取表情包列表
@@ -80,8 +88,13 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
         }
 
         const md5 = crypto.createHash('md5').update(fileBuf).digest('hex');
-        let ext = (typeof rawFormat === 'string' && rawFormat.trim()) ? rawFormat.trim().toLowerCase() : 'png';
-        if (ext.startsWith('.')) ext = ext.slice(1);
+        let ext = 'png';
+        if (typeof rawFormat === 'string' && rawFormat.trim()) {
+          const candidate = rawFormat.trim().toLowerCase().replace(/^\.+/, '');
+          if (ALLOWED_FACE_FORMATS.has(candidate)) {
+            ext = candidate;
+          }
+        }
 
         const storeDir = getStoreDir();
         fs.mkdirSync(storeDir, { recursive: true });
@@ -143,6 +156,11 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
    * 2. 编辑表情路由处理器 (POST /plugins/dsh-napcat-bridge/faces/edit)
    */
   const editFaceHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     if ((req.method || 'GET').toUpperCase() !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       return;
@@ -184,6 +202,11 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
    * 3. 删除表情路由处理器 (POST /plugins/dsh-napcat-bridge/faces/delete)
    */
   const deleteFaceHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     if ((req.method || 'GET').toUpperCase() !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       return;
@@ -208,6 +231,11 @@ export function registerFacesRoutes(options: FaceRoutesOptions): () => void {
    * 4. 大图与缩略图预览文件流路由处理器 (GET /plugins/dsh-napcat-bridge/faces/preview/:id)
    */
   const previewImageHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     if ((req.method || 'GET').toUpperCase() !== 'GET') {
       sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       return;

@@ -73,7 +73,11 @@ describe('契约测试: 表情包管理 HTTP REST 接口 (Face Routes Contract)'
     };
 
     mockCtx = {
-      get: (name: string) => (name === 'webServer' ? mockServer : undefined),
+      get: (name: string) => {
+        if (name === 'connection') return { requestRejection: () => undefined };
+        if (name === 'webServer') return mockServer;
+        return undefined;
+      },
     };
   });
 

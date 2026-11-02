@@ -7,7 +7,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
 import type { SlangStorage } from '../slang/storage.js';
-import { sendJson, parseJsonBody } from './routes.js';
+import { sendJson, parseJsonBody, assertHostAuthentication } from './routes.js';
 
 export const SLANG_API_PATH = '/plugins/dsh-napcat-bridge/slang';
 
@@ -23,6 +23,11 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
 
   // 1. GET & POST /plugins/dsh-napcat-bridge/slang
   const slangCollectionHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     const method = (req.method || 'GET').toUpperCase();
     if (method === 'GET') {
       try {
@@ -85,6 +90,11 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
 
   // 2. POST /plugins/dsh-napcat-bridge/slang/edit
   const editSlangHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     const method = (req.method || 'POST').toUpperCase();
     if (method !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });
@@ -126,6 +136,11 @@ export function registerSlangRoutes(options: SlangRoutesOptions): () => void {
 
   // 3. POST /plugins/dsh-napcat-bridge/slang/delete
   const deleteSlangHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // 宿主身份认证强门控 (Fail-Closed)
+    if (!assertHostAuthentication(ctx, req, res)) {
+      return;
+    }
+
     const method = (req.method || 'POST').toUpperCase();
     if (method !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'Method Not Allowed' });

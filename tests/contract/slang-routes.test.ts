@@ -78,7 +78,11 @@ describe('契约测试: 黑话管理 HTTP REST 接口 (Slang Routes Contract)', 
     };
 
     mockCtx = {
-      get: (name: string) => (name === 'webServer' ? mockServer : undefined),
+      get: (name: string) => {
+        if (name === 'connection') return { requestRejection: () => undefined };
+        if (name === 'webServer') return mockServer;
+        return undefined;
+      },
     };
   });
 
