@@ -266,6 +266,37 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       expect(updatedContent).not.toContain('private_memory_budget_chars');
       expect(updatedContent).toContain('测试人格');
     });
+
+    it('当 profile patch 包含对象数组（如 coding_tools_overrides 及其子属性 type/enabled/permission）时，绝不误杀子字段', () => {
+      const profileDir = path.join(testTmpDir, 'profiles/desktop');
+      fs.mkdirSync(profileDir, { recursive: true });
+      const patchPath = path.join(profileDir, 'cordis.patch.yml');
+
+      const complexYaml = `
+- id: dsh-napcat-bridge
+  name: "@jiangsubei/dsh-napcat-bridge"
+  config:
+    ws_port: 3001
+    coding_tools_overrides:
+      - id: "8000000002"
+        type: group
+        enabled: true
+    session_permission_overrides:
+      - id: "8000000001"
+        type: group
+        permission: read-only
+`;
+      fs.writeFileSync(patchPath, complexYaml, 'utf8');
+
+      const healResult = healProfileConfigFile(testTmpDir, 'desktop');
+      expect(healResult.healed).toBe(false);
+      expect(healResult.removedKeys).toEqual([]);
+
+      const updatedContent = fs.readFileSync(patchPath, 'utf8');
+      expect(updatedContent).toContain('type: group');
+      expect(updatedContent).toContain('enabled: true');
+      expect(updatedContent).toContain('permission: read-only');
+    });
   });
 
   describe('3. 保存配置时自愈与防 500 契约 (Save Route Interception)', () => {

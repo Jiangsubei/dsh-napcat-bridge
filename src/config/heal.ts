@@ -74,10 +74,11 @@ export function surgicalCleanYamlConfig(
     return { newContent: yamlContent, removedKeys: [], renamedKeys: [] };
   }
 
-  const lines = yamlContent.split('\n');
+  const lines = yamlContent.split(/\r?\n/);
   let inTargetPlugin = false;
   let inConfig = false;
   let configIndent = -1;
+  let topKeyIndent = -1;
   const removed = new Set<string>();
   const renamed: Array<{ from: string; to: string }> = [];
   const outputLines: string[] = [];
@@ -94,6 +95,7 @@ export function surgicalCleanYamlConfig(
       }
       inConfig = false;
       configIndent = -1;
+      topKeyIndent = -1;
       outputLines.push(line);
       continue;
     }
@@ -104,6 +106,7 @@ export function surgicalCleanYamlConfig(
       if (configMatch) {
         inConfig = true;
         configIndent = configMatch[1].length;
+        topKeyIndent = -1;
         outputLines.push(line);
         continue;
       }
@@ -117,44 +120,54 @@ export function surgicalCleanYamlConfig(
           continue;
         }
 
-        const keyMatch = line.match(/^(\s+)([a-zA-Z0-9_]+):(.*)$/);
-        const configKey = keyMatch?.[2];
-
-        // 历史键原地重命名，保留原值与多行子块
-        if (configKey && renameMap.has(configKey)) {
-          const targetKey = renameMap.get(configKey)!;
-          outputLines.push(`${keyMatch![1]}${targetKey}:${keyMatch![3]}`);
-          renamed.push({ from: configKey, to: targetKey });
-          continue;
+        // 探测 config 下顶层键的基准缩进 (忽略空行与纯注释)
+        if (topKeyIndent === -1 && line.trim().length > 0 && !line.trim().startsWith("#")) {
+          const match = line.match(/^(\s+)([a-zA-Z0-9_]+):/);
+          if (match && match[1].length > configIndent) {
+            topKeyIndent = match[1].length;
+          }
         }
 
-        // 检查是否是需要剔除的过期键
-        if (configKey && staleKeys.has(configKey)) {
-          removed.add(configKey);
-          // 若该键的值为多行（如缩进的数组或多行字符串），跳过后续所有更深缩进的行
-          let j = i + 1;
-          while (j < lines.length) {
-            const nextLine = lines[j];
-            if (nextLine.trim().length === 0) {
-              j++;
-              continue;
-            }
-            const nextIndent = nextLine.search(/\S/);
-            if (nextIndent !== -1 && nextIndent > lineIndent) {
-              j++;
-            } else {
-              break;
-            }
+        // 仅对与 topKeyIndent 严格齐平的直接顶层配置键执行过期检测与重命名，绝不误触子对象字段 (如 overrides 中的 type/enabled)
+        if (topKeyIndent !== -1 && lineIndent === topKeyIndent) {
+          const keyMatch = line.match(/^(\s+)([a-zA-Z0-9_]+):(.*)$/);
+          const configKey = keyMatch?.[2];
+
+          // 历史键原地重命名，保留原值与多行子块
+          if (configKey && renameMap.has(configKey)) {
+            const targetKey = renameMap.get(configKey)!;
+            outputLines.push(`${keyMatch![1]}${targetKey}:${keyMatch![3]}`);
+            renamed.push({ from: configKey, to: targetKey });
+            continue;
           }
-          i = j - 1; // 跳过整个子块
-          continue;
+
+          // 检查是否是需要剔除的过期键
+          if (configKey && staleKeys.has(configKey)) {
+            removed.add(configKey);
+            // 若该键的值为多行（如缩进的数组或多行字符串），跳过后续所有更深缩进的行
+            let j = i + 1;
+            while (j < lines.length) {
+              const nextLine = lines[j];
+              if (nextLine.trim().length === 0) {
+                j++;
+                continue;
+              }
+              const nextIndent = nextLine.search(/\S/);
+              if (nextIndent !== -1 && nextIndent > lineIndent) {
+                j++;
+              } else {
+                break;
+              }
+            }
+            i = j - 1; // 跳过整个子块
+            continue;
+          }
         }
       }
     }
 
     outputLines.push(line);
   }
-
   return {
     newContent: outputLines.join('\n'),
     removedKeys: Array.from(removed),
@@ -206,11 +219,13 @@ export function healProfileConfigFile(
       let inCfg = false;
       let cfgIndent = -1;
 
+      let topKeyIndent = -1;
       for (const line of lines) {
         if (/^-\s+id:\s*/.test(line)) {
           inTarget = line.includes(SETTINGS_NAMESPACE) || line.includes(PLUGIN_NAME);
           inCfg = false;
           cfgIndent = -1;
+          topKeyIndent = -1;
           continue;
         }
         if (inTarget) {
@@ -218,6 +233,7 @@ export function healProfileConfigFile(
           if (cfgMatch) {
             inCfg = true;
             cfgIndent = cfgMatch[1].length;
+            topKeyIndent = -1;
             continue;
           }
           if (inCfg) {
@@ -226,14 +242,24 @@ export function healProfileConfigFile(
               inCfg = false;
               continue;
             }
-            const keyMatch = line.match(/^\s+([a-zA-Z0-9_]+):/);
-            if (keyMatch) {
-              presentKeys.add(keyMatch[1]);
+            if (line.trim().length === 0 || indent === -1 || line.trim().startsWith("#")) {
+              continue;
+            }
+            if (topKeyIndent === -1) {
+              const firstMatch = line.match(/^(\s+)([a-zA-Z0-9_]+):/);
+              if (firstMatch && firstMatch[1].length > cfgIndent) {
+                topKeyIndent = firstMatch[1].length;
+              }
+            }
+            if (topKeyIndent !== -1 && indent === topKeyIndent) {
+              const keyMatch = line.match(/^(\s+)([a-zA-Z0-9_]+):/);
+              if (keyMatch) {
+                presentKeys.add(keyMatch[2]);
+              }
             }
           }
         }
       }
-
       const staleKeys = new Set<string>();
       const renameMap = new Map<string, string>();
       const renameTargets = new Set<string>();
