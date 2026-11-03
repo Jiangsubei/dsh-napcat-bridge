@@ -1,6 +1,6 @@
 {
   "name": "dsh-napcat-bridge",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "DeepSeek Harness × NapCat QQ 桥接套件：既是随叫随到的专业助手，也是懂梗斗图、能学黑话、主动冒泡的灵魂群友。群聊/私聊开箱即用，内置两层记忆、表情资产库与全 WebUI 可视化配置",
   "type": "module",
   "main": "dist/index.js",
