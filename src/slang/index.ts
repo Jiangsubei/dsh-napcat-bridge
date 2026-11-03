@@ -16,6 +16,7 @@ import {
 import { resolveDshPath } from '../utils/path.js';
 import type { MessageDatabase } from '../storage/database.js';
 import { migrateSlangStorage } from '../storage/slang-migration.js';
+import { SnapshotManager } from '../prompt/snapshot.js';
 
 export * from './storage.js';
 export * from './tools.js';
@@ -32,40 +33,10 @@ export interface SlangServiceOptions {
   getEnabled?: () => boolean;
   /** 是否向 root ctx.tools 注册全局 Slang 工具（默认 true） */
   registerGlobalTools?: boolean;
+  /** 是否向 root ctx 注册动态提示词段（默认 true；在配合统一 SnapshotHub 装配时传入 false） */
+  registerPromptContext?: boolean;
 }
 
-/**
- * 注册动态上下文段 (systemPrompt.context: napcat:slang, order: 45)
- */
-export function registerSlangPromptContext(
-  ctx: Context,
-  storage: SlangStorage,
-  getEnabled: () => boolean = () => true
-): () => void {
-  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
-  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-    return () => {};
-  }
-
-  return systemPrompt.context({
-    name: 'napcat:slang',
-    order: 45,
-    text: () => {
-      if (!getEnabled()) {
-        return '';
-      }
-      const rawMarkdown = storage.getRawMarkdownSync();
-      if (!rawMarkdown || !rawMarkdown.trim()) {
-        return '';
-      }
-      return [
-        '# 社群黑话与网络流行语知识库 (Slang & Memes)',
-        '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（如果已经有对应条目的话，请先使用 query_slang 工具查询详细释义与例句）：',
-        rawMarkdown.trim(),
-      ].join('\n\n');
-    },
-  });
-}
 
 /**
  * 装配并启动 Slang 服务
@@ -142,9 +113,29 @@ export function setupSlangService(
     (ctx as any).on?.('ready', checkReadyTools);
   }
 
-  // 4. 注册 systemPrompt.context 动态黑话段
-  const promptDisposer = registerSlangPromptContext(ctx, storage, getEnabled);
-  unregisters.push(promptDisposer);
+  // 4. 注册 systemPrompt.context 动态黑话段，统一通过 SnapshotManager 享受严格 Fail-Closed 白名单防护
+  if (options.registerPromptContext !== false) {
+    const snapshotManager = new SnapshotManager(ctx);
+    const promptDisposer = snapshotManager.registerProvider({
+      name: 'napcat:slang',
+      order: 45,
+      provide: () => {
+        if (!getEnabled()) {
+          return '';
+        }
+        const rawMarkdown = storage.getRawMarkdownSync();
+        if (!rawMarkdown || !rawMarkdown.trim()) {
+          return '';
+        }
+        return [
+          '# 社群黑话与网络流行语知识库 (Slang & Memes)',
+          '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（如果已经有对应条目的话，请先使用 query_slang 工具查询详细释义与例句）：',
+          rawMarkdown.trim(),
+        ].join('\n\n');
+      },
+    });
+    unregisters.push(promptDisposer);
+  }
 
   return {
     storage,

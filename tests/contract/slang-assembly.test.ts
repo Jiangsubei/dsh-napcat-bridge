@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { SlangStorage } from '../../src/slang/storage.js';
 import { setupSlangService } from '../../src/slang/index.js';
+import { setupSnapshotHub } from '../../src/prompt/snapshot.js';
 import { registerAgentTools } from '../../src/tools/index.js';
 import { MessageDatabase } from '../../src/storage/database.js';
 
@@ -67,11 +68,18 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
     } catch {}
   });
 
-  it('契约 1: setupSlangService 正确注册 napcat:slang 动态提示词且 order 为 45，注入 L1 紧凑常驻索引', async () => {
+  it('契约 1: setupSnapshotHub 配合 slangService 正确注册 napcat:slang (order 45)，且 Web UI 隔离、QQ 会话放行', async () => {
     const service = setupSlangService(mockCtx, {
       db,
       storagePath: testFilePath,
       registerGlobalTools: false,
+    });
+
+    const hub = setupSnapshotHub({
+      ctx: mockCtx,
+      db,
+      slangStorage: service.storage,
+      getSlangEnabled: () => true,
     });
 
     expect(mockSystemPrompt.context).toHaveBeenCalled();
@@ -80,10 +88,16 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
     const promptObj = registeredPrompts.get('napcat:slang');
     expect(promptObj.order).toBe(45);
 
-    // 未添加词条时，Prompt 为空
+    // 1. Web 会话 / 空上下文下：严格白名单隔离，绝对不泄露
+    const webAssembleCtx = { session: { id: 'web-session-123' } };
+    expect(promptObj.text(webAssembleCtx)).toBe('');
     expect(promptObj.text()).toBe('');
 
-    // 添加词条后，Prompt 同步包含最新黑话的 L1 索引与 query_slang 指引
+    // 2. QQ 会话下，未添加词条时 Prompt 为空
+    const qqAssembleCtx = { agent: { session: { id: 'qq-group-1000000001-1' } } };
+    expect(promptObj.text(qqAssembleCtx)).toBe('');
+
+    // 3. QQ 会话下添加词条后，包含 L1 索引与 query_slang 指引
     await service.storage.recordEntry({
       term: '牢大',
       tags: '科比、坠机调侃',
@@ -91,11 +105,12 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
       example: '想你了牢大',
     });
 
-    const activePrompt = promptObj.text();
+    const activePrompt = promptObj.text(qqAssembleCtx);
     expect(activePrompt).toContain('社群黑话与网络流行语知识库');
     expect(activePrompt).toContain('query_slang');
     expect(activePrompt).toContain('- 牢大：科比、坠机调侃');
 
+    hub.dispose();
     service.dispose();
     expect(registeredPrompts.has('napcat:slang')).toBe(false);
   });

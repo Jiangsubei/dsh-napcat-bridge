@@ -1,13 +1,15 @@
 /**
  * dsh-napcat-bridge: Memory 插件核心模块
- * 组合 MemoryStorage, MemoryTools 与 SystemPrompt 动态段注入。
+ * 组合 MemoryStorage 与 MemoryTools。
+ * 动态提示词快照统一接入 SnapshotManager，全面贯彻 Fail-Closed 白名单防御。
  */
 
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from '../storage/database.js';
 import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
-import { MemoryTools, createMemoryToolDefinitions, resolveContextPeerAndQQ } from './tools.js';
+import { MemoryTools, createMemoryToolDefinitions } from './tools.js';
+import { SnapshotManager } from '../prompt/snapshot.js';
 import {
   DEFAULT_USER_PROFILE_BUDGET_CHARS,
   DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
@@ -41,71 +43,8 @@ export interface MemoryServiceOptions {
   sessionManager?: SessionManager;
   /** 是否向 root ctx.tools 注册全局 Memory 工具（默认 true；在配合预设架构时传入 false 隔离 Web 会话） */
   registerGlobalTools?: boolean;
-}
-
-export function registerMemoryPromptContext(
-  ctx: Context,
-  storage: MemoryStorage,
-  db?: MessageDatabase,
-  budgetInput: (() => number) | MemoryBudgetOptions = () =>
-    DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
-  getCurrentSpeaker?: (peer: string) => string | undefined
-): () => void {
-  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
-  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-    return () => {};
-  }
-
-  return systemPrompt.context({
-    name: 'napcat:memory',
-    order: 40,
-    text: (assembleCtx?: any) => {
-      const resolved = resolveContextPeerAndQQ(assembleCtx, getCurrentSpeaker);
-      const peer = resolved.peer;
-      const currentQQ = resolved.qq !== 'default' ? resolved.qq : (getCurrentSpeaker ? getCurrentSpeaker(peer) : undefined);
-
-      const isQQSession = Boolean(
-        peer &&
-          (peer.startsWith('group_') ||
-            peer.startsWith('user_') ||
-            peer.startsWith('qq-group-') ||
-            peer.startsWith('qq-user-') ||
-            peer.startsWith('qq-'))
-      );
-
-      if (!peer || !isQQSession || peer === 'default') {
-        return '';
-      }
-
-      const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-
-      if (isPrivate) {
-        // 私聊：直接传入单用户，画像全量注入，无 7 天活跃限制
-        return storage.getPromptSnapshotSync(
-          peer,
-          [{ qq: resolved.qq, name: resolved.qq }],
-          DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
-          currentQQ
-        );
-      }
-
-      // 群聊：从 SQLite 查询近 7 天活跃发言用户列表 (按发言时间倒序)
-      let activeUsers: Array<{ qq: string; name: string }> = [];
-      if (db) {
-        try {
-          const rows = db.getActiveUsers(peer, 7, 15);
-          activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
-        } catch {}
-      }
-
-      const groupUserProfilesBudget =
-        typeof budgetInput === 'function'
-          ? budgetInput() || DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS
-          : (budgetInput.getGroupUserProfilesBudget?.() ?? DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS);
-
-      return storage.getPromptSnapshotSync(peer, activeUsers, groupUserProfilesBudget, currentQQ);
-    },
-  });
+  /** 是否向 root ctx 注册动态提示词段（默认 true；在配合统一 SnapshotHub 装配时传入 false） */
+  registerPromptContext?: boolean;
 }
 
 export function setupMemoryService(
@@ -170,17 +109,45 @@ export function setupMemoryService(
     (ctx as any).on?.('ready', checkReadyTools);
   }
 
-  // 2. 注册 systemPrompt.context 动态记忆段
-  const promptDisposer = registerMemoryPromptContext(
-    ctx,
-    storage,
-    options.db,
-    {
-      getGroupUserProfilesBudget,
-    },
-    options.getCurrentSpeaker
-  );
-  unregisters.push(promptDisposer);
+  // 2. 统一通过 SnapshotManager 挂载 napcat:memory 动态上下文段 (Fail-Closed 安全白名单防护)
+  if (options.registerPromptContext !== false) {
+    const snapshotManager = new SnapshotManager(ctx, {
+      getCurrentSpeaker: options.getCurrentSpeaker,
+    });
+    const promptDisposer = snapshotManager.registerProvider({
+      name: 'napcat:memory',
+      order: 40,
+      provide: (session) => {
+        const peer = session.peer;
+        const currentQQ = session.qq !== 'default' ? session.qq : undefined;
+
+        if (session.isPrivate) {
+          return storage.getPromptSnapshotSync(
+            peer,
+            [{ qq: session.qq, name: session.qq }],
+            DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
+            currentQQ
+          );
+        }
+
+        let activeUsers: Array<{ qq: string; name: string }> = [];
+        if (options.db) {
+          try {
+            const rows = options.db.getActiveUsers(peer, 7, 15);
+            activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
+          } catch {}
+        }
+
+        return storage.getPromptSnapshotSync(
+          peer,
+          activeUsers,
+          getGroupUserProfilesBudget(),
+          currentQQ
+        );
+      },
+    });
+    unregisters.push(promptDisposer);
+  }
 
   return {
     storage,

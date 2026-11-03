@@ -36,7 +36,7 @@ import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
-import { registerNapCatDynamicPrompt, registerFacePromptContext } from './prompt/dynamic.js';
+import { setupSnapshotHub, type SnapshotManager } from './prompt/snapshot.js';
 import { setupMemoryService } from './memory/index.js';
 import { getRuntimePresetDefinition, QQ_PRESET_ID } from './constants/preset.js';
 
@@ -150,6 +150,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   let unregisterFacesRoutes: (() => void) | undefined;
   let slangService: any = null;
   let unregisterSlangRoutes: (() => void) | undefined;
+  let snapshotManager: SnapshotManager | null = null;
   let isDisposed = false;
 
   // C2: Notice 事件 (group_upload / poke) 无真实 message_id 时的稳定正数主键策略
@@ -261,25 +262,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   // EN-001: 群成员昵称解析器（at 段被@者昵称，TTL 缓存避免每条消息多次 get_group_member_info）
   const memberResolver = new CachedGroupMemberResolver(server);
 
-  // 2. 注册 System Prompt 动态上下文段
-  // 2.1 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
-  const unregisterDynamicPrompt = registerNapCatDynamicPrompt(
-    ctx,
-    () => currentConfig().persona || '',
-    () => currentConfig().behavior || ''
-  );
-
-  // 3. 初始化存储、媒体管理器与会话管理器
+  // 2. 初始化存储、媒体管理器与会话管理器
   const dbPath = resolveDshPath(dshHome, undefined, DEFAULT_DATABASE_PATH);
   const db = new MessageDatabase(dbPath);
   db.init();
-
-  // 2.2 注册表情包动态情绪锚点上下文段 (napcat:face_summary, order: 48)
-  const unregisterFaceDynamicPrompt = registerFacePromptContext(
-    ctx,
-    db,
-    () => Boolean(currentConfig().face_enabled)
-  );
 
   // 启动时自动规范化存量表情包存储路径，并从工作区 profiles 目录自愈找回物理文件
   try {
@@ -301,6 +287,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     storagePath: normalizedSlangPath,
     dshHome,
     registerGlobalTools: false,
+    registerPromptContext: false,
     maxEntries: currentConfig().slang_max_entries,
     getMaxEntries: () => currentConfig().slang_max_entries ?? DEFAULT_SLANG_MAX_ENTRIES,
     evictPolicy: currentConfig().slang_evict_policy,
@@ -370,6 +357,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     storageDir: normalizedMemoryDir,
     dshHome,
     registerGlobalTools: false,
+    registerPromptContext: false,
     groupMemoryTotalBudgetChars: currentConfig().group_memory_total_budget_chars,
     userProfileBudgetChars: currentConfig().user_profile_budget_chars,
     sessionMemoryBudgetChars: currentConfig().session_memory_budget_chars,
@@ -385,6 +373,23 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     getCurrentSpeaker: (peer: string) => currentSpeakers.get(peer),
     db,
     sessionManager,
+  });
+
+  // 6. 统一装配 System Prompt 动态上下文快照 Hub (Fail-Closed 安全白名单隔离)
+  snapshotManager = setupSnapshotHub({
+    ctx,
+    db,
+    memoryStorage: memoryService.storage,
+    slangStorage: slangService.storage,
+    getCurrentSpeaker: (peer: string) => currentSpeakers.get(peer),
+    getGroupMemoryBudget: () =>
+      currentConfig().group_memory_total_budget_chars ??
+      DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
+    getSlangEnabled: () => currentConfig().slang_enabled ?? true,
+    getFaceEnabled: () => Boolean(currentConfig().face_enabled),
+    getPersona: () => currentConfig().persona || '',
+    getBehavior: () => currentConfig().behavior || '',
+    logger,
   });
 
   // 5.1 构造 NapCat 专属工具提供者 (供 dsh-napcat-bridge/tools 插件与 qq-session 预设挂载)
@@ -1370,11 +1375,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     if (typeof unregisterQuestionChannel === 'function') {
       unregisterQuestionChannel();
     }
-    if (typeof unregisterDynamicPrompt === 'function') {
-      unregisterDynamicPrompt();
-    }
-    if (typeof unregisterFaceDynamicPrompt === 'function') {
-      unregisterFaceDynamicPrompt();
+    if (snapshotManager) {
+      snapshotManager.dispose();
+      snapshotManager = null;
     }
     await server.stop().catch(() => {});
     await sessionManager.dispose().catch(() => {});

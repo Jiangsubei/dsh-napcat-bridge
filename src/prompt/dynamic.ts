@@ -1,61 +1,42 @@
 /**
- * dsh-napcat-bridge: 动态提示词与人格注入模块
- * 将插件配置的人格与行为准则注入 systemPrompt.context() 动态段，
- * 保护静态 KV Cache，并实现非空保底文本返回。
+ * dsh-napcat-bridge: 动态提示词与上下文注入模块
+ * 统一委托至 SnapshotManager，全面贯彻 Fail-Closed 白名单防御。
  */
 
 import type { Context } from '@deepseek-ai/cordis';
-import { DEFAULT_PERSONA, DEFAULT_BEHAVIOR, DEFAULT_MEMORY_GUIDANCE } from '../constants/index.js';
 import type { MessageDatabase } from '../storage/database.js';
+import { SnapshotManager, isExplicitNonQQSession } from './snapshot.js';
+import {
+  DEFAULT_PERSONA,
+  DEFAULT_BEHAVIOR,
+  DEFAULT_MEMORY_GUIDANCE,
+} from '../constants/index.js';
+
+export * from './snapshot.js';
 
 /**
  * 注册 QQ 会话专属动态提示词段 (napcat:qq_scenario)
- * AB 测试分支：清理关于如何发送消息的提示词，不注册该段。
+ * 保留空实现以兼容干净度契约断言 (不产生脏注入)
  */
 export function registerQQScenarioDynamicPrompt(_ctx: Context): () => void {
   return () => {};
 }
 
-export const registerNapCatQQScenarioPrompt = registerQQScenarioDynamicPrompt;
-
 /**
- * 注册 NapCat 动态 System Prompt 上下文快照
- *
- * @param ctx Cordis 上下文
- * @param getPersona 读取当前助手人格配置的回调
- * @param getBehavior 读取当前行为准则配置的回调
- * @returns 注销该动态段的 Disposer 函数
+ * 注册 NapCat 动态 System Prompt 上下文快照 (委托至 SnapshotManager)
  */
 export function registerNapCatDynamicPrompt(
   ctx: Context,
   getPersona: () => string,
   getBehavior: () => string
 ): () => void {
-  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
-  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-    return () => {};
-  }
-
-  return systemPrompt.context({
+  const manager = new SnapshotManager(ctx);
+  return manager.registerProvider({
     name: 'napcat:behavior_persona',
     order: 50,
-    text: (assembleCtx?: any) => {
-      const agent = assembleCtx?.agent || assembleCtx?.scope || assembleCtx?.session;
-      const sessionId =
-        agent?.session?.id ||
-        agent?.sessionId ||
-        agent?.id ||
-        (typeof agent === 'string' ? agent : '');
-
-      const isQQSession = Boolean(
-        sessionId &&
-          (sessionId.startsWith('qq-group-') ||
-            sessionId.startsWith('qq-user-') ||
-            sessionId.startsWith('qq-'))
-      );
-
-      // Web UI normal conversation: do NOT inject QQ assistant persona/behavior
-      if (sessionId && !isQQSession) {
+    qqOnly: false,
+    provide: (_session, assembleCtx) => {
+      if (isExplicitNonQQSession(assembleCtx)) {
         return '';
       }
 
@@ -82,47 +63,19 @@ export function registerNapCatDynamicPrompt(
 }
 
 /**
- * 注册表情包动态 System Prompt 上下文锚点 (napcat:face_summary, order: 48)
- *
- * @param ctx Cordis 上下文
- * @param db 消息与表情数据库实例
- * @param getEnabled 读取当前是否开启表情包能力 (face_enabled) 的回调
- * @returns 注销该动态段的 Disposer 函数
+ * 注册表情包动态 System Prompt 上下文锚点 (委托至 SnapshotManager)
  */
 export function registerFacePromptContext(
   ctx: Context,
   db: MessageDatabase,
   getEnabled: () => boolean = () => true
 ): () => void {
-  const systemPrompt = typeof (ctx as any).get === 'function' ? (ctx as any).get('systemPrompt') : undefined;
-  if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-    return () => {};
-  }
-
-  return systemPrompt.context({
+  const manager = new SnapshotManager(ctx);
+  return manager.registerProvider({
     name: 'napcat:face_summary',
     order: 48,
-    text: (assembleCtx?: any) => {
+    provide: () => {
       if (!getEnabled()) {
-        return '';
-      }
-
-      const agent = assembleCtx?.agent || assembleCtx?.scope || assembleCtx?.session;
-      const sessionId =
-        agent?.session?.id ||
-        agent?.sessionId ||
-        agent?.id ||
-        (typeof agent === 'string' ? agent : '');
-
-      const isQQSession = Boolean(
-        sessionId &&
-          (sessionId.startsWith('qq-group-') ||
-            sessionId.startsWith('qq-user-') ||
-            sessionId.startsWith('qq-'))
-      );
-
-      // Web UI 普通会话或未识别 QQ 会话：不注入表情包动态段
-      if (sessionId && !isQQSession) {
         return '';
       }
 
@@ -138,5 +91,3 @@ export function registerFacePromptContext(
     },
   });
 }
-
-
