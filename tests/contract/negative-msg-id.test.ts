@@ -18,8 +18,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { formatWakeupPrompt } from '../../src/gateway/session/id-resolver.js';
 import { shouldWakeup } from '../../src/gateway/wakeup.js';
-import { sendQqMessage, collectFace } from '../../src/tools/index.js';
+import { sendQqMessage, collectFace, registerAgentTools } from '../../src/tools/index.js';
 import { MessageDatabase } from '../../src/storage/database.js';
+import { Context } from '@deepseek-ai/cordis';
 
 describe('契约测试: 负数 message_id 全链路支持与透传', () => {
   const NEGATIVE_MSG_ID = -837578626;
@@ -250,5 +251,114 @@ describe('契约测试: 负数 message_id 全链路支持与透传', () => {
     );
     expect(resImplicit.success).toBe(true);
     expect(resImplicit.face_id).toMatch(/^face_/);
+  });
+
+  it('契约 8: DSH 装配注册工具在 execute 接收字符串格式负数 ID 时必须通过 Schema 校验并正常执行', async () => {
+    const mockCtx = new Context();
+    const registeredTools: any[] = [];
+    mockCtx.provide('tools', {
+      register: (tool: any) => {
+        registeredTools.push(tool);
+        return () => {};
+      },
+    });
+
+    let sentPayload: any;
+    const mockGateway: any = {
+      sendMsg: vi.fn(async (_peer: string, payload: any) => {
+        sentPayload = payload;
+        return { status: 'ok', retcode: 0, data: { message_id: 9999 } };
+      }),
+      setMsgEmojiLike: vi.fn(async () => ({ status: 'ok', retcode: 0 })),
+    };
+
+    registerAgentTools(mockCtx, {
+      gateway: mockGateway,
+      db,
+      dshHome: tmpDir,
+      config: { face_enabled: true },
+    });
+
+    const sendTool = registeredTools.find((t) => t.name === 'send_qq_message');
+    const reactTool = registeredTools.find((t) => t.name === 'react_message');
+    const collectTool = registeredTools.find((t) => t.name === 'collect_face');
+    const historyTool = registeredTools.find((t) => t.name === 'read_chat_history');
+
+    expect(sendTool).toBeDefined();
+    expect(reactTool).toBeDefined();
+    expect(collectTool).toBeDefined();
+    expect(historyTool).toBeDefined();
+
+    // 8.1 send_qq_message 传入字符串形式负数 reply_to 不被 DSH 拦截报错
+    const sendRes = await sendTool.execute(
+      { text: '测试回复', reply_to: String(NEGATIVE_MSG_ID) },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(sendRes.success).toBe(true);
+    expect(sentPayload).toEqual([
+      { type: 'reply', data: { id: NEGATIVE_MSG_ID } },
+      { type: 'text', data: { text: '测试回复' } },
+    ]);
+
+    // 8.2 react_message 传入字符串形式负数 message_id 不被 DSH 拦截报错
+    const reactRes = await reactTool.execute(
+      { emoji: 'thumbs_up', message_id: String(NEGATIVE_MSG_ID) },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(reactRes.success).toBe(true);
+    expect(mockGateway.setMsgEmojiLike).toHaveBeenCalledWith(
+      NEGATIVE_MSG_ID,
+      expect.any(String)
+    );
+
+    // 8.3 read_chat_history 传入字符串形式负数 reply_to 不被 DSH 拦截报错
+    const historyRes = await historyTool.execute(
+      { reply_to: String(NEGATIVE_MSG_ID) },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(historyRes).toBeDefined();
+
+    // 8.4 collect_face 传入字符串形式负数 message_id 不被 DSH 拦截报错
+    const sampleImg = path.join(tmpDir, 'schema_test.png');
+    fs.writeFileSync(sampleImg, Buffer.from('schema-test-img'));
+    db.saveMessage({
+      msg_id: -99998888,
+      peer: 'group_1000000001',
+      user_id: '2000000001',
+      sender_name: '测试者',
+      time: 1793716513000,
+      type: 'image',
+      content: `[图片:${sampleImg}] 表情测试`,
+      raw: JSON.stringify([{ type: 'image', data: { file: sampleImg } }]),
+      file_id: null,
+      busid: null,
+      local_path: sampleImg,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+    const collectRes = await collectTool.execute(
+      { tags: ['契约8'], mood: '搞笑', message_id: '-99998888' },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(collectRes.success).toBe(true);
+
+    // 8.5 send_qq_message 传入标准数字格式（正数与负数）均正常执行
+    const sendResNum = await sendTool.execute(
+      { text: '测试回复数字', reply_to: NEGATIVE_MSG_ID },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(sendResNum.success).toBe(true);
+
+    const sendResPosStr = await sendTool.execute(
+      { text: '测试回复正数字符串', reply_to: '12345678' },
+      { agent: { session: { id: 'qq-group-1000000001' } } }
+    );
+    expect(sendResPosStr.success).toBe(true);
+    expect(sentPayload).toEqual([
+      { type: 'reply', data: { id: 12345678 } },
+      { type: 'text', data: { text: '测试回复正数字符串' } },
+    ]);
   });
 });

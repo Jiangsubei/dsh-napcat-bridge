@@ -1459,7 +1459,10 @@ export function registerAgentTools(
               description: "快捷相对时间窗口：检索过去指定时间段内的消息 (如 '1h', '6h', '1d', '7d')",
             },
             has_file: { type: 'boolean', description: '是否仅筛选带有文件/图片/媒体附件的消息' },
-            reply_to: { type: 'number', description: '查询引用了指定 msg_id 的直接回复消息' },
+            reply_to: {
+              oneOf: [{ type: 'number' }, { type: 'string' }],
+              description: '查询引用了指定 msg_id 的直接回复消息（支持数字或数字字符串）',
+            },
             exclude_self: { type: 'boolean', description: '是否排除机器人自身的发言 (默认 false)' },
             self_only: { type: 'boolean', description: '是否仅查询机器人自身的发言 (默认 false)' },
             limit: { type: 'number', description: '返回最大条数 (默认 20，上限 100)' },
@@ -1801,8 +1804,8 @@ export function registerAgentTools(
                 '- rage: 爆筋 / 生气愤怒 / 忍无可忍',
             },
             message_id: {
-              type: 'number',
-              description: '要回应的目标消息 ID。可省略，省略时自动绑定当前回合正在回复的入站消息',
+              oneOf: [{ type: 'number' }, { type: 'string' }],
+              description: '要回应的目标消息 ID（支持数字或数字字符串）。可省略，省略时自动绑定当前回合正在回复的入站消息',
             },
           },
           output: {
@@ -1867,8 +1870,8 @@ export function registerAgentTools(
               description: '要发送给用户的纯文本内容。',
             },
             reply_to: {
-              type: 'number',
-              description: '需要引用的目标消息数字 ID（来自当前入站消息头部 [消息ID: <id>] 或 read_chat_history）。',
+              oneOf: [{ type: 'number' }, { type: 'string' }],
+              description: '需要引用的目标消息数字 ID，支持数字或数字字符串（来自当前入站消息头部 [消息ID: <id>] 或 read_chat_history）。',
             },
             at_user: {
               type: 'string',
@@ -2036,8 +2039,8 @@ export function registerAgentTools(
                 description: '情绪与语境意图（如 "嘲讽", "卖萌", "感谢", "无奈", "破防"，必填）',
               },
               message_id: {
-                type: 'number',
-                description: '收藏新表情时的目标消息 ID。若省略则自动绑定当前回合正在回复的入站消息',
+                oneOf: [{ type: 'number' }, { type: 'string' }],
+                description: '收藏新表情时的目标消息 ID（支持数字或数字字符串）。若省略则自动绑定当前回合正在回复的入站消息',
               },
             },
             output: {

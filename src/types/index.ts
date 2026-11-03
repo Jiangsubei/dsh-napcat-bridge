@@ -243,7 +243,7 @@ export interface ReadChatHistoryParams {
   /** 是否仅筛选带有文件/图片/多媒体附件的消息 (local_path 或 file_id 不为空) */
   has_file?: boolean;
   /** 查询指定 msg_id 消息的直接回复消息 (reply_to = ?) */
-  reply_to?: number;
+  reply_to?: number | string;
   /** 是否排除机器人自己发出的消息 (self = 0) */
   exclude_self?: boolean;
   /** 是否仅查询机器人自己发出的消息 (self = 1) */
@@ -497,7 +497,7 @@ export interface ReactMessageParams {
   /** 表情语义键（对应 QQ 群消息回应表情） */
   emoji: string;
   /** 要回应的目标消息 ID。可省略，省略时自动绑定当前回合正在回复的入站消息 */
-  message_id?: number;
+  message_id?: number | string;
 }
 
 export interface ReactMessageResult {
@@ -579,7 +579,7 @@ export interface SendFaceResult {
 export interface CollectFaceParams {
   tags: string[];
   mood: string;
-  message_id?: number;
+  message_id?: number | string;
 }
 
 export interface CollectFaceResult {
