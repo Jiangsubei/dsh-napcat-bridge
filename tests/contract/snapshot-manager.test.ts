@@ -310,5 +310,28 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
 
       hub.dispose();
     });
+
+    it('5.2 setupSnapshotHub 传递 getFaceStoreMax 时，表情包查询上限严格遵循该配置', () => {
+      const mockDb: any = {
+        getActiveFacesForContext: vi.fn().mockReturnValue({
+          total: 0,
+          faces: [],
+        }),
+      };
+
+      const hub = setupSnapshotHub({
+        ctx: mockCtx,
+        db: mockDb,
+        getFaceEnabled: () => true,
+        getFaceStoreMax: () => 250,
+      });
+
+      const qqCtx = { session: { id: 'qq-group-1000000001' } };
+      registeredContexts.get('napcat:face_summary').text(qqCtx);
+
+      expect(mockDb.getActiveFacesForContext).toHaveBeenCalledWith(250);
+
+      hub.dispose();
+    });
   });
 });

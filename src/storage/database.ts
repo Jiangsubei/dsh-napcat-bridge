@@ -7,6 +7,7 @@
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { DEFAULT_FACE_STORE_MAX } from '../constants/index.js';
 import type {
   SlangEntry,
   ChatMessageSummary,
@@ -1023,9 +1024,9 @@ export class MessageDatabase {
   }
 
   /**
-   * 获取供动态上下文注入的活跃表情包列表 (默认最多 100 张)
+   * 获取供动态上下文注入的活跃表情包列表 (默认最多 DEFAULT_FACE_STORE_MAX 张)
    */
-  getActiveFacesForContext(limit: number = 100): { faces: FaceRecord[]; total: number } {
+  getActiveFacesForContext(limit: number = DEFAULT_FACE_STORE_MAX): { faces: FaceRecord[]; total: number } {
     const q = this.queryFaces({ enabledOnly: true, limit: Math.max(1, limit) });
     return { faces: q.faces, total: q.total };
   }

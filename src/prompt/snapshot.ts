@@ -10,6 +10,7 @@ import {
   DEFAULT_BEHAVIOR,
   DEFAULT_MEMORY_GUIDANCE,
   DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
+  DEFAULT_FACE_STORE_MAX,
 } from '../constants/index.js';
 import type { MessageDatabase } from '../storage/database.js';
 import type { MemoryStorage } from '../memory/storage.js';
@@ -275,6 +276,7 @@ export interface SetupSnapshotHubOptions {
   getGroupMemoryBudget?: () => number;
   getSlangEnabled?: () => boolean;
   getFaceEnabled?: () => boolean;
+  getFaceStoreMax?: () => number;
   getPersona?: () => string;
   getBehavior?: () => string;
   logger?: {
@@ -354,7 +356,8 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
       if (options.getFaceEnabled && !options.getFaceEnabled()) {
         return '';
       }
-      const activeFacesRes = options.db.getActiveFacesForContext(100);
+      const limit = typeof options.getFaceStoreMax === 'function' ? options.getFaceStoreMax() : DEFAULT_FACE_STORE_MAX;
+      const activeFacesRes = options.db.getActiveFacesForContext(limit);
       return formatFaceLibraryContext(activeFacesRes.faces, activeFacesRes.total);
     },
   });

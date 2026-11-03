@@ -289,4 +289,60 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     expect(fs.existsSync(canonicalExpected)).toBe(true);
     checkDb.close();
   });
+
+  it('装配 6: 真实装配下 SystemPrompt napcat:face_summary 的表情包注入上限严格遵循 face_store_max 配置', async () => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-face-asm-quota-'));
+    booted = await bootDshNapcatBridge({
+      dshHome: tmpHome,
+      mountPlugin: false,
+    });
+
+    // 挂载插件，配置 face_store_max 为 3
+    await booted.ctx.plugin(NapCatBridgePlugin, {
+      ws_port: 29996,
+      face_enabled: true,
+      face_store_max: 3,
+    });
+
+    const dbPath = path.join(tmpHome, 'napcat', 'messages.sqlite');
+    const { MessageDatabase } = await import('../../src/storage/database.js');
+    const db = new MessageDatabase(dbPath);
+    db.init();
+
+    // 插入 5 张表情
+    for (let i = 1; i <= 5; i++) {
+      db.insertFace({
+        id: `face_quota_${i}`,
+        file_path: path.join(tmpHome, 'napcat', 'faces', `quota_${i}.png`),
+        md5: `md5_quota_${i}`,
+        source: 'manual',
+        tags: [`配额${i}`],
+        mood: '测试',
+        size: 100,
+        format: 'png',
+      });
+    }
+    db.close();
+
+    const qqWs = path.join(tmpHome, 'qq-ws');
+    fs.mkdirSync(qqWs, { recursive: true });
+    const qqHandle = await booted.ctx.agents.create({
+      sessionId: 'qq-group-12345678',
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        await (booted.ctx as any).agentPresets.mount(agentCtx, 'qq-session');
+      },
+    });
+    const qqAgent = qqHandle.agent || qqHandle;
+    const assembly = await (booted.ctx as any).systemPrompt.assemble({ scope: qqAgent, agent: qqAgent } as any);
+    const faceCtx = assembly.contexts.find((c: any) => c.name === 'napcat:face_summary');
+    expect(faceCtx).toBeDefined();
+
+    expect(faceCtx.text).toContain('当前本地库共 5 张可用表情包（当前已列出前 3 张');
+    expect(faceCtx.text).toContain('face_quota_5');
+    expect(faceCtx.text).toContain('face_quota_4');
+    expect(faceCtx.text).toContain('face_quota_3');
+    expect(faceCtx.text).not.toContain('face_quota_1');
+  });
 });

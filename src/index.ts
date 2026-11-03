@@ -15,6 +15,7 @@ import {
   DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
   DEFAULT_DATABASE_PATH,
   DEFAULT_FACE_STORE_DIR,
+  DEFAULT_FACE_STORE_MAX,
 } from './constants/index.js';
 import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
@@ -390,6 +391,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
     getSlangEnabled: () => currentConfig().slang_enabled ?? true,
     getFaceEnabled: () => Boolean(currentConfig().face_enabled),
+    getFaceStoreMax: () => currentConfig().face_store_max ?? DEFAULT_FACE_STORE_MAX,
     getPersona: () => currentConfig().persona || '',
     getBehavior: () => currentConfig().behavior || '',
     logger,

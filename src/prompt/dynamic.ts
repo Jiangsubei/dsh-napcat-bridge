@@ -16,6 +16,7 @@ import {
   DEFAULT_PERSONA,
   DEFAULT_BEHAVIOR,
   DEFAULT_MEMORY_GUIDANCE,
+  DEFAULT_FACE_STORE_MAX,
 } from '../constants/index.js';
 
 export * from './snapshot.js';
@@ -76,7 +77,8 @@ export function registerNapCatDynamicPrompt(
 export function registerFacePromptContext(
   ctx: Context,
   db: MessageDatabase,
-  getEnabled: () => boolean = () => true
+  getEnabled: () => boolean = () => true,
+  getFaceStoreMax?: () => number
 ): () => void {
   const manager = new SnapshotManager(ctx);
   return manager.registerProvider({
@@ -87,7 +89,8 @@ export function registerFacePromptContext(
         return '';
       }
 
-      const activeFacesRes = db.getActiveFacesForContext(100);
+      const limit = typeof getFaceStoreMax === 'function' ? getFaceStoreMax() : DEFAULT_FACE_STORE_MAX;
+      const activeFacesRes = db.getActiveFacesForContext(limit);
       return formatFaceLibraryContext(activeFacesRes.faces, activeFacesRes.total);
     },
   });

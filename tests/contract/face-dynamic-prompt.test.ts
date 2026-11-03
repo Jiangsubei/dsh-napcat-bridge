@@ -185,4 +185,36 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     const text = promptObj.text(assembleCtx);
     expect(text).toBe('');
   });
+
+  it('契约 6: 上下文注入上限动态遵循 getFaceStoreMax 配置', () => {
+    for (let i = 1; i <= 5; i++) {
+      db.insertFace({
+        id: `face_${i}`,
+        file_path: `/path/face_${i}.png`,
+        md5: `md5_face_${i}`,
+        source: 'manual',
+        tags: [`标签${i}`],
+        mood: '测试',
+        enabled: true,
+        size: 100,
+        format: 'png',
+      });
+    }
+
+    // 配置上限为 2
+    registerFacePromptContext(mockCtx, db, () => true, () => 2);
+    const promptObj = registeredPrompts.get('napcat:face_summary');
+
+    const assembleCtx = {
+      agent: {
+        session: { id: 'qq-group-12345678' },
+      },
+    };
+
+    const text = promptObj.text(assembleCtx);
+    expect(text).toContain('当前本地库共 5 张可用表情包（当前已列出前 2 张');
+    expect(text).toContain('face_5');
+    expect(text).toContain('face_4');
+    expect(text).not.toContain('face_1');
+  });
 });
