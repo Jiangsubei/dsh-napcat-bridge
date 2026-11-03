@@ -159,9 +159,9 @@ describe('契约测试: 统一提示词与上下文格式化模块 (PromptFormat
       expect(res).toContain('- **草率了**：指决定过快');
     });
 
-    it('3.4 formatMemoryContext 产生统一的 ## 会话记忆与群友画像 (Memory & Profiles) 格式', () => {
+    it('3.4 formatMemoryContext 产生统一的 ## 会话规则与用户画像 (Memory & Profiles) 格式', () => {
       const res = formatMemoryContext('### Session 记忆\n- 规则一');
-      expect(res).toContain('## 会话记忆与群友画像 (Memory & Profiles)');
+      expect(res).toContain('## 会话规则与用户画像 (Memory & Profiles)');
       expect(res).toContain('### Session 记忆\n- 规则一');
     });
   });

@@ -139,11 +139,11 @@ export function formatSlangContext(slangContent: string): string {
 }
 
 /**
- * 格式化会话记忆与群友画像 (Memory & Profiles)
+ * 格式化会话规则与用户画像 (Memory & Profiles)
  */
 export function formatMemoryContext(memoryContent: string): string {
   return formatPromptSection({
-    title: '会话记忆与群友画像',
+    title: '会话规则与用户画像',
     subtitle: 'Memory & Profiles',
     content: memoryContent,
   });

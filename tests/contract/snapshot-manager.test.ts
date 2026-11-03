@@ -286,7 +286,7 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
 
       // 1. 记忆与画像
       const memText = registeredContexts.get('napcat:memory').text(qqCtx);
-      expect(memText).toContain('## 会话记忆与群友画像 (Memory & Profiles)');
+      expect(memText).toContain('## 会话规则与用户画像 (Memory & Profiles)');
       expect(memText).toContain('### Session 记忆');
 
       // 2. 黑话
