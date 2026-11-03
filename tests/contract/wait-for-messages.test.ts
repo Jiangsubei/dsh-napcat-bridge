@@ -23,7 +23,7 @@ import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import WebSocket from 'ws';
 import { MessageWaitRegistry, type WaitCollectedMessage } from '../../src/gateway/server.js';
-import { waitForUserMessages } from '../../src/tools/index.js';
+import { waitForUserMessages, renderWaitResultText } from '../../src/tools/index.js';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import * as NapCatBridgePlugin from '../../src/index.js';
 
@@ -203,6 +203,34 @@ describe('契约测试: EN-005 wait_for_user_messages（registry + 工具函数�
     expect(result).toHaveProperty('total', 1);
     expect((result as any).messages[0]).toMatchObject({ user_id: USER_QQ, content: '继续说' });
   });
+
+  it('契约 8: renderWaitResultText 正确渲染带 msg_id 与 quoted 引用回复的消息', () => {
+    const text = renderWaitResultText({
+      total: 1,
+      messages: [
+        {
+          msg_id: 88888,
+          from: '测试用户',
+          user_id: USER_QQ,
+          content: '@雪梨',
+          time: 1725200000000,
+          reply_to: 77777,
+          quoted: {
+            msg_id: 77777,
+            user_id: OTHER_QQ,
+            from_name: '历史用户',
+            text: '你是硬梨吗',
+          },
+        },
+      ],
+    });
+
+    expect(text).toContain('已收集 1 条新消息:');
+    expect(text).toContain('测试用户');
+    expect(text).toContain('[消息ID: 88888]');
+    expect(text).toContain('[引用回复 历史用户 (QQ: 1000000002): "你是硬梨吗"]');
+    expect(text).toContain('@雪梨');
+  });
 });
 
 describe('契约测试: EN-005 wait_for_user_messages 装配闭环（真实装配 + 真实 WS 入站）', () => {
@@ -314,5 +342,63 @@ describe('契约测试: EN-005 wait_for_user_messages 装配闭环（真实装�
     const result = await waitForUserMessages({ timeout: 0.1 } as any, { peer: GROUP_PEER });
     expect(result).toHaveProperty('success', false);
     expect((result as any).error).toBe('No messages received within the specified timeout');
+  });
+
+  it('装配: 等待期间入站引用回复消息 → 门控解析引用消息 → 工具返回带 quoted 与 reply_to 并正确渲染', async () => {
+    // 1. 先注入一条前序历史消息供引用
+    client.send(
+      JSON.stringify(
+        inboundGroupMessage('你是硬梨吗', {
+          messageId: 5001,
+          fromUserId: OTHER_QQ,
+          fromName: '历史用户',
+        })
+      )
+    );
+    await sleep(150);
+
+    // 2. 发起等待收集
+    const waitPromise = waitForUserMessages({ timeout: 2 } as any, { peer: GROUP_PEER });
+
+    // 3. 入站一条引用 5001 的回复消息
+    const replyEvent = {
+      post_type: 'message',
+      message_type: 'group',
+      sub_type: 'normal',
+      message_id: 8001,
+      user_id: USER_QQ,
+      group_id: GROUP_ID,
+      sender: { user_id: USER_QQ, nickname: '测试用户', card: '测试用户' },
+      message: [
+        { type: 'reply', data: { id: '5001' } },
+        { type: 'text', data: { text: '这是回复内容' } },
+      ],
+      raw_message: '[CQ:reply,id=5001]这是回复内容',
+      time: Math.floor(Date.now() / 1000),
+      self_id: BOT_QQ,
+    };
+    client.send(JSON.stringify(replyEvent));
+
+    const result = await waitPromise;
+    expect(result).toHaveProperty('total', 1);
+    const msg = (result as any).messages[0];
+    expect(msg).toMatchObject({
+      msg_id: 8001,
+      from: '测试用户',
+      user_id: USER_QQ,
+      content: '这是回复内容',
+      reply_to: 5001,
+      quoted: {
+        msg_id: 5001,
+        user_id: OTHER_QQ,
+        from_name: '历史用户',
+        text: '你是硬梨吗',
+      },
+    });
+
+    const rendered = renderWaitResultText(result);
+    expect(rendered).toContain('[消息ID: 8001]');
+    expect(rendered).toContain('[引用回复 历史用户 (QQ: 1000000002): "你是硬梨吗"]');
+    expect(rendered).toContain('这是回复内容');
   });
 });

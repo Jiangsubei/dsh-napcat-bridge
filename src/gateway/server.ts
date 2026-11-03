@@ -640,10 +640,19 @@ export class NapCatGatewayServer {
  * content 归一化文本 / time 毫秒时间戳）
  */
 export interface WaitCollectedMessage {
+  msg_id?: number;
   from: string;
   user_id: string;
   content: string;
   time: number;
+  reply_to?: number | null;
+  quoted?: {
+    msg_id?: number;
+    user_id?: string;
+    from_name?: string;
+    text?: string;
+    images?: string[];
+  } | null;
 }
 
 /**

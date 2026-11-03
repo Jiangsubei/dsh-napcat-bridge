@@ -22,7 +22,7 @@ import { resolveDshPath } from './utils/path.js';
 import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
 import { MessageDatabase } from './storage/database.js';
 import { MediaStorageManager, startMediaCleanupTask, computeFileMd5 } from './storage/media.js';
-import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
+import { NapCatGatewayServer, MessageWaitRegistry, type WaitCollectedMessage } from './gateway/server.js';
 import { resolveInboundImage } from './gateway/inbound-media.js';
 import { OfflineMessageSyncer } from './gateway/sync.js';
 import { SessionManager } from './gateway/session.js';
@@ -859,26 +859,175 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       return;
     }
 
+    // 统一引用消息解析 Helper (供等待门控与唤醒门控共用)
+    const getQuotedMessageHelper = async (repId: number): Promise<{
+      user_id: string;
+      sender_name: string;
+      content: string;
+      self: number;
+      images?: string[];
+    } | null> => {
+      // 1. 本地 SQLite 优先查询（耗时 < 1ms，0 网络/API 开销）
+      const cached = db.getMessage(repId);
+      if (cached) {
+        let quotedContent = cached.content;
+        const images: string[] = [];
+
+        // 若本地记录存有原始 raw，使用最新解析器动态重新解析（兼顾历史老数据升级与格式对齐）
+        if (cached.raw) {
+          try {
+            const rawSegments = JSON.parse(cached.raw);
+            if (Array.isArray(rawSegments)) {
+              const reParsed = parseNormalizedContent({
+                message: rawSegments,
+                raw_message: '',
+              } as any, {
+                getFaceByMd5: (hash) => db.getFaceByMd5(hash),
+              });
+              if (reParsed.content) {
+                quotedContent = reParsed.content;
+              }
+              if (reParsed.images && Array.isArray(reParsed.images)) {
+                for (const img of reParsed.images) {
+                  if (img && !images.includes(img)) images.push(img);
+                }
+              }
+            }
+          } catch {}
+        }
+
+        if (cached.local_path && !images.includes(cached.local_path)) {
+          images.push(cached.local_path);
+        }
+
+        return {
+          user_id: cached.user_id,
+          sender_name: cached.sender_name,
+          content: quotedContent,
+          self: cached.self,
+          images: images.length > 0 ? images : undefined,
+        };
+      }
+
+      // 2. 本地未命中，调用 NapCat get_msg API 二级兜底拉取
+      try {
+        const res = await server.getMsg(repId);
+        if (res && res.status === 'ok' && res.data) {
+          const remoteMsg = res.data;
+          const { content: quotedContent, images: quotedImages } = parseNormalizedContent(remoteMsg, {
+            getFaceByMd5: (hash) => db.getFaceByMd5(hash),
+          });
+          const quotedUserId = String(remoteMsg.sender?.user_id ?? remoteMsg.user_id ?? '');
+          let quotedName = remoteMsg.sender?.card || remoteMsg.sender?.nickname || '';
+          if (!quotedName && isGroup && event.group_id && quotedUserId) {
+            try {
+              quotedName = (await memberResolver.resolve(event.group_id, quotedUserId)) || '';
+            } catch {}
+          }
+          const quotedSelf = botQQ !== '' && quotedUserId === botQQ ? 1 : 0;
+
+          // 自动回填本地 SQLite 补齐记录
+          try {
+            db.saveMessage({
+              msg_id: repId,
+              peer,
+              user_id: quotedUserId,
+              sender_name: quotedName,
+              time: remoteMsg.time
+                ? remoteMsg.time < 10000000000
+                  ? remoteMsg.time * 1000
+                  : remoteMsg.time
+                : Date.now(),
+              type: 'text',
+              content: quotedContent,
+              raw: JSON.stringify(remoteMsg.message || remoteMsg.raw_message),
+              file_id: null,
+              busid: null,
+              local_path: quotedImages[0] || null,
+              fingerprint: null,
+              recalled: 0,
+              self: quotedSelf,
+              reply_to: null,
+            });
+          } catch {}
+
+          return {
+            user_id: quotedUserId,
+            sender_name: quotedName,
+            content: quotedContent,
+            self: quotedSelf,
+            images: quotedImages.length > 0 ? quotedImages : undefined,
+          };
+        }
+      } catch (apiErr) {
+        logger.debug?.(`[Plugin] 从 NapCat 拉取引用消息 (msg_id: ${repId}) 失败:`, apiErr);
+      }
+
+      // 3. 两级均查不到时返回 null（触发 shouldWakeup 优雅降级保底）
+      return null;
+    };
+
     // EN-005: 等待门控——等待期间该 peer 新消息「仅落库 + (命中则)进收集器」，
     //         其余环节（提问/审批/主动回复/唤醒）全部跳过，杜绝 collect + followup 双重投递。
     //         斜杠命令已在上方拦截（程序层，用户拍板除外项）；自身消息回显只抑制不收集。
     if (waitRegistry.isWaiting(peer)) {
-      if (!isSelf && waitRegistry.tryDeliver(peer, {
-        from: senderName,
-        user_id: fromUser,
-        content,
-        time: timestamp,
-      })) {
-        // 刷新出方向回复锚点（@提问者/引用原消息锚定最后一条被收集消息）
+      if (!isSelf) {
+        let quotedInfo: WaitCollectedMessage['quoted'] = undefined;
+        if (replyId !== undefined) {
+          try {
+            const qMsg = await getQuotedMessageHelper(replyId);
+            if (qMsg) {
+              const isQuotingSelf = Boolean(
+                qMsg.self === 1 ||
+                (botQQ !== '' && String(qMsg.user_id) === botQQ)
+              );
+              quotedInfo = {
+                msg_id: replyId,
+                user_id: String(qMsg.user_id || ''),
+                from_name: qMsg.sender_name || (isQuotingSelf ? ((currentConfig() as any).bot_nickname || (currentConfig().aliases?.[0] ?? '')) : ''),
+                text: qMsg.content || '',
+                images: qMsg.images && qMsg.images.length > 0 ? qMsg.images : undefined,
+              };
+            } else {
+              quotedInfo = {
+                msg_id: replyId,
+                user_id: '',
+                from_name: '',
+                text: '〔历史引用消息：内容已过期或无法获取〕',
+              };
+            }
+          } catch {
+            quotedInfo = {
+              msg_id: replyId,
+              user_id: '',
+              from_name: '',
+              text: '〔历史引用消息：内容已过期或无法获取〕',
+            };
+          }
+        }
+
         const consumedMsgId = Number(event.message_id);
-        if (consumedMsgId) {
-          const waitCtx = {
-            msg_id: consumedMsgId,
-            from_user: fromUser,
-            is_group: isGroup,
-          };
-          outboundBridge.trackInboundContext(peer, waitCtx);
-          outboundBridge.updateActiveTurnContext(peer, waitCtx);
+        const deliveredMsg: WaitCollectedMessage = {
+          from: senderName,
+          user_id: fromUser,
+          content,
+          time: timestamp,
+          ...(Number.isFinite(consumedMsgId) ? { msg_id: consumedMsgId } : {}),
+          ...(replyId !== undefined ? { reply_to: replyId } : {}),
+          ...(quotedInfo ? { quoted: quotedInfo } : {}),
+        };
+
+        if (waitRegistry.tryDeliver(peer, deliveredMsg)) {
+          // 刷新出方向回复锚点（@提问者/引用原消息锚定最后一条被收集消息）
+          if (consumedMsgId) {
+            const waitCtx = {
+              msg_id: consumedMsgId,
+              from_user: fromUser,
+              is_group: isGroup,
+            };
+            outboundBridge.trackInboundContext(peer, waitCtx);
+            outboundBridge.updateActiveTurnContext(peer, waitCtx);
+          }
         }
       }
       logger.debug?.(`[Plugin] 等待收集期间抑制入站消息流转 (peer: ${peer})`);
@@ -928,106 +1077,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         getFaceByMd5: (hash) => db.getFaceByMd5(hash),
         // EN-001: 被@者昵称解析（有 TTL 缓存，不重复 API 调用）
         resolveNickname: (gid, qq) => memberResolver.resolve(gid, qq),
-        getQuotedMessage: async (repId: number) => {
-          // 1. 本地 SQLite 优先查询（耗时 < 1ms，0 网络/API 开销）
-          const cached = db.getMessage(repId);
-          if (cached) {
-            let quotedContent = cached.content;
-            const images: string[] = [];
-
-            // 若本地记录存有原始 raw，使用最新解析器动态重新解析（兼顾历史老数据升级与格式对齐）
-            if (cached.raw) {
-              try {
-                const rawSegments = JSON.parse(cached.raw);
-                if (Array.isArray(rawSegments)) {
-                  const reParsed = parseNormalizedContent({
-                    message: rawSegments,
-                    raw_message: '',
-                  } as any, {
-                    getFaceByMd5: (hash) => db.getFaceByMd5(hash),
-                  });
-                  if (reParsed.content) {
-                    quotedContent = reParsed.content;
-                  }
-                  if (reParsed.images && Array.isArray(reParsed.images)) {
-                    for (const img of reParsed.images) {
-                      if (img && !images.includes(img)) images.push(img);
-                    }
-                  }
-                }
-              } catch {}
-            }
-
-            if (cached.local_path && !images.includes(cached.local_path)) {
-              images.push(cached.local_path);
-            }
-
-            return {
-              user_id: cached.user_id,
-              sender_name: cached.sender_name,
-              content: quotedContent,
-              self: cached.self,
-              images: images.length > 0 ? images : undefined,
-            };
-          }
-
-          // 2. 本地未命中，调用 NapCat get_msg API 二级兜底拉取
-          try {
-            const res = await server.getMsg(repId);
-            if (res && res.status === 'ok' && res.data) {
-              const remoteMsg = res.data;
-              const { content: quotedContent, images: quotedImages } = parseNormalizedContent(remoteMsg, {
-                getFaceByMd5: (hash) => db.getFaceByMd5(hash),
-              });
-              const quotedUserId = String(remoteMsg.sender?.user_id ?? remoteMsg.user_id ?? '');
-              let quotedName = remoteMsg.sender?.card || remoteMsg.sender?.nickname || '';
-              if (!quotedName && isGroup && event.group_id && quotedUserId) {
-                try {
-                  quotedName = (await memberResolver.resolve(event.group_id, quotedUserId)) || '';
-                } catch {}
-              }
-              const quotedSelf = botQQ !== '' && quotedUserId === botQQ ? 1 : 0;
-
-              // 自动回填本地 SQLite 补齐记录
-              try {
-                db.saveMessage({
-                  msg_id: repId,
-                  peer,
-                  user_id: quotedUserId,
-                  sender_name: quotedName,
-                  time: remoteMsg.time
-                    ? remoteMsg.time < 10000000000
-                      ? remoteMsg.time * 1000
-                      : remoteMsg.time
-                    : Date.now(),
-                  type: 'text',
-                  content: quotedContent,
-                  raw: JSON.stringify(remoteMsg.message || remoteMsg.raw_message),
-                  file_id: null,
-                  busid: null,
-                  local_path: quotedImages[0] || null,
-                  fingerprint: null,
-                  recalled: 0,
-                  self: quotedSelf,
-                  reply_to: null,
-                });
-              } catch {}
-
-              return {
-                user_id: quotedUserId,
-                sender_name: quotedName,
-                content: quotedContent,
-                self: quotedSelf,
-                images: quotedImages.length > 0 ? quotedImages : undefined,
-              };
-            }
-          } catch (apiErr) {
-            logger.debug?.(`[Plugin] 从 NapCat 拉取引用消息 (msg_id: ${repId}) 失败:`, apiErr);
-          }
-
-          // 3. 两级均查不到时返回 null（触发 shouldWakeup 优雅降级保底）
-          return null;
-        },
+        getQuotedMessage: getQuotedMessageHelper,
         isQuotingBot: async (repId: number) => {
           const quotedMsg = db.getMessage(repId);
           return quotedMsg?.self === 1 || (botQQ !== '' && quotedMsg?.user_id === botQQ);

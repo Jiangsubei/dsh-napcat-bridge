@@ -805,9 +805,9 @@ export async function waitForUserMessages(
 
   // 6. 结算结果映射（状态层报错原文透传，不给建议）
   if (result.ok) {
-    return { messages: result.messages, total: result.messages.length };
+    return toLosslessJson({ messages: result.messages, total: result.messages.length }) as WaitForUserMessagesResult;
   }
-  return { success: false, error: result.message };
+  return toLosslessJson({ success: false, error: result.message }) as WaitForUserMessagesResult;
 }
 
 /** EN-005: 等待结果渲染文本（成功列出收集消息；失败显示 error） */
@@ -822,7 +822,22 @@ export function renderWaitResultText(value: WaitForUserMessagesResult): string {
   const lines = messages.map((m, i) => {
     const head = m.from || m.user_id || '未知用户';
     const timeStr = m.time ? formatDateTime(m.time) : '';
-    return `${i + 1}. [${head}${timeStr ? ` ${timeStr}` : ''}] ${m.content}`;
+    const idStr = m.msg_id !== undefined ? ` [消息ID: ${m.msg_id}]` : '';
+    let quoteStr = '';
+    if (m.quoted) {
+      let quotedSender = '某人';
+      if (m.quoted.from_name && m.quoted.user_id) {
+        quotedSender = `${m.quoted.from_name} (QQ: ${m.quoted.user_id})`;
+      } else if (m.quoted.from_name) {
+        quotedSender = m.quoted.from_name;
+      } else if (m.quoted.user_id) {
+        quotedSender = `QQ: ${m.quoted.user_id}`;
+      } else if (m.quoted.msg_id) {
+        quotedSender = `消息ID: ${m.quoted.msg_id}`;
+      }
+      quoteStr = ` [引用回复 ${quotedSender}${m.quoted.text ? `: "${m.quoted.text}"` : ''}]`;
+    }
+    return `${i + 1}. [${head}${timeStr ? ` ${timeStr}` : ''}]${idStr}${quoteStr} ${m.content}`;
   });
   return `已收集 ${messages.length} 条新消息:\n${lines.join('\n')}`;
 }
@@ -1738,7 +1753,7 @@ export function registerAgentTools(
               peer,
               signal: exec.signal,
             })) as any;
-            return res;
+            return toLosslessJson(res);
           },
         })
       )
