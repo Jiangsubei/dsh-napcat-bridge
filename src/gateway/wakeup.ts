@@ -10,9 +10,33 @@ import type {
   OneBotNoticeEvent,
   WakeupPayload,
   WakeupTriggerType,
+  FaceRecord,
 } from '../types/index.js';
 import type { ProactiveManager } from './proactive.js';
 import type { FriendNoticeTracker } from './friend-tracker.js';
+import { computeFileMd5 } from '../storage/media.js';
+
+export interface MatchedFaceInfo {
+  id: string;
+  mood?: string | null;
+  tags?: string[] | null;
+}
+
+/**
+ * 格式化已收藏表情包在聊天上下文中的语义占位符。
+ * 格式示例：[表情包: face_12345678 (情绪: 嘲讽)] 或 [表情包: face_12345678]
+ * 说明：SystemPrompt 中已全量注入表情库各 ID 对应的详细标签，入站仅需保留 face_id 与情绪意图，避免重复注入标签。
+ */
+export function formatFacePlaceholder(face: MatchedFaceInfo): string {
+  if (face.mood && typeof face.mood === 'string' && face.mood.trim()) {
+    return `[表情包: ${face.id} (情绪: ${face.mood.trim()})]`;
+  }
+  return `[表情包: ${face.id}]`;
+}
+
+export interface ParseNormalizedContentOptions {
+  getFaceByMd5?: (md5: string) => FaceRecord | null | undefined;
+}
 
 export interface WakeupOptions {
   bot_qq: string;
@@ -34,6 +58,8 @@ export interface WakeupOptions {
   proactiveManager?: ProactiveManager;
   /** 好友申请与通知跟踪器 */
   friendTracker?: FriendNoticeTracker;
+  /** 入站图片匹配本地表情库查询器 */
+  getFaceByMd5?: (md5: string) => FaceRecord | null | undefined;
 }
 
 export interface WakeupDecision {
@@ -351,7 +377,10 @@ export function extractCardContent(
   return cardInfo;
 }
 
-export function parseNormalizedContent(event: OneBotMessageEvent): {
+export function parseNormalizedContent(
+  event: OneBotMessageEvent,
+  options?: ParseNormalizedContentOptions
+): {
   content: string;
   images: string[];
   replyId?: number;
@@ -400,7 +429,37 @@ export function parseNormalizedContent(event: OneBotMessageEvent): {
         case 'image': {
           const imgPath = data.local_path || data.file || data.url || '';
           if (imgPath) images.push(imgPath);
-          if (data.sub_type === 1 || data.emoji_package_id) {
+
+          let matchedFace: MatchedFaceInfo | null = null;
+          if (data.face && data.face.id) {
+            matchedFace = data.face;
+          } else if (options?.getFaceByMd5) {
+            let md5 = data.md5;
+            if (!md5 && data.local_path) {
+              md5 = computeFileMd5(data.local_path);
+            }
+            if (!md5 && typeof data.file === 'string') {
+              const m = data.file.match(/^[a-fA-F0-9]{32}(?:\.[a-zA-Z0-9]+)?$/);
+              if (m) {
+                md5 = data.file.split('.')[0].toLowerCase();
+              }
+            }
+            if (md5) {
+              const f = options.getFaceByMd5(md5);
+              if (f && f.enabled && !f.deleted_at) {
+                matchedFace = {
+                  id: f.id,
+                  mood: f.mood,
+                  tags: f.tags,
+                };
+                data.face = matchedFace;
+              }
+            }
+          }
+
+          if (matchedFace) {
+            textParts.push(formatFacePlaceholder(matchedFace));
+          } else if (data.sub_type === 1 || data.emoji_package_id) {
             if (data.local_path) {
               textParts.push(`[表情包:${data.summary || '表情'} 已保存: ${data.local_path}]`);
             } else {
@@ -718,7 +777,9 @@ export async function shouldWakeup(
     } catch {}
   }
 
-  const { content: rawContent, images, replyId, atQQs } = parseNormalizedContent(msgEvent);
+  const { content: rawContent, images, replyId, atQQs } = parseNormalizedContent(msgEvent, {
+    getFaceByMd5: options.getFaceByMd5,
+  });
   const inboundMsgId =
     typeof msgEvent.message_id === 'number' && Number.isSafeInteger(msgEvent.message_id) && msgEvent.message_id > 0
       ? msgEvent.message_id

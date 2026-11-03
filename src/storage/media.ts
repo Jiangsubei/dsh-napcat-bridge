@@ -33,12 +33,33 @@ export interface SaveResourceResult {
   fingerprint: string;
   deduplicated: boolean;
   level?: 1 | 2;
+  md5?: string;
 }
 
 /**
  * 根据文件头魔数推断文件扩展名
  * 支持: GIF (GIF89a/GIF87a), PNG (\x89PNG), JPEG (\xFF\xD8), WebP (RIFF....WEBP)
  */
+/**
+ * 计算 Buffer 的 MD5 十六进制字符串
+ */
+export function computeBufferMd5(buffer: Buffer): string {
+  return crypto.createHash('md5').update(buffer).digest('hex');
+}
+
+/**
+ * 计算本地文件的 MD5 十六进制字符串（若文件不存在或读取失败返回 null）
+ */
+export function computeFileMd5(filePath: string): string | null {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const buf = fs.readFileSync(filePath);
+    return crypto.createHash('md5').update(buf).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
 export function detectBufferExt(buffer: Buffer): string | undefined {
   if (!buffer || buffer.length < 2) return undefined;
 
@@ -135,12 +156,14 @@ export class MediaStorageManager {
           fingerprint: record.fingerprint || '',
           deduplicated: true,
           level: 1,
+          md5: computeFileMd5(record.local_path) || undefined,
         };
       }
     }
 
     // 2. 二级去重: SHA-256 指纹去重
     const fingerprint = this.computeHash(buffer);
+    const md5 = computeBufferMd5(buffer);
     const detectedExt = detectBufferExt(buffer);
 
     if (this.db) {
@@ -172,6 +195,7 @@ export class MediaStorageManager {
           fingerprint,
           deduplicated: true,
           level: 2,
+          md5,
         };
       }
     }
@@ -216,6 +240,7 @@ export class MediaStorageManager {
       localPath: targetPath,
       fingerprint,
       deduplicated: false,
+      md5,
     };
   }
 
@@ -235,6 +260,7 @@ export class MediaStorageManager {
           fingerprint: record.fingerprint || '',
           deduplicated: true,
           level: 1,
+          md5: computeFileMd5(record.local_path) || undefined,
         };
       }
     }

@@ -76,6 +76,7 @@ export interface InboundImageResult {
   ok: boolean;
   localPath?: string;
   fingerprint?: string;
+  md5?: string;
   via?: InboundImageVia;
   /** 本地字节数与消息段声明 file_size 不一致（疑似缩略图），仅告警不改选路 */
   sizeMismatch?: boolean;
@@ -490,6 +491,7 @@ export async function resolveInboundImage(input: ResolveInboundImageInput): Prom
         ok: true,
         localPath: saved.localPath,
         fingerprint: saved.fingerprint,
+        md5: saved.md5,
         via,
         ...(sizeMismatch ? { sizeMismatch: true } : {}),
         attempts,

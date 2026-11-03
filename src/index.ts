@@ -20,7 +20,7 @@ import { BridgeConfigSchema } from './config/schema.js';
 import { resolveDshPath } from './utils/path.js';
 import { EMOJI_MAP, type BridgePluginConfig, type MessageRecord } from './types/index.js';
 import { MessageDatabase } from './storage/database.js';
-import { MediaStorageManager, startMediaCleanupTask } from './storage/media.js';
+import { MediaStorageManager, startMediaCleanupTask, computeFileMd5 } from './storage/media.js';
 import { NapCatGatewayServer, MessageWaitRegistry } from './gateway/server.js';
 import { resolveInboundImage } from './gateway/inbound-media.js';
 import { OfflineMessageSyncer } from './gateway/sync.js';
@@ -676,6 +676,19 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
               primaryLocalPath = resolved.localPath;
               primaryFingerprint = resolved.fingerprint ?? null;
             }
+
+            // 识别入站图片/表情包是否命中本地已收藏表情库
+            const md5 = resolved.md5 || (resolved.localPath ? computeFileMd5(resolved.localPath) : undefined);
+            if (md5) {
+              const matchedFace = db.getFaceByMd5(md5);
+              if (matchedFace && matchedFace.enabled && !matchedFace.deleted_at) {
+                data.face = {
+                  id: matchedFace.id,
+                  mood: matchedFace.mood,
+                  tags: matchedFace.tags,
+                };
+              }
+            }
           } else {
             logger.warn?.(
               `[Plugin] 入站图片落盘失败 (peer: ${peer}, msg_id: ${event.message_id}, file: ${data.file || data.file_id || '?'}): ${resolved.error || '未知原因'}`
@@ -685,7 +698,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       }
     }
 
-    const { content: rawContent, replyId, atQQs } = parseNormalizedContent(event);
+    const { content: rawContent, replyId, atQQs } = parseNormalizedContent(event, {
+      getFaceByMd5: (hash) => db.getFaceByMd5(hash),
+    });
 
     // 过滤完全为空的消息事件 (无字符、无媒体、无文件、无引用，如 NapCat 上报的文件下载回执/系统灰条)
     const hasMedia = Boolean(
@@ -908,6 +923,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         proactive: currentConfig(),
         proactiveManager,
         friendTracker: friendNoticeTracker,
+        getFaceByMd5: (hash) => db.getFaceByMd5(hash),
         // EN-001: 被@者昵称解析（有 TTL 缓存，不重复 API 调用）
         resolveNickname: (gid, qq) => memberResolver.resolve(gid, qq),
         getQuotedMessage: async (repId: number) => {
@@ -925,7 +941,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
                   const reParsed = parseNormalizedContent({
                     message: rawSegments,
                     raw_message: '',
-                  } as any);
+                  } as any, {
+                    getFaceByMd5: (hash) => db.getFaceByMd5(hash),
+                  });
                   if (reParsed.content) {
                     quotedContent = reParsed.content;
                   }
@@ -956,7 +974,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             const res = await server.getMsg(repId);
             if (res && res.status === 'ok' && res.data) {
               const remoteMsg = res.data;
-              const { content: quotedContent, images: quotedImages } = parseNormalizedContent(remoteMsg);
+              const { content: quotedContent, images: quotedImages } = parseNormalizedContent(remoteMsg, {
+                getFaceByMd5: (hash) => db.getFaceByMd5(hash),
+              });
               const quotedUserId = String(remoteMsg.sender?.user_id ?? remoteMsg.user_id ?? '');
               let quotedName = remoteMsg.sender?.card || remoteMsg.sender?.nickname || '';
               if (!quotedName && isGroup && event.group_id && quotedUserId) {

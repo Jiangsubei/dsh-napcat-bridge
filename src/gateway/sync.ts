@@ -40,7 +40,8 @@ export interface OfflineSyncResult {
 export function convertOneBotToRecord(
   event: any,
   botQQ?: string,
-  targetPeer?: string
+  targetPeer?: string,
+  options?: { getFaceByMd5?: (md5: string) => any }
 ): MessageRecord | null {
   if (!event || typeof event !== 'object') return null;
 
@@ -102,7 +103,7 @@ export function convertOneBotToRecord(
     }
   }
 
-  const { content: rawContent, replyId: parsedReplyId } = parseNormalizedContent(event as any);
+  const { content: rawContent, replyId: parsedReplyId } = parseNormalizedContent(event as any, options);
   if (parsedReplyId !== undefined && replyId === null) {
     replyId = parsedReplyId;
   }
@@ -255,7 +256,9 @@ export class OfflineMessageSyncer {
               break;
             }
 
-            const record = convertOneBotToRecord(msg, this.botQQ, peer);
+            const record = convertOneBotToRecord(msg, this.botQQ, peer, {
+              getFaceByMd5: (hash) => this.db.getFaceByMd5(hash),
+            });
             if (record) {
               const inserted = this.db.saveMessageIfNotExists(record);
               if (inserted) {
