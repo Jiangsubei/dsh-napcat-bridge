@@ -185,7 +185,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
 
   const channelStr = isGroup ? `[QQ群聊: ${groupId}]` : `[QQ私聊]`;
   const msgIdStr =
-    typeof payload.msg_id === 'number' && Number.isSafeInteger(payload.msg_id) && payload.msg_id > 0
+    typeof payload.msg_id === 'number' && Number.isSafeInteger(payload.msg_id) && payload.msg_id !== 0
       ? ` [消息ID: ${payload.msg_id}]`
       : '';
   const headerTime = timeStr ? ` [${timeStr}]` : '';
@@ -218,7 +218,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
       for (const m of payload.buffered_messages) {
         const timePart = m.timestamp ? `[${formatTimeOnly(m.timestamp)}] ` : '';
         const msgIdPart =
-          typeof m.msg_id === 'number' && Number.isSafeInteger(m.msg_id) && m.msg_id > 0
+          typeof m.msg_id === 'number' && Number.isSafeInteger(m.msg_id) && m.msg_id !== 0
             ? `[消息ID: ${m.msg_id}] `
             : '';
         const namePart = m.from_name ? `${m.from_name} (QQ: ${m.from_user})` : `QQ: ${m.from_user}`;
@@ -247,7 +247,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
     for (const m of payload.buffered_messages) {
       const timePart = m.timestamp ? `[${formatTimeOnly(m.timestamp)}] ` : '';
       const msgIdPart =
-        typeof m.msg_id === 'number' && Number.isSafeInteger(m.msg_id) && m.msg_id > 0
+        typeof m.msg_id === 'number' && Number.isSafeInteger(m.msg_id) && m.msg_id !== 0
           ? `[消息ID: ${m.msg_id}] `
           : '';
       const namePart = m.from_name ? `${m.from_name} (QQ: ${m.from_user})` : `QQ: ${m.from_user}`;
@@ -257,7 +257,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
     let currentMsgBlock = '';
     const curTimePart = payload.timestamp ? `[${formatTimeOnly(payload.timestamp)}] ` : '';
     const curMsgIdPart =
-      typeof payload.msg_id === 'number' && Number.isSafeInteger(payload.msg_id) && payload.msg_id > 0
+      typeof payload.msg_id === 'number' && Number.isSafeInteger(payload.msg_id) && payload.msg_id !== 0
         ? `[消息ID: ${payload.msg_id}] `
         : '';
     currentMsgBlock += `${curTimePart}${curMsgIdPart}发送者: ${senderStr}\n`;

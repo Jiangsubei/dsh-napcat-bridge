@@ -781,9 +781,9 @@ export async function shouldWakeup(
     getFaceByMd5: options.getFaceByMd5,
   });
   const inboundMsgId =
-    typeof msgEvent.message_id === 'number' && Number.isSafeInteger(msgEvent.message_id) && msgEvent.message_id > 0
+    typeof msgEvent.message_id === 'number' && Number.isSafeInteger(msgEvent.message_id) && msgEvent.message_id !== 0
       ? msgEvent.message_id
-      : Number(msgEvent.message_id) > 0
+      : (msgEvent.message_id !== undefined && msgEvent.message_id !== null && Number.isSafeInteger(Number(msgEvent.message_id)) && Number(msgEvent.message_id) !== 0)
         ? Number(msgEvent.message_id)
         : undefined;
 

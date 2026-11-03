@@ -1109,13 +1109,19 @@ export async function collectFace(
 
   // 偷图/收藏新表情
   const sessionPeer = ctx.peer || '';
-  let targetMsgId = params.message_id;
-  if (!targetMsgId && ctx.inboundMsgIdGetter && sessionPeer) {
+  let targetMsgId: number | undefined;
+  if (params.message_id !== undefined && params.message_id !== null && String(params.message_id).trim() !== '') {
+    const parsed = Number(params.message_id);
+    if (Number.isSafeInteger(parsed) && parsed !== 0) {
+      targetMsgId = parsed;
+    }
+  }
+  if (targetMsgId === undefined && ctx.inboundMsgIdGetter && sessionPeer) {
     targetMsgId = ctx.inboundMsgIdGetter(sessionPeer);
   }
 
   let targetMsg: MessageRecord | null = null;
-  if (targetMsgId) {
+  if (targetMsgId !== undefined) {
     targetMsg = ctx.db.getMessage(targetMsgId);
   } else if (sessionPeer) {
     const recent = ctx.db.readHistory(sessionPeer, { has_file: true, limit: 1 });
@@ -1279,7 +1285,7 @@ export async function sendQqMessage(
       let replyId: number | undefined;
       if (params.reply_to !== undefined && params.reply_to !== null) {
         const num = typeof params.reply_to === 'number' ? params.reply_to : Number(String(params.reply_to).trim());
-        if (Number.isSafeInteger(num) && num > 0) {
+        if (Number.isSafeInteger(num) && num !== 0) {
           replyId = num;
         }
       }
