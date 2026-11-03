@@ -12,7 +12,7 @@
 | **【P2】群聊主动感知** | [`需求文档-JEV决策模型前置群聊感知与主动唤醒.md`](./需求文档-JEV决策模型前置群聊感知与主动唤醒.md) | **方案定稿（待实现）**。沙盒实测验证通过，涵盖两级漏斗剪枝、客观社交场态感知原语网与上下文元数据透传。实测日志已归档。 |
 | **【P3】人设自我演进** | [`方案设计-Agent自修改演进机制.md`](./方案设计-Agent自修改演进机制.md) | **架构方案草案（待实施）**。涵盖 Soft Soul 软演进、按 peer 持久化存储（`.dsh/napcat/soul/<peer>.md`）、`update_agent_soul` 工具契约与权限硬策略隔离。 |
 | **【P4】社交关系与群管理** | [`需求文档-好友与群管理工具及专用Session.md`](./需求文档-好友与群管理工具及专用Session.md)<br>[`Checklist-好友与群管理工具及专用Session.md`](./Checklist-好友与群管理工具及专用Session.md) | **待排期实施（全项待做）**。涵盖好友管理工具、群管理白名单工具、常规群成员感知（`get_group_members`）、单条消息深度透视（`get_message_detail`）、加好友专用独立 Session 与后台审计日志。 |
-| **【P5】单Agent统筹重构** | [`架构演进-AllInOne单Agent统筹重构.md`](./架构演进-AllInOne单Agent统筹重构.md) | **远景架构规划（待排期）**。涵盖 All-in-One 单 Agent 统筹机制、`send_qq_message` 出站解耦、发完顺手维护表情与记忆、下线独立后台 Agent，以及工具定义设计铁律。 |
+| **【新议题】语音交互扩展** | [`需求文档-可选语音交互扩展工具组_STT与GPT-SoVITS拟真TTS.md`](./需求文档-可选语音交互扩展工具组_STT与GPT-SoVITS拟真TTS.md) | **需求草案（待评审排期）**。涵盖主项目标准适配层、独立 Python Sidecar 推理伴生服务（SenseVoice-Small STT + GPT-SoVITS TTS）、环境音混音与按需触发机制。 |
 
 ---
 
@@ -20,6 +20,17 @@
 
 已交付、验收完毕或历史阶段的文档归类存放于 `archive/`（按 `<主题>_<YYMMDD>` 组织）：
 
+- **`archive/好友申请附言与系统通知隔离_261103/`**：
+  - `踩坑考证-好友申请附言自动注入与系统消息唤醒隔离.md`：还原 QQNT 好友申请通过瞬间自动填入附言并作为第 1 条消息推送的规律，通过 `FriendNoticeTracker` 状态机精准消费拦截，彻底杜绝误唤醒与 Prompt 角色颠倒（关联提交 `d7ea259`、`5d85bfb`，v0.2.7 发布）。
+- **`archive/表情包检索模糊化与动态情绪锚点注入_261102/`**：
+  - `规格文档-表情包检索模糊化与动态情绪锚点注入.md`：数据库层 `mood`/`tag` 模糊匹配改造与自由词 `query` 支持、动态 System Prompt 情绪锚点注入（`napcat:face_summary`）、`list_faces` 工具契约升级；
+  - `Checklist-表情包检索模糊化与动态情绪锚点注入.md`：阶段 1~5 全部 19 项验收点 100% 验收通过（关联提交 `e558293`、`ac1e51c`，v0.2.4 发布）。
+- **`archive/DSH工具Lossless_JSON输出约束与undefined红线_261102/`**：
+  - `踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md`：考证 DSH 微内核对 `defineTool` 返回值执行 `snapshotJsonValue` 无损校验机制，沉淀 `toLosslessJson` 清洗工具与条件展开规避 `undefined` 字段的铁律（关联提交 `cd2b848`、`9c26493`、`e0f94e3`、`7b80c98`）。
+- **`archive/Coding工具组误剔除修复_261101/`**：
+  - `修复报告-Coding工具组剔除误伤read_image与working_directory_261101.md`：解决群聊默认关闭 Coding 工具组误伤视觉识图 `read_image` 与目录感知 `working_directory` 问题，精准收敛为 5 个工程高危工具硬隔离（关联提交 `87c59a1`、`9b943a1`，v0.2.2 发布）。
+- **`archive/AllInOne单Agent统筹重构_261027/`**：
+  - `架构演进-AllInOne单Agent统筹重构.md`：重构回归 `send_qq_message` 出站工具并与回合终结彻底解耦，贯彻用户侧绝对静默原则，主 Agent 回复后同轮次顺手维护记忆与表情包，全面下线独立的 Curator 与 Review 模块（关联提交 `744a621`）。
 - **`archive/NTQQ本地缓存直读与多图并发解析_261101/`**：
   - `方案设计-NTQQ本地缓存直读与多图并发解析_261101.md`：15 张样本实测定位、NTQQ 本地缓存零配置直读（0.7ms~7ms）、QQ 商城表情直通公开 CDN 绕开 10s 假死、HTTP 直链兜底、多图 Promise.all 并发解析及 38 项纯净配置设计；
   - `根因分析-图片与表情包落盘及元信息缺失_261030.md`：入站图片与表情包落盘、元信息缺失及直链生命周期根因分析；

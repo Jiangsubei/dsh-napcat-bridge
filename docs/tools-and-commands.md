@@ -74,6 +74,37 @@
 
 ---
 
+### 1.7 群成员感知工具（仅群聊生效）
+
+| 工具名称 | 功能描述 | 关键参数 |
+|---|---|---|
+| `get_group_member_info` | 查询当前群聊的成员身份与名片信息（包含 QQ 号、群名片、昵称、角色 owner/admin/member 与加群时间）。内置 5 分钟 TTL 本地缓存池。**仅限群聊调用**。 | `user_id` (string \| number, 可选: 目标成员 QQ 号，精确查询)<br>`query` (string, 可选: 按群名片或昵称模糊匹配搜索)<br>`role` (string, 可选: 按角色筛选 `owner`/`admin`/`member`)<br>`no_cache` (boolean, 可选: 强制穿透缓存刷新) |
+
+---
+
+### 1.8 定时任务调度工具
+
+| 工具名称 | 功能描述 | 关键参数 |
+|---|---|---|
+| `schedule_task` | 安排定时单次延迟或周期 Cron 任务。到达时间后系统自动唤醒 Agent 并将设定的 prompt 注入会话执行。夜间免打扰时段自动顺延。 | `task_id` (string, 必填: 任务唯一标识符)<br>`type` (string, 必填: `once` 单次延迟 / `cron` 周期性任务)<br>`delay_seconds` (number, `once` 模式必填: 延迟触发秒数)<br>`cron` (string, `cron` 模式必填: 标准 5 段式 Cron 表达式如 `0 9 * * *`)<br>`prompt` (string, 必填: 触发时唤醒 Agent 的提示词内容)<br>`description` (string, 可选: 任务备注说明) |
+| `manage_scheduled_tasks` | 查询、管理或取消已安排的定时任务。 | `action` (string, 必填: `list` 列出所有任务 / `cancel` 取消指定任务 / `get` 获取任务详情)<br>`task_id` (string, `cancel` 或 `get` 时必填: 目标任务 ID) |
+
+---
+
+### 1.9 黑话词库管理工具（受 `slang_enabled: true` 门控）
+
+当在设置中开启 `slang_enabled`（黑话学习功能总开关）时，新建会话会自动装载以下 3 个黑话管理工具：
+
+| 工具名称 | 功能描述 | 关键参数 |
+|---|---|---|
+| `query_slang` | 查询群聊黑话词条的详细释义、使用场景与真实例句。模型遇到上下文 L1 索引中存在的词条时**必须优先调用本工具查明真实含义**，禁止主观臆测；调用成功自动增加词条查阅热度。 | `term` (string, 必填: 待查询释义的目标黑话词条) |
+| `record_slang` | 收录群聊中发现的新黑话、网络梗词或圈内行话。需提供四项规范字段以保证知识库质量。 | `term` (string, 必填: 词条名称，1~30字)<br>`definition` (string, 必填: 核心含义与深层梗意)<br>`context` (string, 必填: 适用语境、发言情绪与排他禁忌)<br>`example` (string, 必填: 地道群聊使用例句) |
+| `manage_slang` | 管理与维护黑话词库：更新已有词条内容、删除词条、分页浏览或在满额时按 LRU 淘汰模型查阅最少的冷门词条。 | `action` (string, 必填: `update` / `delete` / `list` / `evict`)<br>`term` (string, `update` 或 `delete` 时必填)<br>`definition` / `context` / `example` (string, `update` 时可选)<br>`count` (number, `evict` 时可选淘汰数量) |
+
+---
+
+---
+
 ## 2. QQ 斜杠命令
 
 在聊天输入框中以 `/` 或全角 `／` 开头的消息被识别为斜杠命令。

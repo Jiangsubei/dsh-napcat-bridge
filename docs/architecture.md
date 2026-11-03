@@ -100,7 +100,7 @@ NapCatGatewayServer 接收并解析 JSON
             │       └─► 若是: 校验发送者权限，执行命令并直接回出站消息，中断后续流程
             │
             ├─► 唤醒判定 (shouldWakeup):
-            │       ├─ 私聊: 直接唤醒
+            │       ├─ 私聊: 判定唤醒（默认直接唤醒；自动过滤 QQ 系统管家 10000 号与 sub_type notice/system，精准拦截加好友附言自动注入消息防角色颠倒）
             │       └─ 群聊: 判定即时唤醒（@机器人、别名点名、引用回复）；未唤醒普通消息缓冲至待读池，由定时巡检聚合研判（或潜水超时破冰）
             │
             └─► 提交至 SessionManager:
@@ -108,7 +108,7 @@ NapCatGatewayServer 接收并解析 JSON
                     ├─ 按 peerId（私聊 `user_<user_id>` / 群聊 `group_<group_id>`）分配或复用 DSH 会话
                     ├─ 新建会话权限模式与工具隔离装配：
                     │   ├─ 解析初始权限预设（默认配置与例外覆盖表），注入 permissionPresets
-                    │   └─ 解析 Coding 工具组开关及例外表，若关闭则通过 agentCtx.tools.restrict 彻底排除 7 个工程工具
+                    │   └─ 解析 Coding 工具组开关及例外表，若关闭则通过 agentCtx.tools.restrict 精准排除 5 个高危工程工具（bash/pwsh/read/write/edit；只读视觉工具 read_image 与目录感知 working_directory 始终保留）
                     ├─ 会话编号映射：支持空缺填补（gap-filling）与防撞短哈希
                     ├─ 构造入站上下文标头：显式注入 `[消息ID: <id>]`，为出站引用提供锚点
                     └─ 排队推入 DSH 消息流 (DSH Turn)
@@ -158,14 +158,17 @@ NapCatGatewayServer 接收并解析 JSON
 
 ---
 
-## 6. 表情包体系设计
+## 6. 表情包体系与情绪锚点
 
 当在配置中开启 `face_enabled: true` 时，激活表情包管理能力：
 
 1. **存储架构**：
    - 表情图片物理文件存储于 `.dsh/napcat/faces/`；
    - 元数据（`face_id`、格式、标签 `tags`、情绪 `mood`、使用热度等）记录于 SQLite 数据库 `faces` 表中。
-2. **闭环工具流**：
+2. **模糊检索与会话动态情绪锚点**：
+   - **底层模糊匹配**：`list_faces` 支持自由词 `query` 跨字段模糊匹配，`mood` 与 `tag` 均支持子串模糊匹配，杜绝精准等值脱靶；
+   - **动态 Prompt 注入 (`napcat:face_summary`)**：在会话上下文常驻注入表情库容总数与 Top 可用情绪列表，赋予模型宏观“库存感知”，彻底破除冷启动盲盒困境。
+3. **闭环工具流**：
    - **查库**：`list_faces` 检索心仪表情包；
    - **发送**：`send_face` 下发表情消息；
    - **偷图/收藏**：`collect_face` 录入聊天中出现的好图并打标；
@@ -173,13 +176,30 @@ NapCatGatewayServer 接收并解析 JSON
 
 ---
 
-## 7. 数据存储路径总览
+## 7. 黑话学习系统 (Slang)
+
+当在配置中开启 `slang_enabled: true` 时，激活群聊黑话词库自治能力：
+
+1. **分层架构与 SQLite 存储**：
+   - 黑话条目持久化保存在 SQLite `slangs` 表中，支持旧版 `slang.md` 无损平滑迁入；
+   - 包含词条（`term`）、释义（`definition`）、场景（`context`）、例句（`example`）四大核心字段与查阅计数。
+2. **常驻动态索引 (`napcat:slang`)**：
+   - 动态 System Prompt 注入仅保留轻量 L1 词条列表（低 Token 开销），引导模型遇到词条时按需发起深入查询。
+3. **闭环工具流**：
+   - **查词**：`query_slang` 精确查询词条详细释义、使用场景与例句，每次查询递增热度计数；
+   - **收录**：`record_slang` 收录群聊中发现的新黑话与内行梗；
+   - **维护**：`manage_slang` 修改释义、删除词条，或在满额时按查阅热度执行 LRU 淘汰最冷门词条。
+
+---
+
+## 8. 数据存储路径总览
 
 所有持久化数据均规范化锚定于用户环境的 `.dsh/napcat/` 目录下：
 
 | 数据类型 | 本地绝对路径 | 说明 |
 |---|---|---|
-| **SQLite 数据库** | `.dsh/napcat/messages.db` | 记录消息流水、事件审计、表情元数据与会话状态 |
+| **SQLite 数据库** | `.dsh/napcat/messages.db` | 记录消息流水、事件审计、表情元数据、黑话知识库、定时调度任务与会话状态 |
 | **多媒体资源缓存** | `.dsh/napcat/media/` | 接收到的外来图片、语音、文档缓存（受 7 天 TTL 自动清理） |
 | **本地表情库** | `.dsh/napcat/faces/` | 机器人收藏并维护的本地表情包文件库 |
 | **两层记忆文件** | `.dsh/napcat/napcat_memory/` | Markdown 格式存储的群聊记忆 (`groups/`) 与用户画像 (`users/`) |
+| **黑话知识库存储** | `.dsh/napcat/slang/` | 存量旧版黑话 Markdown 迁移源路径 (自动平滑迁入 SQLite) |

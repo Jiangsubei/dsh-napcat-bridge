@@ -17,11 +17,13 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 既是随叫随到的专业助
 - **两层记忆体系**：群聊会话记忆 + 用户跨群互通画像，Markdown 文件存储，提供 `read_memory`、`create_memory`、`edit_memory` 三大工具；写入侧按“用户画像 / Session 规则 / 群聊画像总预算”三个独立字符预算硬拒绝超限落盘，注入侧保持文件内容原子；彻底摒弃独立后台回顾 Agent。
 - **表情包管理体系**：受 `face_enabled` 配置门控，提供查表情（`list_faces`）、发表情（`send_face`）、收录好图（`collect_face`）与库容维护/LRU 淘汰（`manage_faces`）闭环工具链；另有群聊 `react_message` 贴表情轻量表态。
 - **串行发送与多媒体交互**：单对端串行出站队列，避免并发乱序；支持私聊文件入站自动落盘、群共享文件索引查询（`list_group_files`）、动态资源拉取（`fetch_chat_resource`）与合并转发展开（`expand_forward_message`）。
+- **黑话学习系统**：基于 SQLite 存储的群聊黑话词库，提供 `query_slang`、`record_slang`、`manage_slang` 工具闭环，动态提示词注入 L1 索引，支持 LRU 淘汰冷门词条。
+- **群成员感知与定时任务**：支持查询群成员名片与角色（`get_group_member_info`），支持单次与周期定时唤醒调度（`schedule_task`、`manage_scheduled_tasks`）。
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
-- **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
+- **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持运行中新消息行为模式（`steer` 及时插话 vs `queue` 加入队列），支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
 - **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
 - **发言黑名单与权限安全防线**：支持私聊与群聊发言黑名单（入库留存审计但永不唤醒与回复，管理员亦不豁免）；支持新建会话默认权限（私聊默认 `workspace-write`、群聊默认 `read-only`）及针对指定 QQ 号/群号的权限例外表；支持 Coding 工程工具组（bash/pwsh/read/write/edit）按私聊/群聊及例外表裁剪硬隔离（只读工具 `read_image` 与 `working_directory` 始终保留）。
-- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接设置、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 39 项参数支持 volatile 动态热更新。
+- **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接设置、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 40 项参数支持 volatile 动态热更新。
 
 ---
 
@@ -86,7 +88,7 @@ dsh plugin --profile web add link:.
 
 ---
 
-## ⚙️ 运行时配置 (39 项)
+## ⚙️ 运行时配置 (40 项)
 
 配置卡片在 WebUI 中分为 7 个 Tab：
 
@@ -109,12 +111,10 @@ dsh plugin --profile web add link:.
 ### 3. 回复配置 (Proactive)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
+| `proactive_buffer_size` | `number` | `10` | 群聊滑动窗口队列保留条数，为被动唤醒与主动回复共同提供短程前序上下文 |
+| `new_message_behavior` | `'steer' \| 'queue'` | `'steer'` | 运行中收到新消息的行为模式（`steer` 及时插话 vs `queue` 加入队列） |
 | `proactive_reply_enabled` | `boolean` | `false` | 启用群聊主动回复功能总开关 |
-| `proactive_interval_mins` | `number` | `3` | 主动回复轮询窗口期（分钟，期间有新消息才唤醒） |
-| `proactive_buffer_size` | `number` | `10` | 主动回复滑动窗口消息保留条数 |
-| `proactive_random_enabled` | `boolean` | `false` | 启用群聊普通消息随机概率唤醒 |
-| `proactive_random_probability` | `number` | `0.05` | 普通消息随机唤醒概率（0~1，`0.05` 即 5%） |
-| `proactive_cooldown_mins` | `number` | `10` | 主动回复冷却时间（分钟，防止频繁插话） |
+| `proactive_interval_mins` | `number` | `3` | 主动回复轮询窗口期（分钟，期间有新消息才聚合唤醒 Agent 研读并决策是否回复） |
 | `proactive_only_text` | `boolean` | `false` | 仅回复纯文本内容（多模态媒体消息不主动触发） |
 | `proactive_idle_enabled` | `boolean` | `false` | 启用潜水超时主动唤醒（冷场破冰冒泡） |
 | `proactive_idle_timeout_mins` | `number` | `120` | 潜水超时阈值（分钟） |
@@ -176,7 +176,7 @@ pnpm build         # 同步预设、类型编译与构建 WebUI 产物
 
 ## 🧪 测试
 
-本项目遵循严格的契约测试先行与真实装配验证规范，覆盖专属预设单一真相源同步、出站静默工具流、单 Agent 顺手提炼、表情包闭环、两层记忆体系与斜杠命令等场景（60 套件 500+ 测试用例）。
+本项目遵循严格的契约测试先行与真实装配验证规范，覆盖专属预设单一真相源同步、出站静默工具流、单 Agent 顺手提炼、表情包闭环、两层记忆体系与斜杠命令等场景（88 套件 720+ 测试用例）。
 
 ```bash
 pnpm test          # 完整测试（先执行 pnpm build 再执行测试）
@@ -192,7 +192,7 @@ pnpm test:quick    # 快速执行测试（跳过 build）
 - [快速上手 (docs/getting-started.md)](docs/getting-started.md)：环境依赖、安装步骤、NapCat WS 配置与验证指南。
 - [系统架构 (docs/architecture.md)](docs/architecture.md)：模块总览、生命周期装配、用户侧静默出站体系、记忆与表情体系。
 - [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 7 大 Tab 完整配置项、默认值与迁移说明。
-- [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 13 个 Agent 工具契约与 9 个纯两字中文斜杠命令。
+- [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 22 个 Agent 工具契约与 9 个纯两字中文斜杠命令。
 - [故障排查 (docs/troubleshooting.md)](docs/troubleshooting.md)：出站静默未调用工具、预设隔离、连接异常等问题排查指引。
 
 ---

@@ -137,4 +137,4 @@
 - **强制使用 `toLosslessJson` 清洗**：所有 `defineTool` 的 `execute` 方法返回前，**必须统一包裹 `toLosslessJson(res)`** 递归剥离所有 `undefined` 字段；
 - **契约测试必须覆盖无损 JSON 校验**：为工具编写契约测试时，必须遍历断言 `execute` 返回结果的所有键值绝不含 `undefined`。
 
-> 踩坑案例、欺骗性现象与底层根因考究详见：[devlog/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md](file:///f:/Project/dsh-napcat-bridge/devlog/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md)（参考提交 `cd2b848`、`9c26493`、`e0f94e3`）。
+> 踩坑案例、欺骗性现象与底层根因考究详见：[devlog/archive/DSH工具Lossless_JSON输出约束与undefined红线_261102/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md](file:///f:/Project/dsh-napcat-bridge/devlog/archive/DSH工具Lossless_JSON输出约束与undefined红线_261102/踩坑考证-DSH工具Lossless_JSON输出约束与undefined红线.md)（参考提交 `cd2b848`、`9c26493`、`e0f94e3`）。

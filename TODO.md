@@ -1,8 +1,8 @@
 # dsh-napcat-bridge 活跃需求与任务排期清单 (TODO)
 
-> **更新日期**: 2026-10-27  
+> **更新日期**: 2026-11-03  
 > **文档定位**: 项目根目录活跃任务追踪与排期总览（恪守“只留未做”原则）  
-> **排期原则**: 遵照用户拍板排期，P1 已全量交付闭环并归档至 `devlog/archive/`；当前阶段聚焦 P2（JEV 前置群聊感知），P3/P4 顺延推进自修改演进与运维管理，P5 推进 All-in-One 单 Agent 统筹重构；P0 暂空，作为突发紧急阻塞预留位。
+> **排期原则**: 遵照用户拍板排期，P1 与 P5（All-in-One 单 Agent 重构）已全量交付闭环并归档至 `devlog/archive/`；当前阶段聚焦 P2（JEV 前置群聊感知），P3/P4 顺延推进自修改演进与运维管理，并保持对可选语音交互扩展（Sidecar）的规划视野；P0 暂空，作为突发紧急阻塞预留位。
 
 ---
 
@@ -13,8 +13,8 @@
 | **P0** | *(暂无紧急阻塞)* | - | - | 预留位，随时响应生产故障或重大阻断缺陷 |
 | **P2** | **JEV 决策模型前置群聊感知与主动唤醒** | `src/gateway/wakeup.ts`<br>`src/gateway/jev.ts` | **方案定稿**<br>(沙盒实测验证通过) | 编写 TDD 契约测试，实现 JEV 客户端与门控装配 |
 | **P3** | **Agent 自修改演进机制**（群专属人设/行为准则自我演进） | `src/gateway/session/`<br>`src/tools/` | **架构调研草案**<br>(待方案细化) | 细化自修改工具协议与权限栅栏设计，编写契约测试 |
-| **P4** | **好友与群管理工具及专用管理 Session** | `src/gateway/`<br>`src/tools/` | **需求收敛**<br>(待实测与实现) | 验证管理 API 可达性，实现管理工具及独立 Session 隔离 |
-| **P5** | **All-in-One 单 Agent 统筹重构**（`send_qq_message` 回归 · 出站与终结解耦 · 淘汰独立后台 Agent） | `src/gateway/`<br>`src/tools/`<br>`src/outbound/` | **核心出站改造已完成**<br>(send_qq_message 回归/静默闭环) | 推进独立后台 Agent (Curator/Review) 淘汰与顺手维护契约集成 |
+| **P4** | **好友与群管理工具及专用管理 Session** | `src/gateway/`<br>`src/tools/` | **需求收敛**<br>(待排期实施) | 验证管理 API 可达性，实现管理工具及独立 Session 隔离 |
+| **规划中** | **可选语音交互扩展工具组**（SenseVoice STT + GPT-SoVITS 拟真 TTS） | 独立 Sidecar<br>`src/tools/` | **需求草案**<br>(待评审排期) | 评审伴生进程架构、混音管线及工具契约 |
 
 ---
 
@@ -73,19 +73,25 @@
 
 ---
 
-### 【P5】All-in-One 单 Agent 统筹重构（出站解耦 · 发完顺手维护 · 后台 Agent 下线）
+### 【规划中】可选语音交互扩展工具组（STT 与 GPT-SoVITS 拟真 TTS）
 
 - **相关文档**:
-  - 架构方案: [`devlog/架构演进-AllInOne单Agent统筹重构.md`](./devlog/架构演进-AllInOne单Agent统筹重构.md)
+  - 需求草案: [`devlog/需求文档-可选语音交互扩展工具组_STT与GPT-SoVITS拟真TTS.md`](./devlog/需求文档-可选语音交互扩展工具组_STT与GPT-SoVITS拟真TTS.md)
 - **核心定位**:
-  - 彻底去除零散的 Background Agent（下线独立 Curator、独立 Background Reviewer 会话与倒计时调度）；
-  - 重新引入 `send_qq_message` 工具，实现出站文本发送与回合终结彻底解耦；
-  - 打通“即时出站回复 -> 顺手在后台维护表情包（`collect_face` / `manage_faces`）与记忆（`create_memory` / `edit_memory`） -> 平稳收敛终结”的单 Agent 统一治理链路。
-- **执行清单 (Next Steps)**:
-  - [x] 重新接入 `send_qq_message` 工具（显式参数 text, reply_to?, at_user?），彻底解耦出站与回合终结（调用工具不终结 turn）
-  - [x] 入站唤醒 Prompt 消息头部显式透传真实 `[消息ID: <id>]`
-  - [x] 彻底废除 `assistant/message` 自动直发机制，严格贯彻用户侧绝对静默原则（0兜底、未调用工具不出站）
-  - [x] 清洗历史抑制词，替换为自然顺手维护引导（保留严格防流水账限制）
-  - [x] 重构平移历史合约测试（涵盖 ab-test-direct-stream, send-message-tool, send-message-quote, aside-suppression, outbound-stream, quote-assembly, turn-anchor-fix, stale-inbound-quote 等全部套件，全绿）
-  - [ ] 改造单 Agent 顺手维护完整闭环并编写端到端联合用例
-  - [ ] 彻底下线独立后台 Agent（Curator/Review）及配套定时器/调度逻辑，完成技术债清退
+  - 解决语音交互中的算力过载与恐怖谷效应；
+  - 保持主插件极致轻量，采用独立 Python Sidecar 推理服务伴生架构；
+  - 提供环境音混音管线与按需触发机制。
+
+---
+
+## 近期已完成并归档重大里程碑 (261027 ~ 261103)
+
+- **【P5】All-in-One 单 Agent 统筹重构**：`send_qq_message` 回归出站与回合解耦，实现发完顺手维护表情与记忆，全面下线独立后台 Curator 与 Review 模块（归档至 `archive/AllInOne单Agent统筹重构_261027/`）；
+- **黑话学习系统与 WebUI 管理卡片**：分层黑话词库、LRU 淘汰与 SQLite 迁移，`query_slang`、`record_slang`、`manage_slang` 工具集（v0.2.3，归档至 `archive/黑话学习系统与Web设置管理_261027/`）；
+- **群成员信息查询工具**：`get_group_member_info` 精准/模糊搜索与 5 分钟 TTL 缓存池（v0.2.3，归档至 `archive/群成员信息查询工具_261027/`）；
+- **Agent 定时任务调度器**：`schedule_task` 与 `manage_scheduled_tasks` 周期与单次定时唤醒（归档至 `archive/Agent定时唤醒与周期任务调度系统_261027/`）；
+- **发言黑名单与权限安全防线**：私聊/群聊黑名单（管理员不豁免）、新建会话默认权限模式与例外表、Coding 工具组 5 工具硬隔离（v0.2.0、v0.2.2，归档至 `archive/发言黑名单与会话权限管理_261101/`、`archive/Coding工具组误剔除修复_261101/`）；
+- **NTQQ 本地缓存直读与多图并发解析**：零配置直读 NTQQ 缓存（0.7ms~7ms）、公开 CDN 直通防假死、多图并发解析（v0.2.0，归档至 `archive/NTQQ本地缓存直读与多图并发解析_261101/`）；
+- **表情包模糊检索与动态情绪锚点注入**：`list_faces` 支持自由词 `query`、`mood`/`tag` 模糊匹配、会话动态情绪锚点 `napcat:face_summary` 注入（v0.2.4，归档至 `archive/表情包检索模糊化与动态情绪锚点注入_261102/`）；
+- **好友申请附言自动注入与系统消息唤醒隔离**：`FriendNoticeTracker` 状态机精准消费拦截，隔离系统号 10000 唤醒（v0.2.7，归档至 `archive/好友申请附言与系统通知隔离_261103/`）；
+- **统一提示词格式化模块**：收敛黑话、表情包全量分组与 ID 注入，建立统一运行时快照模块（commit `10a40ce`）。

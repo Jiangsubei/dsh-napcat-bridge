@@ -139,3 +139,29 @@
   2. 避免通过未经认证的裸浏览器标签页、第三方调试脚本直接发起非授权跨站调用；
   3. 检查 DSH 宿主版本及 `connection` 基础服务状态是否正常。
 
+---
+
+## 13. DSH 工具调用报错 `value is not lossless JSON`
+
+- **现象**：Agent 调用自定义工具（如黑话、表情包工具）时报错 `Error: tool "<tool_name>" returned invalid output: value is not lossless JSON`，即使底层数据已落盘，模型依然认为工具执行失败并陷入重复重试。
+- **原因**：**DSH 微内核对 `defineTool` 返回值执行 `snapshotJsonValue` 无损校验**。
+  - DSH 要求工具返回值必须能被无损序列化还原为纯粹的 JSON；
+  - 若返回值对象中包含值为 `undefined` 的键（如未命中的可选字段 `{ evicted_term: undefined }`），JSON 规范不包含 `undefined`，校验器判定为“有损”并抛出致命错误。
+- **恢复与开发规范**：
+  - 构造返回值时避免产生 `{ key: undefined }`，优先采用 ES6 条件展开：`...(val ? { key: val } : {})`；
+  - 工具返回前统一使用 `toLosslessJson(res)` 剥离所有 `undefined` 字段；
+  - 为工具编写契约测试断言返回值绝不含 `undefined` 属性。
+
+---
+
+## 14. 加好友通过瞬间把申请验证附言当普通私聊消息唤醒回复
+
+- **现象**：在手机 QQ 同意好友申请后，机器人立即私聊对方发送回复，回复内容误把对方此前申请时的验证消息（如“我是xxx”）当成了刚发来的聊天话语。
+- **原因**：**QQNT 协议端在好友添加成功瞬间会将申请附言作为会话首条消息推送**。
+  - NapCat 在 `notice.friend_add` 之后会紧跟一条 `sub_type: 'friend'` 的私聊历史消息，内容与加好友附言完全一致；
+  - 旧版逻辑将该消息误判为常规私聊唤醒。
+- **排查与解决步骤**：
+  - 插件自 **v0.2.7** 起内置了 `FriendNoticeTracker` 状态机，自动监听捕获加好友请求附言，并在首条消息到达时精确消费并拦截唤醒（标记为系统提示），绝不误回复；
+  - 检查当前插件版本（执行 `git log -n 1` 或 `package.json`），确保版本 `>= 0.2.7`；
+  - 若正在调试源码，请务必执行 `pnpm build` 并重启 DSH。
+
