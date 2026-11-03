@@ -5,7 +5,13 @@
 
 import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from '../storage/database.js';
-import { SnapshotManager, isExplicitNonQQSession } from './snapshot.js';
+import {
+  SnapshotManager,
+  isExplicitNonQQSession,
+  formatFaceLibraryContext,
+  formatPersonaContext,
+  formatBehaviorContext,
+} from './snapshot.js';
 import {
   DEFAULT_PERSONA,
   DEFAULT_BEHAVIOR,
@@ -52,12 +58,14 @@ export function registerNapCatDynamicPrompt(
         effectiveBehavior = `${effectiveBehavior}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
       }
 
-      const parts: string[] = [];
-      if (effectivePersona) parts.push(effectivePersona);
-      if (effectiveBehavior) parts.push(effectiveBehavior);
+      const personaBlock = formatPersonaContext(effectivePersona);
+      const behaviorBlock = formatBehaviorContext(effectiveBehavior);
 
-      const result = parts.join('\n\n').trim();
-      return result || DEFAULT_BEHAVIOR;
+      const parts: string[] = [];
+      if (personaBlock) parts.push(personaBlock);
+      if (behaviorBlock) parts.push(behaviorBlock);
+
+      return parts.join('\n\n').trim();
     },
   });
 }
@@ -79,15 +87,8 @@ export function registerFacePromptContext(
         return '';
       }
 
-      const summary = db.getFaceMoodSummary(8);
-      if (summary.total === 0) {
-        return '[本地表情库概览：当前库为空。若聊天中出现有趣的梗图或表情，可调用 collect_face 进行收录打标。]';
-      }
-
-      const moodParts = summary.moods.map((m) => `${m.mood}(${m.count})`);
-      const moodText = moodParts.length > 0 ? `当前可用情绪：${moodParts.join(', ')}。` : '';
-
-      return `[本地表情库概览：共 ${summary.total} 张表情包。${moodText}表达相应情绪时，可直接使用对应 mood 调用 list_faces 查询并配合 send_face 发送。]`;
+      const activeFacesRes = db.getActiveFacesForContext(100);
+      return formatFaceLibraryContext(activeFacesRes.faces, activeFacesRes.total);
     },
   });
 }

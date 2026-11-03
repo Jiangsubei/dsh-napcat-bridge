@@ -1022,6 +1022,14 @@ export class MessageDatabase {
     return { total, moods };
   }
 
+  /**
+   * 获取供动态上下文注入的活跃表情包列表 (默认最多 100 张)
+   */
+  getActiveFacesForContext(limit: number = 100): { faces: FaceRecord[]; total: number } {
+    const q = this.queryFaces({ enabledOnly: true, limit: Math.max(1, limit) });
+    return { faces: q.faces, total: q.total };
+  }
+
   queryFaces(options: FaceQueryOptions = {}): { faces: FaceRecord[]; total: number; has_more: boolean } {
     const db = this.ensureDb();
     const whereClauses: string[] = [];

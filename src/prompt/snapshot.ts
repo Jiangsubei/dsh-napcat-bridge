@@ -14,6 +14,15 @@ import {
 import type { MessageDatabase } from '../storage/database.js';
 import type { MemoryStorage } from '../memory/storage.js';
 import type { SlangStorage } from '../slang/storage.js';
+import {
+  formatFaceLibraryContext,
+  formatPersonaContext,
+  formatBehaviorContext,
+  formatSlangContext,
+  formatMemoryContext,
+} from './formatter.js';
+
+export * from './formatter.js';
 
 export interface QQSessionContext {
   peer: string;
@@ -293,24 +302,27 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
         const peer = session.peer;
         const currentQQ = session.qq !== 'default' ? session.qq : undefined;
 
+        let raw = '';
         if (session.isPrivate) {
-          return memStorage.getPromptSnapshotSync(
+          raw = memStorage.getPromptSnapshotSync(
             peer,
             [{ qq: session.qq, name: session.qq }],
             DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
             currentQQ
           );
+        } else {
+          // 群聊活跃用户
+          let activeUsers: Array<{ qq: string; name: string }> = [];
+          try {
+            const rows = options.db.getActiveUsers(peer, 7, 15);
+            activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
+          } catch {}
+
+          const groupBudget = options.getGroupMemoryBudget?.() ?? DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS;
+          raw = memStorage.getPromptSnapshotSync(peer, activeUsers, groupBudget, currentQQ);
         }
 
-        // 群聊活跃用户
-        let activeUsers: Array<{ qq: string; name: string }> = [];
-        try {
-          const rows = options.db.getActiveUsers(peer, 7, 15);
-          activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
-        } catch {}
-
-        const groupBudget = options.getGroupMemoryBudget?.() ?? DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS;
-        return memStorage.getPromptSnapshotSync(peer, activeUsers, groupBudget, currentQQ);
+        return raw ? formatMemoryContext(raw) : '';
       },
     });
   }
@@ -329,16 +341,12 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
         if (!rawMarkdown || !rawMarkdown.trim()) {
           return '';
         }
-        return [
-          '# 社群黑话与网络流行语知识库 (Slang & Memes)',
-          '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（如果已经有对应条目的话，请先使用 query_slang 工具查询详细释义与例句）：',
-          rawMarkdown.trim(),
-        ].join('\n\n');
+        return formatSlangContext(rawMarkdown.trim());
       },
     });
   }
 
-  // 3. 注册表情包动态情绪锚点 (napcat:face_summary, order: 48)
+  // 3. 注册表情包全量动态段 (napcat:face_summary, order: 48)
   manager.registerProvider({
     name: 'napcat:face_summary',
     order: 48,
@@ -346,13 +354,8 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
       if (options.getFaceEnabled && !options.getFaceEnabled()) {
         return '';
       }
-      const summary = options.db.getFaceMoodSummary(8);
-      if (summary.total === 0) {
-        return '[本地表情库概览：当前库为空。若聊天中出现有趣的梗图或表情，可调用 collect_face 进行收录打标。]';
-      }
-      const moodParts = summary.moods.map((m) => `${m.mood}(${m.count})`);
-      const moodText = moodParts.length > 0 ? `当前可用情绪：${moodParts.join(', ')}。` : '';
-      return `[本地表情库概览：共 ${summary.total} 张表情包。${moodText}表达相应情绪时，可直接使用对应 mood 调用 list_faces 查询并配合 send_face 发送。]`;
+      const activeFacesRes = options.db.getActiveFacesForContext(100);
+      return formatFaceLibraryContext(activeFacesRes.faces, activeFacesRes.total);
     },
   });
 
@@ -379,12 +382,14 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
         effectiveBehavior = `${effectiveBehavior}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
       }
 
-      const parts: string[] = [];
-      if (effectivePersona) parts.push(effectivePersona);
-      if (effectiveBehavior) parts.push(effectiveBehavior);
+      const personaBlock = formatPersonaContext(effectivePersona);
+      const behaviorBlock = formatBehaviorContext(effectiveBehavior);
 
-      const result = parts.join('\n\n').trim();
-      return result || DEFAULT_BEHAVIOR;
+      const parts: string[] = [];
+      if (personaBlock) parts.push(personaBlock);
+      if (behaviorBlock) parts.push(behaviorBlock);
+
+      return parts.join('\n\n').trim();
     },
   });
 

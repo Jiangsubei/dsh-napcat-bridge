@@ -106,7 +106,7 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
     });
 
     const activePrompt = promptObj.text(qqAssembleCtx);
-    expect(activePrompt).toContain('社群黑话与网络流行语知识库');
+    expect(activePrompt).toContain('社群黑话知识库 (Slang & Memes)');
     expect(activePrompt).toContain('query_slang');
     expect(activePrompt).toContain('- 牢大：科比、坠机调侃');
 

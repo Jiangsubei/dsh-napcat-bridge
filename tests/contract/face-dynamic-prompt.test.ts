@@ -108,12 +108,14 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     };
 
     const text = promptObj.text(assembleCtx);
-    expect(text).toContain('本地表情库概览');
-    expect(text).toContain('共 3 张表情包');
-    expect(text).toContain('卖萌(2)');
-    expect(text).toContain('调侃(1)');
-    expect(text).toContain('list_faces');
-    expect(text).toContain('send_face');
+    expect(text).toContain('本地表情包库存 (Sticker & Meme Library)');
+    expect(text).toContain('共 3 张可用表情包');
+    expect(text).toContain('### 卖萌 (2)');
+    expect(text).toContain('### 调侃 (1)');
+    expect(text).toContain('- f1: 标签: 猫猫');
+    expect(text).toContain('- f2: 标签: 小猫');
+    expect(text).toContain('- f3: 标签: 熊猫头');
+    expect(text).toContain('send_face(face_id="..."');
   });
 
   it('契约 3: QQ 会话且库为空时，注入友好收录引导文案', () => {
@@ -127,7 +129,8 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     };
 
     const text = promptObj.text(assembleCtx);
-    expect(text).toContain('当前库为空');
+    expect(text).toContain('本地表情包库存 (Sticker & Meme Library)');
+    expect(text).toContain('当前本地表情库为空');
     expect(text).toContain('collect_face');
   });
 

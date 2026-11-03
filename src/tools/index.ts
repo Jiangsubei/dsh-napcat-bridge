@@ -1950,12 +1950,12 @@ export function registerAgentTools(
           defineTool({
             name: 'send_face',
             description:
-              '根据表情 ID 将一张本地表情包作为独立表情消息发送到聊天中。用于聊天中需要精准表达情绪、接梗斗图时；表情 ID 需来自 list_faces 检索结果。业务图片产物请使用 send_file。',
+              '根据表情 ID 将一张本地表情包作为独立表情消息发送到聊天中。用于聊天中需要精准表达情绪、接梗斗图时；表情 ID 可直接从系统上下文中的本地表情库存清单中选取，亦可来自 list_faces 检索结果。业务图片产物请使用 send_file。',
             parameters: {
               face_id: {
                 type: 'string',
                 required: true,
-                description: '要发送的目标表情 ID (必填，通过 list_faces 获取)',
+                description: '要发送的目标表情 ID (必填，可直接从上下文表情库清单获取或通过 list_faces 检索)',
               },
             },
             output: {

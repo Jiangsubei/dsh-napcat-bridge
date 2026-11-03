@@ -9,7 +9,7 @@ import type { MessageDatabase } from '../storage/database.js';
 import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
 import { MemoryTools, createMemoryToolDefinitions } from './tools.js';
-import { SnapshotManager } from '../prompt/snapshot.js';
+import { SnapshotManager, formatMemoryContext } from '../prompt/snapshot.js';
 import {
   DEFAULT_USER_PROFILE_BUDGET_CHARS,
   DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
@@ -121,29 +121,32 @@ export function setupMemoryService(
         const peer = session.peer;
         const currentQQ = session.qq !== 'default' ? session.qq : undefined;
 
+        let raw = '';
         if (session.isPrivate) {
-          return storage.getPromptSnapshotSync(
+          raw = storage.getPromptSnapshotSync(
             peer,
             [{ qq: session.qq, name: session.qq }],
             DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
             currentQQ
           );
+        } else {
+          let activeUsers: Array<{ qq: string; name: string }> = [];
+          if (options.db) {
+            try {
+              const rows = options.db.getActiveUsers(peer, 7, 15);
+              activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
+            } catch {}
+          }
+
+          raw = storage.getPromptSnapshotSync(
+            peer,
+            activeUsers,
+            getGroupUserProfilesBudget(),
+            currentQQ
+          );
         }
 
-        let activeUsers: Array<{ qq: string; name: string }> = [];
-        if (options.db) {
-          try {
-            const rows = options.db.getActiveUsers(peer, 7, 15);
-            activeUsers = rows.map((r) => ({ qq: r.user_id, name: r.sender_name }));
-          } catch {}
-        }
-
-        return storage.getPromptSnapshotSync(
-          peer,
-          activeUsers,
-          getGroupUserProfilesBudget(),
-          currentQQ
-        );
+        return raw ? formatMemoryContext(raw) : '';
       },
     });
     unregisters.push(promptDisposer);

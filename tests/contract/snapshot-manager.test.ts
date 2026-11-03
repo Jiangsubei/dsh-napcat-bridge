@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   SnapshotManager,
   resolveQQSessionContext,
+  setupSnapshotHub,
   type SnapshotProvider,
 } from '../../src/prompt/snapshot.js';
 
@@ -245,6 +246,69 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
       expect(registeredContexts.size).toBe(2);
       manager.dispose();
       expect(registeredContexts.size).toBe(0);
+    });
+  });
+
+  describe('契约 5: setupSnapshotHub 组装各业务统一二级标题格式', () => {
+    it('5.1 注册的所有 Provider 输出均严格遵循 ## 模块名 规范，且表情包按情绪分组带 ID', () => {
+      const mockDb: any = {
+        getActiveFacesForContext: vi.fn().mockReturnValue({
+          total: 2,
+          faces: [
+            { id: 'face_1', mood: '开心', tags: ['大笑'], enabled: true },
+            { id: 'face_2', mood: '调侃', tags: ['摊手'], enabled: true },
+          ],
+        }),
+        getFaceMoodSummary: vi.fn().mockReturnValue({ total: 2, moods: [] }),
+        getActiveUsers: vi.fn().mockReturnValue([]),
+      };
+
+      const mockSlangStorage: any = {
+        getRawMarkdownSync: vi.fn().mockReturnValue('- **词条一**：解释一'),
+      };
+
+      const mockMemoryStorage: any = {
+        getPromptSnapshotSync: vi.fn().mockReturnValue('### Session 记忆\n- 备忘条目'),
+      };
+
+      const hub = setupSnapshotHub({
+        ctx: mockCtx,
+        db: mockDb,
+        memoryStorage: mockMemoryStorage,
+        slangStorage: mockSlangStorage,
+        getPersona: () => '自定义人格设定',
+        getBehavior: () => '自定义行为准则',
+        getFaceEnabled: () => true,
+        getSlangEnabled: () => true,
+      });
+
+      const qqCtx = { session: { id: 'qq-group-1000000001' } };
+
+      // 1. 记忆与画像
+      const memText = registeredContexts.get('napcat:memory').text(qqCtx);
+      expect(memText).toContain('## 会话记忆与群友画像 (Memory & Profiles)');
+      expect(memText).toContain('### Session 记忆');
+
+      // 2. 黑话
+      const slangText = registeredContexts.get('napcat:slang').text(qqCtx);
+      expect(slangText).toContain('## 社群黑话知识库 (Slang & Memes)');
+      expect(slangText).toContain('- **词条一**：解释一');
+
+      // 3. 表情包全量注入
+      const faceText = registeredContexts.get('napcat:face_summary').text(qqCtx);
+      expect(faceText).toContain('## 本地表情包库存 (Sticker & Meme Library)');
+      expect(faceText).toContain('共 2 张可用表情包');
+      expect(faceText).toContain('### 开心 (1)');
+      expect(faceText).toContain('- face_1: 标签: 大笑');
+      expect(faceText).toContain('### 调侃 (1)');
+      expect(faceText).toContain('- face_2: 标签: 摊手');
+
+      // 4. 人格与行为准则
+      const pbText = registeredContexts.get('napcat:behavior_persona').text(qqCtx);
+      expect(pbText).toContain('## 人格设定 (Persona)\n\n自定义人格设定');
+      expect(pbText).toContain('## 行为准则 (Behavior Guidelines)\n\n自定义行为准则');
+
+      hub.dispose();
     });
   });
 });
