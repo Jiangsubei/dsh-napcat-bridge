@@ -12,6 +12,7 @@ import type {
   WakeupTriggerType,
 } from '../types/index.js';
 import type { ProactiveManager } from './proactive.js';
+import type { FriendNoticeTracker } from './friend-tracker.js';
 
 export interface WakeupOptions {
   bot_qq: string;
@@ -31,6 +32,8 @@ export interface WakeupOptions {
   proactive?: BridgePluginConfig;
   /** 主动回复管理器实例 */
   proactiveManager?: ProactiveManager;
+  /** 好友申请与通知跟踪器 */
+  friendTracker?: FriendNoticeTracker;
 }
 
 export interface WakeupDecision {
@@ -802,6 +805,16 @@ export async function shouldWakeup(
 
   // 3.1 私聊消息: 默认直接唤醒
   if (!isGroup) {
+    // 过滤系统号 (如 10000 系统通知) 或系统通知子类型
+    if (fromUser === '10000' || msgEvent.sub_type === 'notice' || msgEvent.sub_type === 'system') {
+      return { wakeup: false };
+    }
+
+    // 若匹配为好友申请附言自动注入或伴生消息，直接阻断唤醒（零误杀）
+    if (options.friendTracker?.checkAndConsumeFriendNotice(fromUser, content, timestamp)) {
+      return { wakeup: false };
+    }
+
     const payload: WakeupPayload = {
       msg_id: inboundMsgId,
       trigger: 'at', // default trigger type for private or handled by agent

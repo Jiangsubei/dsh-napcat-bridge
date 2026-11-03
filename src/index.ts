@@ -27,6 +27,7 @@ import { OfflineMessageSyncer } from './gateway/sync.js';
 import { SessionManager } from './gateway/session.js';
 import { shouldWakeup, parseNormalizedContent, resolveAtNicknames, isExcludedFromProactive } from './gateway/wakeup.js';
 import { CachedGroupMemberResolver } from './gateway/members.js';
+import { FriendNoticeTracker } from './gateway/friend-tracker.js';
 import { ProactiveManager } from './gateway/proactive.js';
 import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
 import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
@@ -163,6 +164,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
     return (hash >>> 0) || 1;
   };
+
+  const friendNoticeTracker = new FriendNoticeTracker();
 
   // 1. 初始化 Gateway WebSocket 服务端
   const server = new NapCatGatewayServer({
@@ -550,7 +553,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         senderName = (await memberResolver.resolve(event.group_id, fromUser)) || '';
       } catch {}
     }
-    if (!isSelfMsg && fromUser) {
+    if (!isSelfMsg && fromUser && fromUser !== '10000') {
       currentSpeakers.set(peer, fromUser);
     }
     const timestamp = event.time
@@ -700,6 +703,42 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       logger.debug?.(
         `[Plugin] 收到完全为空的消息事件 (msg_id: ${event.message_id}, peer: ${peer})，已过滤不落盘不唤醒`
       );
+      return;
+    }
+
+    // 过滤 QQ 系统号 (如 10000 系统通知) 或系统通知子类型
+    const isSystemSender = !isGroup && (fromUser === '10000' || event.sub_type === 'notice' || event.sub_type === 'system');
+
+    // 检查是否为好友申请附言自动注入消息
+    const isFriendNotice = !isGroup && Boolean(friendNoticeTracker.checkAndConsumeFriendNotice(fromUser, rawContent, timestamp));
+
+    if (isSystemSender || isFriendNotice) {
+      logger.info?.(
+        `[Plugin] 收到${isFriendNotice ? '好友申请附言自动注入' : '系统通知'}消息 (peer: ${peer}, from: ${fromUser}, content: "${rawContent}")，仅入库审计，绝不唤醒 Agent`
+      );
+
+      try {
+        db.saveMessage({
+          msg_id: event.message_id,
+          peer,
+          user_id: fromUser,
+          sender_name: '系统提示',
+          time: timestamp,
+          type: isFriendNotice ? 'friend_notice' : 'system',
+          content: rawContent,
+          raw: JSON.stringify(event.message || event.raw_message),
+          file_id: null,
+          busid: null,
+          local_path: null,
+          fingerprint: null,
+          recalled: 0,
+          self: 0,
+          reply_to: null,
+        });
+      } catch (err) {
+        logger.error?.('[Plugin] 系统/好友通知消息入库失败:', err);
+      }
+
       return;
     }
 
@@ -868,6 +907,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         aliases: currentConfig().aliases,
         proactive: currentConfig(),
         proactiveManager,
+        friendTracker: friendNoticeTracker,
         // EN-001: 被@者昵称解析（有 TTL 缓存，不重复 API 调用）
         resolveNickname: (gid, qq) => memberResolver.resolve(gid, qq),
         getQuotedMessage: async (repId: number) => {
@@ -1061,8 +1101,23 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     }
   });
 
-  // 8. 监听 Notice 事件 (撤回、戳一戳、群文件上传等)
+  // 7.1 监听 Request 事件 (加好友申请等)
+  server.onRequest(async (event) => {
+    if (event.request_type === 'friend') {
+      logger.info?.(`[Plugin] 收到好友申请 (from: ${event.user_id}, comment: "${event.comment || ''}")`);
+      friendNoticeTracker.recordRequest(event.user_id, event.comment || '', event.time, event.flag);
+    }
+  });
+
+  // 8. 监听 Notice 事件 (撤回、戳一戳、群文件上传、好友增加等)
   server.onNotice(async (event) => {
+    // 好友添加成功通知
+    if (event.notice_type === 'friend_add') {
+      const fromUser = String(event.user_id || '');
+      logger.info?.(`[Plugin] 收到好友添加成功通知 (user: ${fromUser})`);
+      friendNoticeTracker.recordFriendAdd(fromUser, event.time);
+      return;
+    }
     // 撤回处理
     if (event.notice_type === 'group_recall' || event.notice_type === 'friend_recall') {
       if (event.message_id) {

@@ -10,6 +10,7 @@ import type {
   OneBotMessageEvent,
   OneBotMetaEvent,
   OneBotNoticeEvent,
+  OneBotRequestEvent,
 } from '../types/index.js';
 
 export interface GatewayServerOptions {
@@ -26,6 +27,7 @@ export interface GatewayServerOptions {
 
 export type MessageHandler = (event: OneBotMessageEvent) => void | Promise<void>;
 export type NoticeHandler = (event: OneBotNoticeEvent) => void | Promise<void>;
+export type RequestHandler = (event: OneBotRequestEvent) => void | Promise<void>;
 export type MetaHandler = (event: OneBotMetaEvent) => void | Promise<void>;
 
 interface PendingAction {
@@ -42,6 +44,7 @@ export class NapCatGatewayServer {
 
   private messageHandlers: MessageHandler[] = [];
   private noticeHandlers: NoticeHandler[] = [];
+  private requestHandlers: RequestHandler[] = [];
   private metaHandlers: MetaHandler[] = [];
   private connectHandlers: Array<() => void | Promise<void>> = [];
 
@@ -69,6 +72,13 @@ export class NapCatGatewayServer {
     this.noticeHandlers.push(handler);
     return () => {
       this.noticeHandlers = this.noticeHandlers.filter((h) => h !== handler);
+    };
+  }
+
+  onRequest(handler: RequestHandler): () => void {
+    this.requestHandlers.push(handler);
+    return () => {
+      this.requestHandlers = this.requestHandlers.filter((h) => h !== handler);
     };
   }
 
@@ -221,6 +231,20 @@ export class NapCatGatewayServer {
           }
         } catch (e) {
           this.options.logger?.error?.('[GatewayServer] 通知处理器异常:', e);
+        }
+      }
+    } else if (postType === 'request') {
+      const reqEvent = parsed as OneBotRequestEvent;
+      for (const h of this.requestHandlers) {
+        try {
+          const res = h(reqEvent);
+          if (res && typeof (res as Promise<any>).catch === 'function') {
+            (res as Promise<any>).catch((e) => {
+              this.options.logger?.error?.('[GatewayServer] 异步请求处理器异常:', e);
+            });
+          }
+        } catch (e) {
+          this.options.logger?.error?.('[GatewayServer] 请求处理器异常:', e);
         }
       }
     } else if (postType === 'meta_event') {
@@ -740,3 +764,5 @@ export class MessageWaitRegistry {
     }
   }
 }
+
+export { NapCatGatewayServer as GatewayServer };

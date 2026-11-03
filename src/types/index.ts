@@ -130,6 +130,18 @@ export interface OneBotNoticeEvent {
   likes?: Array<{ emoji_id?: string | number; id?: string | number; count?: number }>;
 }
 
+export interface OneBotRequestEvent {
+  post_type: 'request';
+  request_type: 'friend' | 'group' | string;
+  user_id: number | string;
+  comment?: string;
+  flag: string;
+  time: number;
+  self_id: number | string;
+  sub_type?: string;
+  group_id?: number | string;
+}
+
 export interface OneBotMetaEvent {
   post_type: 'meta_event';
   meta_event_type: 'lifecycle' | 'heartbeat';
