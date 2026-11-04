@@ -193,7 +193,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
     defineTool({
       name: 'query_slang',
       description:
-        '【日常聊天查梗专用】查询指定社群黑话、网络流行语或缩写的完整释义与典型使用例句。当在常驻黑话索引中看到对应词条或对话涉及该梗时必须调用本工具，以获取权威社群释义与真实语境，严禁仅凭索引或通用印象臆测。若未收录可尝试联网搜索。',
+        '【日常聊天查梗专用】查询指定社群黑话、网络流行语或缩写的完整释义与典型使用例句。当在常驻黑话索引中看到对应词条或对话涉及该梗、且前文尚未查询掌握时应调用本工具，以获取权威社群释义与真实语境，严禁在未查明前仅凭索引或通用印象臆测。若前文已查询掌握则无需重复查询；若未收录可尝试联网搜索。',
       parameters: {
         term: {
           type: 'string',
