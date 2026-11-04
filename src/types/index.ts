@@ -1120,17 +1120,23 @@ export interface ListActiveAgentsResult {
   error?: string;
 }
 
-export interface CreateUserAgentParams {
-  user_id: string | number;
+/**
+ * 创建/激活目标 Agent 的参数。
+ * target_type 必须显式声明，避免把群号误当作 QQ 号建成私聊会话。
+ */
+export interface CreateTargetAgentParams {
+  target_type: 'user' | 'group';
+  target_id: string | number;
   initial_message: string;
 }
 
-export interface CreateUserAgentResult {
+export interface CreateTargetAgentResult {
   success: boolean;
   created?: boolean;
   session_id?: string;
   peer?: string;
-  user_id?: string;
+  target_type?: 'user' | 'group';
+  target_id?: string;
   message?: string;
   error?: string;
 }

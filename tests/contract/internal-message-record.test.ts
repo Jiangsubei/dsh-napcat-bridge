@@ -4,7 +4,7 @@
  * 契约测试: Agent 内部协同通讯落库（source = 'agent'）
  *
  * 需求背景:
- * 内部协同通讯（send_agent_message / create_user_agent 初始使命）此前只进入
+ * 内部协同通讯（send_agent_message / create_target_agent 初始使命）此前只进入
  * Agent 上下文，不写 messages 表。上下文压缩后，Agent 无法通过 read_chat_history
  * 找回「谁给我布置过什么 / 我给谁发过什么」。
  *

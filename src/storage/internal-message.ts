@@ -1,7 +1,7 @@
 /**
  * dsh-napcat-bridge: Agent 内部协同通讯落库记录构造
  *
- * 内部通讯（send_agent_message / create_user_agent 初始使命）不产生 QQ 消息，
+ * 内部通讯（send_agent_message / create_target_agent 初始使命）不产生 QQ 消息，
  * 但属于 Agent 的上下文资产：上下文压缩后，Agent 需要能通过 read_chat_history
  * 找回「谁给我布置了什么 / 我给谁发过什么」。
  *

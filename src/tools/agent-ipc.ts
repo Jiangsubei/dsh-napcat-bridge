@@ -5,7 +5,7 @@
  *
  * 包含工具:
  * 1. list_active_agents: 查询当前活跃/已实例化的 Agent 列表及状态
- * 2. create_user_agent: 为指定 QQ 用户创建或激活专属常驻 Agent，传入初始使命指令
+ * 2. create_target_agent: 为指定 QQ 用户或群聊创建或激活常驻 Agent，传入初始使命指令
  * 3. send_agent_message: Agent 间内部通信信道 (布置任务/同步成果，真人和 QQ 客户端不可见)
  *
  * 架构规范:
@@ -19,8 +19,8 @@ import type {
   ListActiveAgentsParams,
   ListActiveAgentsResult,
   ActiveAgentInfo,
-  CreateUserAgentParams,
-  CreateUserAgentResult,
+  CreateTargetAgentParams,
+  CreateTargetAgentResult,
   SendAgentMessageParams,
   SendAgentMessageResult,
 } from '../types/index.js';
@@ -35,7 +35,7 @@ export { toLosslessJson };
  * 从本次工具调用的执行上下文补齐真实发起方 Session ID。
  *
  * Agent IPC 的 contextGetter 读取的是进程级 globalToolContext，它不携带调用方身份；
- * 若只依赖 ctx.sessionId，send_agent_message / create_user_agent 会把来源写成
+ * 若只依赖 ctx.sessionId，send_agent_message / create_target_agent 会把来源写成
  * 字面量 'agent'，导致对方收到无法寻址的回执地址。
  */
 function withInvocationSession(ctx: ToolExecutionContext, exec: any): ToolExecutionContext {
@@ -156,7 +156,7 @@ export function createListActiveAgentsTool(
           return [
             {
               type: 'text',
-              text: '当前暂无活跃的 QQ Agent 会话。若需向特定好友发起会话，可调用 create_user_agent 创建并激活专属 Agent。',
+              text: '当前暂无活跃的 QQ Agent 会话。若需向特定好友或群聊主动发起会话，可调用 create_target_agent 并显式指定 target_type（user/group）创建并激活专属 Agent。',
             },
           ];
         }
@@ -182,19 +182,35 @@ export function createListActiveAgentsTool(
   });
 }
 
-// ==================== 2. create_user_agent (创建/唤醒用户专属 Agent) ====================
+// ==================== 2. create_target_agent (创建/唤醒用户或群聊 Agent) ====================
 
-export const CREATE_USER_AGENT_DESCRIPTION =
-  '为指定 QQ 用户创建其专属的常驻 Agent 会话，并注入初始使命指令。注意：如果该用户此前已存在专属 Agent，本工具将直接返回其 Session ID 并提示已存在，不会重复发送消息，后续请直接调用 send_agent_message 进行通信；仅在该用户此前尚无专属 Agent 时，本工具才会真正创建并注入初始消息。目标 Agent 完成使命后回执一次即视为闭环；发起方收到回执后，若用户没有新的明确要求，无需再次回复确认或致谢。';
+export const CREATE_TARGET_AGENT_DESCRIPTION =
+  '为指定 QQ 用户或群聊创建并激活其常驻 Agent 会话，注入初始使命指令。target_type 必须显式声明为 "user"（QQ 私聊用户，含临时会话）或 "group"（QQ 群聊），target_id 为目标 QQ 号或群号。仅当用户明确指定了目标对象（谁 / 哪个群）且需要主动发起会话时才调用；不要自行猜测或批量创建会话。注意：如果该目标此前已存在专属 Agent，本工具将直接返回其 Session ID 并提示已存在，不会重复发送消息，后续请直接调用 send_agent_message 进行通信。目标 Agent 完成使命后回执一次即视为闭环；发起方收到回执后，若用户没有新的明确要求，无需再次回复确认或致谢。';
 
-export async function createUserAgent(
-  params: CreateUserAgentParams,
+export async function createTargetAgent(
+  params: CreateTargetAgentParams,
   ctx: ToolExecutionContext
-): Promise<CreateUserAgentResult> {
-  if (!params || !params.user_id || String(params.user_id).trim() === '') {
+): Promise<CreateTargetAgentResult> {
+  const targetType = params?.target_type;
+  if (targetType !== 'user' && targetType !== 'group') {
     return toLosslessJson({
       success: false,
-      error: '目标用户的 QQ 号不能为空。请传入 user_id。',
+      error:
+        'target_type 必须显式指定为 "user"（QQ 私聊用户）或 "group"（QQ 群聊），以避免把群号误当 QQ 号建成私聊会话。',
+    });
+  }
+
+  const targetIdStr = params?.target_id === undefined ? '' : String(params.target_id).trim();
+  if (!targetIdStr) {
+    return toLosslessJson({
+      success: false,
+      error: `目标 ${targetType === 'group' ? '群号' : 'QQ 号'}不能为空。请传入 target_id。`,
+    });
+  }
+  if (!/^\d+$/.test(targetIdStr)) {
+    return toLosslessJson({
+      success: false,
+      error: `目标 ID [${targetIdStr}] 非法：必须为纯数字的 ${targetType === 'group' ? '群号' : 'QQ 号'}。`,
     });
   }
 
@@ -213,14 +229,13 @@ export async function createUserAgent(
     });
   }
 
-  const userIdStr = String(params.user_id).trim();
-  const peer = `user_${userIdStr}`;
+  const peer = `${targetType}_${targetIdStr}`;
   const sessionId =
     typeof sessionManager.peerToSessionId === 'function'
       ? sessionManager.peerToSessionId(peer)
-      : `qq-user-${userIdStr}`;
+      : `qq-${targetType}-${targetIdStr}`;
 
-  // 1. 判断目标用户的 Agent 是否已存在（且未归档、未删除）
+  // 1. 判断目标 Agent 是否已存在（且未归档、未删除）
   const isArchived =
     typeof sessionManager.isSessionArchived === 'function' && sessionManager.isSessionArchived(sessionId);
   const isZombie =
@@ -239,14 +254,15 @@ export async function createUserAgent(
       created: false,
       session_id: sessionId,
       peer,
-      user_id: userIdStr,
-      message: `该用户已存在专属 Agent (Session ID: ${sessionId})。未重复注入初始消息。请直接调用 send_agent_message 工具向该 Session ID 发送内部消息。`,
+      target_type: targetType,
+      target_id: targetIdStr,
+      message: `该目标已存在专属 Agent (Session ID: ${sessionId})。未重复注入初始消息。请直接调用 send_agent_message 工具向该 Session ID 发送内部消息。`,
     });
   }
 
   try {
-    // 2. 目标用户此前无专属 Agent，首次创建并初始化
-    //    先解析昵称，确保首建会话标题即为「私聊: 昵称 QQ号 #n」，绝不以纯号码起步
+    // 2. 目标此前无专属 Agent，首次创建并初始化
+    //    先解析昵称，确保首建会话标题即带群名/好友昵称，绝不以纯号码起步
     if (typeof sessionManager.ensurePeerName === 'function') {
       try {
         await sessionManager.ensurePeerName(peer);
@@ -276,8 +292,9 @@ export async function createUserAgent(
       created: true,
       session_id: sessionId,
       peer,
-      user_id: userIdStr,
-      message: '用户专属 Agent 创建成功，已注入初始消息并唤醒。',
+      target_type: targetType,
+      target_id: targetIdStr,
+      message: `${targetType === 'group' ? '群聊' : '用户'}专属 Agent 创建成功，已注入初始消息并唤醒。`,
     });
   } catch (err: any) {
     return toLosslessJson({
@@ -287,36 +304,43 @@ export async function createUserAgent(
   }
 }
 
-export function createCreateUserAgentTool(
+export function createCreateTargetAgentTool(
   contextGetter: () => ToolExecutionContext
 ): ToolDefinition {
   return defineTool({
-    name: 'create_user_agent',
-    description: CREATE_USER_AGENT_DESCRIPTION,
+    name: 'create_target_agent',
+    description: CREATE_TARGET_AGENT_DESCRIPTION,
     parameters: {
-      user_id: {
+      target_type: {
         type: 'string',
-        description: '目标用户的 QQ 号 (必填)',
+        enum: ['user', 'group'],
+        description:
+          '目标类型 (必填)：user = QQ 私聊用户（含临时会话），group = QQ 群聊。绝不能把群号当作 user 传入。',
+      },
+      target_id: {
+        type: 'string',
+        description: '目标 QQ 号或群号 (必填，纯数字)',
       },
       initial_message: {
         type: 'string',
-        description: '指派给该用户 Agent 的初始指令或使命背景说明 (必填)',
+        description: '指派给该目标 Agent 的初始指令或使命背景说明 (必填)',
       },
     },
     output: {
       schema: { type: 'json' },
       render: (_args, value) => {
-        const v = value as unknown as CreateUserAgentResult;
+        const v = value as unknown as CreateTargetAgentResult;
         if (!v || !v.success) return [{ type: 'text', text: `创建失败: ${v?.error || '未知错误'}` }];
+        const typeLabel = v.target_type === 'group' ? '群聊' : '用户';
         if (v.created === false) {
-          return [{ type: 'text', text: `用户 Agent 已存在 [${v.session_id}]。未重复发消息，请直接调用 send_agent_message 发送内部消息。` }];
+          return [{ type: 'text', text: `${typeLabel} Agent 已存在 [${v.session_id}]。未重复发消息，请直接调用 send_agent_message 发送内部消息。` }];
         }
-        return [{ type: 'text', text: `用户 Agent [${v.session_id}] 创建成功并已注入初始消息。` }];
+        return [{ type: 'text', text: `${typeLabel} Agent [${v.session_id}] 创建成功并已注入初始消息。` }];
       },
     },
     execute: async (args, exec) => {
       const ctx = withInvocationSession(contextGetter(), exec);
-      return createUserAgent(args as CreateUserAgentParams, ctx) as any;
+      return createTargetAgent(args as CreateTargetAgentParams, ctx) as any;
     },
   });
 }
@@ -411,7 +435,7 @@ export async function sendAgentMessage(
   if (!hasHandle && !isActiveOrPresent) {
     return toLosslessJson({
       success: false,
-      error: `目标 Agent 会话 [${targetSessionId}] 尚未激活或不存在。若需要为该用户建立专属会话，请先调用 create_user_agent 创建并激活。`,
+      error: `目标 Agent 会话 [${targetSessionId}] 尚未激活或不存在。若需要为该目标建立专属会话，请先调用 create_target_agent（target_type 按 user/group 显式指定）创建并激活。`,
     });
   }
 

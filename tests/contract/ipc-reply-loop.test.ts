@@ -6,7 +6,7 @@
  * 规范:
  * 1. QQ 会话预设明确要求：被派发方回执一次即止，发起方收到回执后无新要求不再回复；
  * 2. 内部协同唤醒提示包含同样的终止约束；
- * 3. send_agent_message / create_user_agent 工具描述包含该约束。
+ * 3. send_agent_message / create_target_agent 工具描述包含该约束。
  */
 
 import { describe, it, expect } from 'vitest';
@@ -14,7 +14,7 @@ import { QQ_PRESET_PERSONA_PREFIX } from '../../src/constants/preset.js';
 import { formatWakeupPrompt } from '../../src/gateway/session/id-resolver.js';
 import {
   SEND_AGENT_MESSAGE_DESCRIPTION,
-  CREATE_USER_AGENT_DESCRIPTION,
+  CREATE_TARGET_AGENT_DESCRIPTION,
 } from '../../src/tools/agent-ipc.js';
 import type { WakeupPayload } from '../../src/types/index.js';
 
@@ -42,6 +42,6 @@ describe('契约测试: 内部协作回执即止', () => {
 
   it('契约 3: 内部协作工具描述包含终止约束', () => {
     expect(SEND_AGENT_MESSAGE_DESCRIPTION).toContain('回执即止');
-    expect(CREATE_USER_AGENT_DESCRIPTION).toContain('回执一次即视为闭环');
+    expect(CREATE_TARGET_AGENT_DESCRIPTION).toContain('回执一次即视为闭环');
   });
 });

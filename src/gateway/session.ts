@@ -456,7 +456,7 @@ export class SessionManager {
 
   /**
    * 确保 peer 的显示名称已解析（优先缓存/持久化，缺失时通过 NapCat 查询群信息或用户资料）。
-   * 供内部主动创建会话（create_user_agent / send_agent_message）在首次建会话前预热标题。
+   * 供内部主动创建会话（create_target_agent / send_agent_message）在首次建会话前预热标题。
    */
   public async ensurePeerName(peer: string): Promise<string | undefined> {
     return this.agentRunner.resolvePeerName(peer);

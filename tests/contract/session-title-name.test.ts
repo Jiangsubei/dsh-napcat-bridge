@@ -7,7 +7,7 @@
  * - peer 名称此前只存在内存 Map，DSH 重启即丢；
  * - getOrCreateAgent 每次无条件 rename，名字未知时会把
  *   「群聊: 测试群 8000000001 #1」覆盖成「群聊: 8000000001 #1」；
- * - Agent 内部主动创建会话（create_user_agent / send_agent_message）此前没有昵称来源，
+ * - Agent 内部主动创建会话（create_target_agent / send_agent_message）此前没有昵称来源，
  *   首建标题只有号码。
  *
  * 覆盖规范:

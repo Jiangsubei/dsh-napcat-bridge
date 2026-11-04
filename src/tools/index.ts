@@ -94,18 +94,18 @@ export {
 };
 import {
   createListActiveAgentsTool,
-  createCreateUserAgentTool,
+  createCreateTargetAgentTool,
   createSendAgentMessageTool,
   queryActiveAgents,
-  createUserAgent,
+  createTargetAgent,
   sendAgentMessage,
 } from './agent-ipc.js';
 export {
   createListActiveAgentsTool,
-  createCreateUserAgentTool,
+  createCreateTargetAgentTool,
   createSendAgentMessageTool,
   queryActiveAgents,
-  createUserAgent,
+  createTargetAgent,
   sendAgentMessage,
 };
 import {
@@ -2610,7 +2610,7 @@ export function registerAgentTools(
       };
     };
     unregisters.push(tools.register(createListActiveAgentsTool(ipcContextGetter)));
-    unregisters.push(tools.register(createCreateUserAgentTool(ipcContextGetter)));
+    unregisters.push(tools.register(createCreateTargetAgentTool(ipcContextGetter)));
     unregisters.push(tools.register(createSendAgentMessageTool(ipcContextGetter)));
 
     // 13. get_group_member_info (群成员信息查询)

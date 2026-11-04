@@ -2,11 +2,11 @@
  * tests/contract/agent-ipc.test.ts
  *
  * 契约测试: 跨 Agent 内部协同体系 (Inter-Agent IPC)
- * (list_active_agents, create_user_agent, send_agent_message)
+ * (list_active_agents, create_target_agent, send_agent_message)
  *
  * 覆盖规范:
  * 1. 活跃感知契约 (list_active_agents): 正确枚举当前活跃的 Agent 句柄、绑定的会话类型与繁忙状态
- * 2. 专属成员常驻契约 (create_user_agent): 目标用户首次创建或唤醒常驻 Agent，注入初始系统使命，返回 session_id
+ * 2. 目标 Agent 创建契约 (create_target_agent): 按 target_type 显式区分 user/group，首次创建或唤醒常驻 Agent，注入初始系统使命，返回 session_id
  * 3. 内部通信与回传契约 (send_agent_message): 投递内部消息，真人和 QQ 端不可见，携带 reply_to_session 原路闭环
  * 4. 并发排队与引导契约: 复用底层 new_message_behavior，平滑调度
  * 5. DSH Lossless JSON 红线契约: 断言所有工具执行结果绝不包含 undefined
@@ -16,10 +16,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   queryActiveAgents,
-  createUserAgent,
+  createTargetAgent,
   sendAgentMessage,
   createListActiveAgentsTool,
-  createCreateUserAgentTool,
+  createCreateTargetAgentTool,
   createSendAgentMessageTool,
 } from '../../src/tools/agent-ipc.js';
 import { bootDshNapcatBridge } from '../../src/boot.js';
@@ -190,11 +190,12 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
     });
   });
 
-  describe('2. create_user_agent 用户常驻 Agent 创建契约', () => {
+  describe('2. create_target_agent 用户/群聊常驻 Agent 创建契约', () => {
     it('首次创建: 用户此前无专属 Agent 时真正创建并注入初始指令，返回 created: true', async () => {
-      const res = await createUserAgent(
+      const res = await createTargetAgent(
         {
-          user_id: '1000000002',
+          target_type: 'user',
+          target_id: '1000000002',
           initial_message: '主人安排向你询问发票单号，请协助私聊跟进。',
         },
         {
@@ -207,7 +208,8 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       expect(res.created).toBe(true);
       expect(res.session_id).toBe('qq-user-1000000002');
       expect(res.peer).toBe('user_1000000002');
-      expect(res.user_id).toBe('1000000002');
+      expect(res.target_type).toBe('user');
+      expect(res.target_id).toBe('1000000002');
 
       // 验证唤醒 Payload
       expect(dispatchedPayloads).toHaveLength(1);
@@ -219,13 +221,40 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       assertNoUndefinedFields(res);
     });
 
+    it('群聊创建契约: target_type=group 时严格构造 group_ peer 与 qq-group- Session，绝不落成私聊', async () => {
+      const res = await createTargetAgent(
+        {
+          target_type: 'group',
+          target_id: '8000000002',
+          initial_message: '请到群里发送 1 做验证。',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-user-1000000001',
+        }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.created).toBe(true);
+      expect(res.peer).toBe('group_8000000002');
+      expect(res.session_id).toBe('qq-group-8000000002');
+      expect(res.target_type).toBe('group');
+      expect(res.target_id).toBe('8000000002');
+
+      expect(dispatchedPayloads).toHaveLength(1);
+      expect(dispatchedPayloads[0].peer).toBe('group_8000000002');
+      expect(dispatchedPayloads[0].from_session).toBe('qq-user-1000000001');
+      assertNoUndefinedFields(res);
+    });
+
     it('已存在抑制契约: 用户已存在活跃 Agent 时返回 created: false 并告知 Session ID，绝不重复发送消息', async () => {
       // 模拟 1000000001 已存在于 active handles 中
       mockSessionManager.hasActiveHandle = (sid) => sid === 'qq-user-1000000001';
 
-      const res = await createUserAgent(
+      const res = await createTargetAgent(
         {
-          user_id: '1000000001',
+          target_type: 'user',
+          target_id: '1000000001',
           initial_message: '重复消息',
         },
         {
@@ -250,9 +279,10 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       // 标记为已归档
       mockSessionManager.isSessionArchived = (sid) => sid === 'qq-user-1000000001';
 
-      const res = await createUserAgent(
+      const res = await createTargetAgent(
         {
-          user_id: '1000000001',
+          target_type: 'user',
+          target_id: '1000000001',
           initial_message: '重新创建消息',
         },
         {
@@ -268,23 +298,47 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       assertNoUndefinedFields(res);
     });
 
-    it('未传 user_id 或 initial_message 时防御性拦截', async () => {
-      const res1 = await createUserAgent({ user_id: '', initial_message: 'test' }, { sessionManager: mockSessionManager });
+    it('防御性拦截: 未声明 target_type / target_id 非法 / initial_message 为空时绝不让建', async () => {
+      const res1 = await createTargetAgent(
+        { target_id: '1000000001', initial_message: 'test' } as any,
+        { sessionManager: mockSessionManager }
+      );
       expect(res1.success).toBe(false);
-      expect(res1.error).toContain('QQ 号不能为空');
+      expect(res1.error).toContain('target_type');
       assertNoUndefinedFields(res1);
 
-      const res2 = await createUserAgent({ user_id: '1000000001', initial_message: '' }, { sessionManager: mockSessionManager });
+      const res2 = await createTargetAgent(
+        { target_type: 'user', target_id: '', initial_message: 'test' },
+        { sessionManager: mockSessionManager }
+      );
       expect(res2.success).toBe(false);
-      expect(res2.error).toContain('初始消息不能为空');
+      expect(res2.error).toContain('不能为空');
       assertNoUndefinedFields(res2);
+
+      const res3 = await createTargetAgent(
+        { target_type: 'group', target_id: 'not-a-number', initial_message: 'test' },
+        { sessionManager: mockSessionManager }
+      );
+      expect(res3.success).toBe(false);
+      expect(res3.error).toContain('纯数字');
+      assertNoUndefinedFields(res3);
+
+      const res4 = await createTargetAgent(
+        { target_type: 'user', target_id: '1000000001', initial_message: '' },
+        { sessionManager: mockSessionManager }
+      );
+      expect(res4.success).toBe(false);
+      expect(res4.error).toContain('初始消息不能为空');
+      assertNoUndefinedFields(res4);
+
+      expect(dispatchedPayloads).toHaveLength(0);
     });
 
     it('真实装配契约: execute 从 exec.agent.session.id 注入发起方 Session ID，不依赖全局上下文', async () => {
-      const tool = createCreateUserAgentTool(() => ({ sessionManager: mockSessionManager }));
+      const tool = createCreateTargetAgentTool(() => ({ sessionManager: mockSessionManager }));
 
       const res = await (tool as any).execute(
-        { user_id: '1000000002', initial_message: '请跟进发票单号' },
+        { target_type: 'user', target_id: '1000000002', initial_message: '请跟进发票单号' },
         { agent: { session: { id: 'qq-user-1000000001' } } }
       );
 
@@ -405,7 +459,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       assertNoUndefinedFields(res);
     });
 
-    it('未激活拦截契约: 向从未创建或未处于活跃状态的 Session ID 发送消息时拦截并提示调用 create_user_agent', async () => {
+    it('未激活拦截契约: 向从未创建或未处于活跃状态的 Session ID 发送消息时拦截并提示调用 create_target_agent', async () => {
       mockSessionManager.hasActiveHandle = () => false;
       mockSessionManager.isSessionActiveOrPresent = () => false;
 
@@ -422,7 +476,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
 
       expect(res.success).toBe(false);
       expect(res.error).toContain('尚未激活或不存在');
-      expect(res.error).toContain('create_user_agent');
+      expect(res.error).toContain('create_target_agent');
       expect(dispatchedPayloads).toHaveLength(0);
       assertNoUndefinedFields(res);
     });
@@ -447,9 +501,9 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
         expect(listTool).toBeDefined();
         expect(listTool.name).toBe('list_active_agents');
 
-        const createTool = tools.get('create_user_agent');
+        const createTool = tools.get('create_target_agent');
         expect(createTool).toBeDefined();
-        expect(createTool.name).toBe('create_user_agent');
+        expect(createTool.name).toBe('create_target_agent');
 
         const sendTool = tools.get('send_agent_message');
         expect(sendTool).toBeDefined();
