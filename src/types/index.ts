@@ -223,6 +223,8 @@ export interface MessageRecord {
 // ==================== 4. 工具入参/出参 Schema ====================
 
 export interface ReadChatHistoryParams {
+  /** 可选目标会话 peer (如 "group_8000000001" 或 "user_1000000001")，缺省时默认为当前会话 */
+  peer?: string;
   /** 按指定发送者 QQ 号精确筛选 */
   user_id?: string;
   /** 按发送者昵称/群名片模糊匹配 (SQL LIKE %sender_name%) */
@@ -333,6 +335,8 @@ export interface GroupMemberRawItem {
 }
 
 export interface QueryGroupMemberParams {
+  /** 目标群号 (可选，若显式传入则直接查询该群成员；在私聊中查询必须显式传入此参数) */
+  group_id?: string | number;
   /** 目标成员的 QQ 号（精确匹配） */
   user_id?: string;
   /** 目标成员的昵称或群名片模糊搜索关键词 */
@@ -961,4 +965,168 @@ export interface InboundReplyContext {
  */
 export interface SerialSender {
   enqueue<T>(peer: string, task: () => Promise<T>): Promise<T>;
+}
+
+// ==================== 7. 社交关系链探查与跨 Agent 会话协同契约 ====================
+
+export interface FriendItem {
+  user_id: string;
+  nickname: string;
+  remark: string;
+  long_nick: string;
+  sex: string;
+  age: number;
+  level: number;
+}
+
+export interface GetFriendListParams {
+  query?: string;
+  page?: number;
+  limit?: number;
+  no_cache?: boolean;
+}
+
+export interface GetFriendListResult {
+  success: boolean;
+  friends: FriendItem[];
+  total: number;
+  total_matched: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+  has_more: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface GroupItem {
+  group_id: string;
+  group_name: string;
+  group_remark: string;
+  member_count: number;
+  max_member_count: number;
+  group_memo: string;
+  group_create_time: number;
+}
+
+export interface GetGroupListParams {
+  query?: string;
+  page?: number;
+  limit?: number;
+  no_cache?: boolean;
+}
+
+export interface GetGroupListResult {
+  success: boolean;
+  groups: GroupItem[];
+  total: number;
+  total_matched: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+  has_more: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface GetUserProfileParams {
+  user_id: string | number;
+}
+
+export interface GetUserProfileResult {
+  success: boolean;
+  user_id?: string;
+  nickname?: string;
+  remark?: string;
+  sex?: string;
+  age?: number;
+  level?: number;
+  long_nick?: string;
+  qid?: string;
+  reg_time?: number;
+  error?: string;
+}
+
+export interface GetGroupInfoParams {
+  group_id: string | number;
+}
+
+export interface GetGroupInfoResult {
+  success: boolean;
+  group_id?: string;
+  group_name?: string;
+  group_remark?: string;
+  member_count?: number;
+  max_member_count?: number;
+  group_memo?: string;
+  group_create_time?: number;
+  error?: string;
+}
+
+export interface GroupNoticeItem {
+  notice_id: string;
+  sender_id: string;
+  publish_time: number;
+  content: string;
+  read_num: number;
+  pinned: boolean;
+}
+
+export interface GetGroupNoticeParams {
+  group_id: string | number;
+}
+
+export interface GetGroupNoticeResult {
+  success: boolean;
+  group_id?: string;
+  notices: GroupNoticeItem[];
+  total: number;
+  error?: string;
+}
+
+export interface ListActiveAgentsParams {
+  target_type?: 'user' | 'group';
+}
+
+export interface ActiveAgentInfo {
+  session_id: string;
+  peer: string;
+  target_type: 'user' | 'group';
+  target_id: string;
+  is_busy: boolean;
+}
+
+export interface ListActiveAgentsResult {
+  success: boolean;
+  agents: ActiveAgentInfo[];
+  total: number;
+  error?: string;
+}
+
+export interface CreateUserAgentParams {
+  user_id: string | number;
+  initial_message: string;
+}
+
+export interface CreateUserAgentResult {
+  success: boolean;
+  session_id?: string;
+  peer?: string;
+  user_id?: string;
+  message?: string;
+  error?: string;
+}
+
+export interface SendAgentMessageParams {
+  target_session_id: string;
+  message: string;
+  reply_to_session_id?: string;
+}
+
+export interface SendAgentMessageResult {
+  success: boolean;
+  delivered?: boolean;
+  target_session_id?: string;
+  message?: string;
+  error?: string;
 }

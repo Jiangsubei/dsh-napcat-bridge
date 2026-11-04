@@ -454,6 +454,31 @@ export class NapCatGatewayServer {
   }
 
   /**
+   * OneBot 11 get_friend_list: 获取好友列表
+   */
+  async getFriendList(): Promise<OneBotActionResponse<any[]>> {
+    return this.sendAction('get_friend_list', {});
+  }
+
+  /**
+   * OneBot 11 get_group_list: 获取群列表
+   */
+  async getGroupList(noCache = false): Promise<OneBotActionResponse<any[]>> {
+    return this.sendAction('get_group_list', {
+      no_cache: Boolean(noCache),
+    });
+  }
+
+  /**
+   * OneBot 11 / NapCat _get_group_notice: 获取群公告列表
+   */
+  async getGroupNotice(groupId: number | string): Promise<OneBotActionResponse<any[]>> {
+    return this.sendAction('_get_group_notice', {
+      group_id: Number(groupId),
+    });
+  }
+
+  /**
    * OneBot 11 / NapCat: 获取群历史消息记录 (get_group_msg_history)
    */
   async getGroupMsgHistory(

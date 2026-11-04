@@ -69,6 +69,30 @@ import {
 } from './member-info.js';
 export { createGetGroupMemberInfoTool, queryGroupMemberInfo, formatMemberInfo };
 import {
+  createGetFriendListTool,
+  createGetGroupListTool,
+  createGetUserProfileTool,
+  createGetGroupInfoTool,
+  createGetGroupNoticeTool,
+  queryFriendList,
+  queryGroupList,
+  queryUserProfile,
+  queryGroupInfo,
+  queryGroupNotice,
+} from './contact-info.js';
+export {
+  createGetFriendListTool,
+  createGetGroupListTool,
+  createGetUserProfileTool,
+  createGetGroupInfoTool,
+  createGetGroupNoticeTool,
+  queryFriendList,
+  queryGroupList,
+  queryUserProfile,
+  queryGroupInfo,
+  queryGroupNotice,
+};
+import {
   readQzoneFeeds,
   publishQzoneFeed,
   commentQzoneFeed,
@@ -1541,6 +1565,10 @@ export function registerAgentTools(
           description:
             '检索当前会话的本地历史聊天记录。在群聊中查询两条消息之间有什么其他的消息，需要查询指定的时间段，建议在两条消息之间间隔超过 5 分钟时调用，根据聊天节奏决定是否每次查询；亦用于指代不明追溯前情、响应用户查询/复述历史发言，或为贴表情/收藏表情等下游工具捞取目标消息的 message_id。查找群文件请使用专用的 list_group_files。',
           parameters: {
+            peer: {
+              type: 'string',
+              description: '可选目标会话标识 (如 "group_8000000001" 或 "user_1000000001")。缺省时默认为当前会话。',
+            },
             keyword: { type: 'string', description: '按消息文本内容关键词模糊搜索' },
             sender_name: { type: 'string', description: '按发送者昵称或群名片模糊搜索' },
             user_id: { type: 'string', description: '按指定发送者 QQ 号精确筛选' },
@@ -2503,6 +2531,20 @@ export function registerAgentTools(
         })
       )
     );
+
+    // 14. 社交关系链探查与群信息只读工具集
+    const contactContextGetter = () => {
+      const g = getGlobalToolContext();
+      return {
+        ...g,
+        gateway: options.gateway || g.gateway,
+      };
+    };
+    unregisters.push(tools.register(createGetFriendListTool(contactContextGetter)));
+    unregisters.push(tools.register(createGetGroupListTool(contactContextGetter)));
+    unregisters.push(tools.register(createGetUserProfileTool(contactContextGetter)));
+    unregisters.push(tools.register(createGetGroupInfoTool(contactContextGetter)));
+    unregisters.push(tools.register(createGetGroupNoticeTool(contactContextGetter)));
 
     // 13. get_group_member_info (群成员信息查询)
     unregisters.push(

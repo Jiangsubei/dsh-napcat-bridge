@@ -135,8 +135,12 @@ export function formatMemberInfo(raw: GroupMemberRawItem): FormattedGroupMember 
  */
 export function resolveGroupId(
   ctx: ToolExecutionContext,
-  exec?: any
+  exec?: any,
+  explicitGroupId?: string | number
 ): string | undefined {
+  if (explicitGroupId !== undefined && explicitGroupId !== null && String(explicitGroupId).trim() !== '') {
+    return String(explicitGroupId).trim();
+  }
   if (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') {
     return String(ctx.groupId).trim();
   }
@@ -176,11 +180,11 @@ export async function queryGroupMemberInfo(
   ctx: ToolExecutionContext,
   exec?: any
 ): Promise<QueryGroupMemberResult> {
-  const groupId = resolveGroupId(ctx, exec);
+  const groupId = resolveGroupId(ctx, exec, params?.group_id);
   if (!groupId) {
     return {
       success: false,
-      error: '当前不在群聊会话中，无法查询群成员信息。本工具仅适用于 QQ 群聊会话。',
+      error: '当前不在群聊会话中，且未指定 group_id。私聊中查询需显式传入 group_id。',
       members: [],
       total: 0,
     };
@@ -273,7 +277,7 @@ export async function queryGroupMemberInfo(
     message = `已展示至最后一页（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。`;
   }
 
-  return {
+  return toLosslessJson({
     success: true,
     group_id: groupId,
     members: formattedMembers,
@@ -283,8 +287,8 @@ export async function queryGroupMemberInfo(
     limit,
     total_pages: totalPages,
     has_more: hasMore,
-    message,
-  };
+    ...(message ? { message } : {}),
+  });
 }
 
 /**
