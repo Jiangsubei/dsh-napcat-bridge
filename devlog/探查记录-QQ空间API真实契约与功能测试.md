@@ -157,6 +157,34 @@
   ```
 - **结果分析**：动态被瞬间物理删除，返回 `status: "ok", retcode: 0`，全流程无残留，闭环验证 100% 通过！
 
+### 4.3 带图说说发送真实测试 (`send_qzone_msg` 带 `images`)
+- **测试图片**: 测试图片文件（大小约 446KB PNG）
+- **请求 Payload**:
+  ```json
+  {
+    "action": "send_qzone_msg",
+    "params": {
+      "content": "📸 dsh-napcat-bridge 带图测试动态（2026/11/4 11:58:56）",
+      "images": [
+        "file:///path/to/test_attachment.png"
+      ]
+    }
+  }
+  ```
+- **实际响应**:
+  ```json
+  {
+    "status": "ok",
+    "retcode": 0,
+    "data": {
+      "tid": "eca5a64e85adea6a0a2d0700",
+      "time": 1793764741
+    }
+  }
+  ```
+- **真机客户端查验结果**：用户在手机 QQ / QQ 空间端实际查验，**图文混排完全正常展示**，原图与文字完整渲染！
+
+
 ---
 
 ## 5. 总结与工具落地策略
