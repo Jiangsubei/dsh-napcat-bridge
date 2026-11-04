@@ -163,6 +163,17 @@ describe('契约测试: Gateway Action 接入点 (v2 预留 + 成员信息)', ()
     expect(res.status).toBe('ok');
   });
 
+  it('契约: delete_msg 动作参数契约 {message_id}', async () => {
+    const pendingAction = (server as any).deleteMsg(123456789);
+    const sent = await respondTo('delete_msg');
+    const res = await pendingAction;
+    expect(sent.action).toBe('delete_msg');
+    expect(sent.params).toMatchObject({
+      message_id: 123456789,
+    });
+    expect(res.status).toBe('ok');
+  });
+
   it('契约: onConnect 监听连接就绪并暴露 isConnected 状态', async () => {
     expect(server.isConnected).toBe(true);
 

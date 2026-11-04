@@ -348,6 +348,15 @@ export class NapCatGatewayServer {
   }
 
   /**
+   * OneBot 11 delete_msg: 撤回单条消息
+   */
+  async deleteMsg(messageId: number | string): Promise<OneBotActionResponse> {
+    return this.sendAction('delete_msg', {
+      message_id: Number(messageId),
+    });
+  }
+
+  /**
    * OneBot 11 get_image: 取图片在 NapCat 侧的本机路径。
    * NapCat 源码实证 (GetImage.ts): GetImagePayloadSchema {file}，返回 data.{file, url, file_size, file_name}，
    * data.file 为 NapCat 本机原图路径 —— 入站图片四段式取图的首选段（QQ 直链对第三方进程不可用）。

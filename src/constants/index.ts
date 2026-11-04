@@ -27,6 +27,7 @@ export const DEFAULT_BEHAVIOR =
   '- 消息下发：向用户回复消息、告知结论或同步长任务进展时，必须调用 send_qq_message 工具。请将正文完整传入 text 参数，并根据需要显式传入 reply_to（引用目标消息 ID）与 at_user（艾特目标 QQ）。严禁在直接回复中重复输出已发送的正文内容。\n' +
   '- 用户提问与抉择：若需要用户澄清需求、提供缺失信息或在多选项中进行抉择确认，可调用官方 ask_user_question 工具发起结构化交互。\n' +
   '- 文件与表情：生成或需发送给用户的文件/图片必须保存到本地持久化路径或共享目录，并调用 send_file 下发；发送表情包请调用 send_face。\n' +
+  '- 消息撤回：若发现发错内容、产生幻觉，或被用户指出要求撤回，或在具备管理员权限时需要处置违规发言，可调用 recall_message 撤回指定消息（传入 message_id）。受 QQ 平台时限（如普通消息 2 分钟）与权限限制，若超过时限或无权撤回将如实报错。\n' +
   '- ' + DEFAULT_MEMORY_GUIDANCE;
 
 export const DEFAULT_PROACTIVE_REPLY_ENABLED = false;
