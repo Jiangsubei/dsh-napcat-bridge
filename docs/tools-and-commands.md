@@ -103,6 +103,18 @@
 
 ---
 
+### 1.10 Agent 内部协同工具
+
+用于 QQ Agent 之间的内部协同：先创建/唤醒目标 Agent，再通过内部总线投递任务与回执。内部消息不会发送到 QQ，真实用户完全不可见。
+
+| 工具名称 | 功能描述 | 关键参数 |
+|---|---|---|
+| `list_active_agents` | 查询当前活跃或已实例化的 Agent 会话（Session ID、peer、目标类型与号码、是否繁忙），用于协同前寻址。 | `target_type` (string, 可选: `user` 仅私聊 / `group` 仅群聊) |
+| `create_target_agent` | 为指定 QQ 用户或群聊创建并激活常驻 Agent，并注入初始使命。**必须显式指定 `target_type`**，避免把群号误当成 QQ 号建成私聊会话。仅当用户明确指定目标对象（谁 / 哪个群）且需要主动发起会话时调用，不要自行猜测或批量创建。目标已存在时只返回其 Session ID，不重复注入。 | `target_type` (string, 必填: `user` QQ 私聊用户含临时会话 / `group` QQ 群聊)<br>`target_id` (string, 必填: 目标 QQ 号或群号，纯数字)<br>`initial_message` (string, 必填: 初始使命或任务背景) |
+| `send_agent_message` | 向指定 Session ID 的目标 Agent 发送内部协作消息（布置任务、同步上下文或回传成果）。目标会话必须已创建并激活；未激活时先调用 `create_target_agent`。协作遵循「回执即止」：被派发方回执一次即可，发起方收到回执后若无新的明确要求不再回复确认、致谢或追问。 | `target_session_id` (string, 必填: 形如 `qq-user-1000000001` 或 `qq-group-8000000001`)<br>`message` (string, 必填: 内部协作内容) |
+
+---
+
 ---
 
 ## 2. QQ 斜杠命令
