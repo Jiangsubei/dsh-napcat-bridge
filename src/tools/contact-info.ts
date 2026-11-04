@@ -221,7 +221,18 @@ export function createGetFriendListTool(
       render: (_args, value) => {
         const v = value as unknown as GetFriendListResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `查询成功，共 ${v.total_matched} 位好友（当前展示 ${v.total} 位）。` }];
+        if (v.total === 0) return [{ type: 'text', text: v.message || '未找到符合条件的好友。' }];
+        const lines: string[] = [
+          `### 好友列表查询结果 (第 ${v.page}/${v.total_pages} 页，匹配 ${v.total_matched} 人，本页展示 ${v.total} 人)`,
+        ];
+        for (const f of v.friends) {
+          const remarkPart = f.remark ? ` (备注: ${f.remark})` : '';
+          lines.push(`- **${f.nickname}**${remarkPart} | QQ: \`${f.user_id}\``);
+        }
+        if (v.has_more) {
+          lines.push(`\n> 提示：当前还有未展示的好友。可再次调用本工具并传入 \`page: ${v.page + 1}\` 继续浏览。`);
+        }
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {
@@ -378,7 +389,21 @@ export function createGetGroupListTool(
       render: (_args, value) => {
         const v = value as unknown as GetGroupListResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `查询成功，共 ${v.total_matched} 个群聊（当前展示 ${v.total} 个）。` }];
+        if (v.total === 0) return [{ type: 'text', text: v.message || '未找到符合条件的群聊。' }];
+        const lines: string[] = [
+          `### 群聊列表查询结果 (第 ${v.page}/${v.total_pages} 页，匹配 ${v.total_matched} 个群，本页展示 ${v.total} 个)`,
+        ];
+        for (const g of v.groups) {
+          const remarkPart = g.group_remark ? ` (备注: ${g.group_remark})` : '';
+          const memoPart = g.group_memo ? `\n  - 群介绍: ${g.group_memo}` : '';
+          lines.push(
+            `- **${g.group_name}**${remarkPart} | 群号: \`${g.group_id}\` | 人数: ${g.member_count}/${g.max_member_count}${memoPart}`
+          );
+        }
+        if (v.has_more) {
+          lines.push(`\n> 提示：当前还有未展示的群聊。可再次调用本工具并传入 \`page: ${v.page + 1}\` 继续浏览。`);
+        }
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {
@@ -461,7 +486,19 @@ export function createGetUserProfileTool(
       render: (_args, value) => {
         const v = value as unknown as GetUserProfileResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `用户资料 [${v.user_id}]: ${v.nickname} (等级: ${v.level}, 签名: ${v.long_nick || '无'})` }];
+        const regTimeStr = v.reg_time ? new Date(v.reg_time * 1000).toLocaleDateString('zh-CN') : undefined;
+        const lines: string[] = [
+          `### QQ 个人公开资料卡`,
+          `- **用户昵称**: ${v.nickname || '（未知）'}`,
+          `- **QQ 账号**: \`${v.user_id}\``,
+          ...(v.remark ? [`- **好友备注**: ${v.remark}`] : []),
+          ...(v.qid ? [`- **QID**: ${v.qid}`] : []),
+          `- **性别/年龄**: ${v.sex || '未知'} / ${v.age ?? 0} 岁`,
+          `- **QQ 等级**: Lv.${v.level ?? 0}`,
+          ...(regTimeStr ? [`- **注册时间**: ${regTimeStr}`] : []),
+          `- **个性签名**: ${v.long_nick || '（无）'}`,
+        ];
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {
@@ -542,7 +579,17 @@ export function createGetGroupInfoTool(
       render: (_args, value) => {
         const v = value as unknown as GetGroupInfoResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `群信息 [${v.group_id}]: ${v.group_name} (${v.member_count}/${v.max_member_count}人)` }];
+        const createTimeStr = v.group_create_time ? new Date(v.group_create_time * 1000).toLocaleDateString('zh-CN') : '未知';
+        const lines: string[] = [
+          `### 群基础信息详情`,
+          `- **群名称**: ${v.group_name}`,
+          `- **群号**: \`${v.group_id}\``,
+          ...(v.group_remark ? [`- **群备注**: ${v.group_remark}`] : []),
+          `- **群规模**: ${v.member_count} / ${v.max_member_count} 人`,
+          `- **建群时间**: ${createTimeStr}`,
+          `- **群介绍**: ${v.group_memo || '（无）'}`,
+        ];
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {
@@ -644,7 +691,17 @@ export function createGetGroupNoticeTool(
       render: (_args, value) => {
         const v = value as unknown as GetGroupNoticeResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `群公告查询成功，群 [${v.group_id}] 共有 ${v.total} 条公告。` }];
+        if (v.total === 0) return [{ type: 'text', text: `群 [${v.group_id}] 当前暂无群公告。` }];
+        const lines: string[] = [
+          `### 群公告列表 (群号: \`${v.group_id}\`，共 ${v.total} 条)`,
+        ];
+        for (const n of v.notices) {
+          const timeStr = n.publish_time ? new Date(n.publish_time * 1000).toLocaleString('zh-CN') : '未知时间';
+          lines.push(`#### [公告] ${timeStr} (发布者 QQ: \`${n.sender_id}\`)`);
+          lines.push(n.content || '（纯图片或空内容）');
+          lines.push('');
+        }
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {

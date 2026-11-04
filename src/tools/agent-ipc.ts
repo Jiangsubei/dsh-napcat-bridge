@@ -40,7 +40,7 @@ export async function queryActiveAgents(
   ctx: ToolExecutionContext
 ): Promise<ListActiveAgentsResult> {
   const sessionManager = ctx.sessionManager;
-  if (!sessionManager || typeof sessionManager.getActiveHandleKeys !== 'function') {
+  if (!sessionManager) {
     return toLosslessJson({
       success: true,
       agents: [],
@@ -48,10 +48,19 @@ export async function queryActiveAgents(
     });
   }
 
-  const activeKeys = Array.from(sessionManager.getActiveHandleKeys());
+  // 权威活跃会话来源：优先使用 getActiveSessionIds / getAllQQSessionIds，后备兼容 getActiveHandleKeys
+  const rawActiveSids: string[] =
+    typeof (sessionManager as any).getActiveSessionIds === 'function'
+      ? (sessionManager as any).getActiveSessionIds()
+      : typeof sessionManager.getAllQQSessionIds === 'function'
+      ? sessionManager.getAllQQSessionIds()
+      : typeof sessionManager.getActiveHandleKeys === 'function'
+      ? Array.from(sessionManager.getActiveHandleKeys())
+      : [];
+
   const agents: ActiveAgentInfo[] = [];
 
-  for (const sid of activeKeys) {
+  for (const sid of rawActiveSids) {
     if (typeof sid !== 'string' || !sid) continue;
 
     // 过滤已被归档或僵尸的会话
@@ -85,12 +94,20 @@ export async function queryActiveAgents(
         ? Boolean(sessionManager.isSessionBusy(sid))
         : false;
 
+    const name =
+      typeof (sessionManager as any).getSessionDisplayName === 'function'
+        ? (sessionManager as any).getSessionDisplayName(sid)
+        : typeof sessionManager.getPeerName === 'function'
+        ? sessionManager.getPeerName(peer)
+        : undefined;
+
     agents.push({
       session_id: sid,
       peer,
       target_type: type,
       target_id: id,
       is_busy: isBusy,
+      ...(name ? { name } : {}),
     });
   }
 
@@ -119,7 +136,27 @@ export function createListActiveAgentsTool(
       render: (_args, value) => {
         const v = value as unknown as ListActiveAgentsResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `当前活跃 Agent 数量: ${v.total}。` }];
+        if (v.total === 0) {
+          return [
+            {
+              type: 'text',
+              text: '当前暂无活跃的 QQ Agent 会话。若需向特定好友发起会话，可调用 create_user_agent 创建并激活专属 Agent。',
+            },
+          ];
+        }
+        const lines: string[] = [`### 当前活跃 QQ Agent 列表 (共 ${v.total} 个)`];
+        for (const a of v.agents) {
+          const typeLabel = a.target_type === 'user' ? '私聊好友' : '群聊';
+          const namePart = a.name ? `【${a.name}】` : '';
+          const busyTag = a.is_busy ? ' (正在思考处理中)' : ' (空闲)';
+          lines.push(
+            `- **${typeLabel} Agent**${namePart} (ID: \`${a.target_id}\`)${busyTag}\n  - Session ID: \`${a.session_id}\``
+          );
+        }
+        lines.push(
+          `\n> 提示：跨会话协作时，请复制目标 Agent 的 \`Session ID\` 作为 \`target_session_id\` 传入 \`send_agent_message\` 工具发送内部协同消息。`
+        );
+        return [{ type: 'text', text: lines.join('\n') }];
       },
     },
     execute: async (args) => {

@@ -67,6 +67,11 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       isSessionBusy: (sid: string) => sid === 'qq-group-8000000001',
       hasActiveHandle: (sid: string) => ['qq-user-1000000001', 'qq-group-8000000001'].includes(sid),
       isSessionActiveOrPresent: (sid: string) => ['qq-user-1000000001', 'qq-group-8000000001'].includes(sid),
+      getSessionDisplayName: (sid: string) => {
+        if (sid.includes('1000000001')) return '财务小张';
+        if (sid.includes('8000000001')) return '核心研发群';
+        return undefined;
+      },
       getOrCreateAgent: async (peer: string) => ({
         session: { id: peer.startsWith('user_') ? `qq-user-${peer.slice(5)}` : `qq-group-${peer.slice(6)}` },
       }),
@@ -88,6 +93,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
         target_type: 'user',
         target_id: '1000000001',
         is_busy: false,
+        name: '财务小张',
       });
       expect(res.agents[1]).toEqual({
         session_id: 'qq-group-8000000001',
@@ -95,6 +101,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
         target_type: 'group',
         target_id: '8000000001',
         is_busy: true,
+        name: '核心研发群',
       });
       assertNoUndefinedFields(res);
     });
@@ -128,6 +135,58 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       expect(res.agents).toHaveLength(1);
       expect(res.agents[0].session_id).toBe('qq-group-8000000001');
       assertNoUndefinedFields(res);
+    });
+
+    it('工作区会话全量枚举契约: 优先调用 getAllQQSessionIds / getActiveSessionIds 覆盖工作区已建会话，即使内存无活跃 handle 也可精准发现', async () => {
+      // 模拟 activeHandles 为空 (例如服务重启后刚启动，尚未唤醒 handle)
+      mockSessionManager.getActiveHandleKeys = () => [][Symbol.iterator]();
+      // 但在 DSH 工作区 / SQLite / 会话服务中存在 3 个会话 (使用标准脱敏测试 Mock ID 与名称)
+      mockSessionManager.getAllQQSessionIds = () => [
+        'qq-user-1000000003',
+        'qq-group-8000000002',
+        'qq-group-8000000003',
+      ];
+      mockSessionManager.sessionIdToPeer = (sid) => {
+        if (sid.startsWith('qq-user-')) return `user_${sid.slice(8)}`;
+        if (sid.startsWith('qq-group-')) return `group_${sid.slice(9)}`;
+        return sid;
+      };
+      mockSessionManager.peerToSessionId = (peer) => {
+        if (peer.startsWith('user_')) return `qq-user-${peer.slice(5)}`;
+        if (peer.startsWith('group_')) return `qq-group-${peer.slice(6)}`;
+        return peer;
+      };
+      mockSessionManager.getSessionDisplayName = (sid) => {
+        if (sid.includes('1000000003')) return '测试好友C';
+        if (sid.includes('8000000002')) return '技术测试群B';
+        if (sid.includes('8000000003')) return '闲聊测试群C';
+        return undefined;
+      };
+
+      const res = await queryActiveAgents({}, { sessionManager: mockSessionManager });
+      expect(res.success).toBe(true);
+      expect(res.agents).toHaveLength(3);
+      expect(res.agents[0].session_id).toBe('qq-user-1000000003');
+      expect(res.agents[0].name).toBe('测试好友C');
+      expect(res.agents[1].session_id).toBe('qq-group-8000000002');
+      expect(res.agents[1].name).toBe('技术测试群B');
+      expect(res.agents[2].session_id).toBe('qq-group-8000000003');
+      expect(res.agents[2].name).toBe('闲聊测试群C');
+      assertNoUndefinedFields(res);
+    });
+
+    it('Render 契约: output.render 格式化输出活跃 Agent 明细列表 (含 Session ID、名称、类型、QQ号/群号与 IPC 提示语)', async () => {
+      const tool = createListActiveAgentsTool(() => ({ sessionManager: mockSessionManager }));
+      const res = await queryActiveAgents({}, { sessionManager: mockSessionManager });
+      const rendered = (tool as any).output.render({}, res);
+      expect(rendered).toHaveLength(1);
+      const text = rendered[0].text;
+      expect(text).toContain('活跃 QQ Agent 列表');
+      expect(text).toContain('qq-user-1000000001');
+      expect(text).toContain('财务小张');
+      expect(text).toContain('qq-group-8000000001');
+      expect(text).toContain('核心研发群');
+      expect(text).toContain('send_agent_message');
     });
   });
 

@@ -1098,6 +1098,7 @@ export interface ActiveAgentInfo {
   target_type: 'user' | 'group';
   target_id: string;
   is_busy: boolean;
+  name?: string;
 }
 
 export interface ListActiveAgentsResult {

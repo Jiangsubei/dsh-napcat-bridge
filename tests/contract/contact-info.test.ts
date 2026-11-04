@@ -295,6 +295,20 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(res.error).toContain('QQ 网关未连接');
       assertNoUndefinedFields(res);
     });
+
+    it('Render 契约: output.render 必须格式化输出好友明细 (含 user_id 与昵称备注)，绝不可仅返回数量汇总', async () => {
+      const tool = createGetFriendListTool(() => ({ gateway: mockGateway }));
+      const res = await queryFriendList({}, { gateway: mockGateway });
+      const rendered = (tool as any).output.render({}, res);
+      expect(rendered).toHaveLength(1);
+      const text = rendered[0].text;
+      // 必须包含具体 QQ 号与昵称明细，大模型才可寻址
+      expect(text).toContain('1000000001');
+      expect(text).toContain('Alice');
+      expect(text).toContain('小爱(助理)');
+      expect(text).toContain('1000000002');
+      expect(text).toContain('Bob');
+    });
   });
 
   describe('3. get_group_list 群聊查询工具逻辑契约', () => {
@@ -355,6 +369,18 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(res.total_matched).toBe(0);
       expect(res.message).toBe('未找到符合条件的群聊。');
       assertNoUndefinedFields(res);
+    });
+
+    it('Render 契约: output.render 必须格式化输出群明细 (含 group_id、群名与人数)，绝不可仅返回数量汇总', async () => {
+      const tool = createGetGroupListTool(() => ({ gateway: mockGateway }));
+      const res = await queryGroupList({}, { gateway: mockGateway });
+      const rendered = (tool as any).output.render({}, res);
+      expect(rendered).toHaveLength(1);
+      const text = rendered[0].text;
+      // 必须包含具体群号、群名与人数明细
+      expect(text).toContain('8000000001');
+      expect(text).toContain('核心技术交流群');
+      expect(text).toContain('88/200');
     });
   });
 

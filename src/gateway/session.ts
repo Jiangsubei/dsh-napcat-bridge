@@ -215,9 +215,17 @@ export class SessionManager {
       return true;
     }
     if (this.agentRunner.isPendingFirstTurn(sessionId)) return true;
+    if (this.agentRunner.hasActiveHandle(sessionId)) return true;
     const agents = this.ctx.get?.('agents') || (this.ctx as any).agents;
-    const liveAgent = agents?.get?.(sessionId as any);
-    if (liveAgent) {
+    if (agents?.get?.(sessionId as any)) {
+      return true;
+    }
+    const wsRegistry = this.ctx.get?.('workspaceRegistry') || (this.ctx as any)?.workspaceRegistry;
+    if (wsRegistry?.headers?.has?.(sessionId) || wsRegistry?.sessionPaths?.has?.(sessionId)) {
+      return true;
+    }
+    const sessionsSvc = this.ctx.get?.('sessions') || (this.ctx as any)?.sessions;
+    if (sessionsSvc?.get?.(sessionId)) {
       return true;
     }
     return false;
@@ -280,23 +288,124 @@ export class SessionManager {
   }
 
   public getAllQQSessionIds(): string[] {
-    const sids = new Set<string>();
+    const candidateSids = new Set<string>();
+
+    // 1. 内存中已记录的映射
     for (const sid of this.peerCurrentSessionId.values()) {
-      if (!this.isSessionArchived(sid)) {
-        sids.add(sid);
+      if (typeof sid === 'string' && sid) {
+        candidateSids.add(sid);
       }
     }
+
+    // 2. 内存中活跃的句柄
     for (const sid of this.agentRunner.getActiveHandleKeys()) {
-      if (!this.isSessionArchived(sid)) {
-        sids.add(sid);
+      if (typeof sid === 'string' && sid) {
+        candidateSids.add(sid);
       }
     }
+
+    // 3. 模型选择器追踪的会话
     for (const sid of this.modelSelector.getTrackedSessionIds()) {
-      if (!this.isSessionArchived(sid)) {
-        sids.add(sid);
+      if (typeof sid === 'string' && sid) {
+        candidateSids.add(sid);
       }
     }
-    return Array.from(sids);
+
+    // 4. 从 SQLite 持久化历史中恢复
+    try {
+      const records = this.persistence.getAllSessionStates();
+      for (const rec of records) {
+        if (rec.current_session_id) {
+          candidateSids.add(rec.current_session_id);
+        }
+      }
+    } catch {}
+
+    // 5. 从 DSH 工作区注册表 (workspaceRegistry) 扫描
+    const wsRegistry = this.ctx.get?.('workspaceRegistry') || (this.ctx as any)?.workspaceRegistry;
+    if (wsRegistry?.headers && typeof wsRegistry.headers.keys === 'function') {
+      try {
+        for (const rawSid of Array.from(wsRegistry.headers.keys())) {
+          const sid = String(rawSid);
+          if (this.isQQSession(sid)) {
+            candidateSids.add(sid);
+          }
+        }
+      } catch {}
+    }
+    if (wsRegistry?.sessionPaths && typeof wsRegistry.sessionPaths.keys === 'function') {
+      try {
+        for (const rawSid of Array.from(wsRegistry.sessionPaths.keys())) {
+          const sid = String(rawSid);
+          if (this.isQQSession(sid)) {
+            candidateSids.add(sid);
+          }
+        }
+      } catch {}
+    }
+
+    // 6. 从 DSH 会话服务 (sessions) 扫描
+    const sessionsSvc = this.ctx.get?.('sessions') || (this.ctx as any)?.sessions;
+    if (sessionsSvc?.list && typeof sessionsSvc.list === 'function') {
+      try {
+        for (const s of sessionsSvc.list()) {
+          const sid = s?.id ? String(s.id) : '';
+          if (sid && this.isQQSession(sid)) {
+            candidateSids.add(sid);
+          }
+        }
+      } catch {}
+    }
+
+    // 7. 严格合法性与新鲜度过滤
+    const validSids = new Set<string>();
+    for (const sid of candidateSids) {
+      if (!this.isQQSession(sid)) continue;
+      if (this.isSessionArchived(sid)) continue;
+      if (this.agentRunner.isSessionZombie(sid)) continue;
+      if (this.deletedSessionIds.has(sid)) continue;
+
+      // 必须处于活跃或在磁盘物理存在状态
+      if (!this.isSessionActiveOrPresent(sid)) continue;
+
+      // 必须为该 Peer 当前最新分配的会话，排除已被轮换淘汰的旧版本
+      const peer = this.sessionIdToPeer(sid);
+      const latestSid = this.peerToSessionId(peer);
+      if (latestSid && latestSid !== sid) {
+        continue;
+      }
+
+      validSids.add(sid);
+    }
+
+    return Array.from(validSids);
+  }
+
+  public getActiveSessionIds(): string[] {
+    return this.getAllQQSessionIds();
+  }
+
+  public getSessionDisplayName(sessionId: string): string | undefined {
+    const peer = this.sessionIdToPeer(sessionId);
+    const peerName = this.getPeerName(peer);
+    if (peerName) return peerName;
+
+    const sessionsSvc = this.ctx.get?.('sessions') || (this.ctx as any)?.sessions;
+    if (sessionsSvc?.get && typeof sessionsSvc.get === 'function') {
+      try {
+        const s = sessionsSvc.get(sessionId);
+        if (s?.title) {
+          const cleaned = s.title
+            .replace(/^(私聊|群聊|QQ):\s*/, '')
+            .replace(/\s+#\d+.*$/, '')
+            .replace(/\s+\d+$/, '')
+            .trim();
+          if (cleaned) return cleaned;
+          return s.title;
+        }
+      } catch {}
+    }
+    return undefined;
   }
 
   // --- Agent 运行时与并发锁委托 ---
