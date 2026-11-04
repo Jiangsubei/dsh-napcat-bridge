@@ -193,7 +193,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
     defineTool({
       name: 'query_slang',
       description:
-        '【日常聊天查梗专用】查询指定社群黑话、网络流行语或缩写的完整释义与典型使用例句。当在常驻黑话索引中看到对应词条或对话涉及该梗时必须调用本工具，以获取权威社群释义与真实语境，严禁仅凭标签或通用印象臆测。若未收录可尝试联网搜索。',
+        '【日常聊天查梗专用】查询指定社群黑话、网络流行语或缩写的完整释义与典型使用例句。当在常驻黑话索引中看到对应词条或对话涉及该梗时必须调用本工具，以获取权威社群释义与真实语境，严禁仅凭索引或通用印象臆测。若未收录可尝试联网搜索。',
       parameters: {
         term: {
           type: 'string',
@@ -224,7 +224,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
     defineTool({
       name: 'record_slang',
       description:
-        '记录并收录跨会话通用的网络梗、社群黑话、圈内缩写或特色代称。适用于在交流或日常闲聊中捕捉到值得长期掌握的黑话表达、或刚聊明白的新词新梗时主动收录；黑话在所有群聊与私聊中全局生效复用。用户个人偏好或群专属规则请使用记忆工具，勿记入黑话。必须提供核心词条名称、几个词的简要概述标签、核心释义与典型例句四项参数，确保 L2 可被准确查阅；已存在的黑话词条若需修改请使用 manage_slang。',
+        '记录并收录跨会话通用的网络梗、社群黑话、圈内缩写或特色代称。用户个人偏好或群专属规则请使用记忆工具，勿记入黑话。必须提供核心词条名称、触发情境与招牌句式、核心释义与典型例句四项参数；已收录词条若需修改请使用 manage_slang。',
       parameters: {
         term: {
           type: 'string',
@@ -234,7 +234,8 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
         tags: {
           type: 'string',
           required: true,
-          description: '几个词的简要概述标签（必填，如“提前庆祝、反转被打脸”，作为 L1 常驻上下文索引的语义钩子）',
+          description:
+            '触发情境与招牌句式（必填，记录该梗的标志性句式、口癖或触发情境，如“别人X而我X / 就很…懂吧”、“对方发长篇大论 / 敷衍阴阳”；严禁写抽象分类或空洞解释）',
         },
         definition: {
           type: 'string',
@@ -291,7 +292,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
         },
         tags: {
           type: 'string',
-          description: '修改或补齐后的简要概述标签（仅当 action 为 edit 时生效）',
+          description: '修改或补齐后的触发情境与招牌句式（记录标志句式、口癖或触发情境，严禁写抽象分类）',
         },
         definition: {
           type: 'string',

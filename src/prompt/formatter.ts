@@ -133,7 +133,7 @@ export function formatSlangContext(slangContent: string): string {
     title: '社群黑话知识库',
     subtitle: 'Slang & Memes',
     description:
-      '以下为社群中常见并跨会话沉淀的黑话、缩写与调侃用法（若聊天涉及上述对应条目，在构思回复前必须先调用 query_slang 工具查询详细释义与例句，严禁仅凭标签臆测）：',
+      '以下为社群黑话及其触发情境与招牌句式索引（若对方发言契合对应场景、出现标志句式或玩梗，构思回复前必须先调用 query_slang 工具查询详细释义与例句，严禁仅凭索引臆测）：',
     content: slangContent,
   });
 }
