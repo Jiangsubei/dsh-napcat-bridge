@@ -185,7 +185,7 @@ export function createListActiveAgentsTool(
 // ==================== 2. create_user_agent (创建/唤醒用户专属 Agent) ====================
 
 export const CREATE_USER_AGENT_DESCRIPTION =
-  '为指定 QQ 用户创建其专属的常驻 Agent 会话，并注入初始使命指令。注意：如果该用户此前已存在专属 Agent，本工具将直接返回其 Session ID 并提示已存在，不会重复发送消息，后续请直接调用 send_agent_message 进行通信；仅在该用户此前尚无专属 Agent 时，本工具才会真正创建并注入初始消息。';
+  '为指定 QQ 用户创建其专属的常驻 Agent 会话，并注入初始使命指令。注意：如果该用户此前已存在专属 Agent，本工具将直接返回其 Session ID 并提示已存在，不会重复发送消息，后续请直接调用 send_agent_message 进行通信；仅在该用户此前尚无专属 Agent 时，本工具才会真正创建并注入初始消息。目标 Agent 完成使命后回执一次即视为闭环；发起方收到回执后，若用户没有新的明确要求，无需再次回复确认或致谢。';
 
 export async function createUserAgent(
   params: CreateUserAgentParams,
@@ -246,6 +246,12 @@ export async function createUserAgent(
 
   try {
     // 2. 目标用户此前无专属 Agent，首次创建并初始化
+    //    先解析昵称，确保首建会话标题即为「私聊: 昵称 QQ号 #n」，绝不以纯号码起步
+    if (typeof sessionManager.ensurePeerName === 'function') {
+      try {
+        await sessionManager.ensurePeerName(peer);
+      } catch {}
+    }
     await sessionManager.getOrCreateAgent(peer);
 
     // 3. 注入初始使命指令与唤醒
@@ -318,7 +324,7 @@ export function createCreateUserAgentTool(
 // ==================== 3. send_agent_message (Agent 间内部通信) ====================
 
 export const SEND_AGENT_MESSAGE_DESCRIPTION =
-  '向指定 Session ID 的目标 Agent 发送内部协作消息（用于布置任务、同步上下文或回传成果）。该信道为系统内部总线，外部真实 QQ 用户完全不可见、零打扰。';
+  '向指定 Session ID 的目标 Agent 发送内部协作消息（用于布置任务、同步上下文或回传成果）。该信道为系统内部总线，外部真实 QQ 用户完全不可见、零打扰。协作遵循「回执即止」：被派发方完成任务后回执一次即可；发起方收到回执后，若用户没有新的明确要求，不要再回复确认、致谢或追问。';
 
 export async function sendAgentMessage(
   params: SendAgentMessageParams,
@@ -418,6 +424,13 @@ export async function sendAgentMessage(
   const fromSession = currentSessionId;
 
   try {
+    // 建会话前预热 peer 名称（群名/好友昵称），避免内部派发创建的会话标题只有号码
+    if (typeof sessionManager.ensurePeerName === 'function') {
+      try {
+        await sessionManager.ensurePeerName(targetPeer);
+      } catch {}
+    }
+
     await sessionManager.getOrCreateAgent(targetPeer);
 
     await sessionManager.dispatchWakeup({

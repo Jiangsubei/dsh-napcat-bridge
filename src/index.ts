@@ -34,7 +34,7 @@ import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
 import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
 import { createMemoryToolDefinitions } from './memory/tools.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
-import { recordOutboundSelfMessage } from './outbound/self-record.js';
+import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound/self-record.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
@@ -277,13 +277,17 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   server.options.onMessageSent = (event) => {
     try {
       const cfg = currentConfig();
-      recordOutboundSelfMessage(event, {
+      const record = recordOutboundSelfMessage(event, {
         db,
         botQQ: String(cfg.bot_qq || ''),
         senderName: (cfg as any).bot_nickname || cfg.aliases?.[0] || '智能助手',
         getFaceByMd5: (md5: string) => db.getFaceByMd5(md5),
         logger,
       });
+      // 媒体消息异步回查 get_msg 补全 file_id/raw；失败不影响已落库的 payload 版本
+      if (record) {
+        void enrichOutboundMediaRecord(server, db, record, logger);
+      }
     } catch (err) {
       logger.warn?.('[Plugin] 出站消息自记录异常:', err);
     }

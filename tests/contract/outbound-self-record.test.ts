@@ -27,6 +27,7 @@ import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import {
   buildSelfMessageRecord,
   recordOutboundSelfMessage,
+  enrichOutboundMediaRecord,
 } from '../../src/outbound/self-record.js';
 
 const BOT_QQ = '1000000000';
@@ -160,6 +161,55 @@ describe('契约测试: 出站消息自身记录 (纯函数)', () => {
     expect(privateFile!.type).toBe('file');
     expect(privateFile!.content).toContain('[文件:report.pdf]');
   });
+
+  it('契约 7: 出站媒体 payload 解析 local_path（file:// 与绝对路径），URL/base64 不落本地路径', () => {
+    const image = buildSelfMessageRecord(
+      {
+        peer: `group_${GROUP_ID}`,
+        msgId: 8,
+        message: [{ type: 'image', data: { file: 'file:///C:/tmp/outbound-image.png' } }],
+        time: 1793800009000,
+      },
+      base
+    );
+    expect(image!.local_path).toBeTruthy();
+    expect(image!.local_path!.endsWith('outbound-image.png')).toBe(true);
+
+    const file = buildSelfMessageRecord(
+      {
+        peer: `group_${GROUP_ID}`,
+        msgId: 9,
+        message: [{ type: 'file', data: { file: 'file:///C:/tmp/report.pdf' } }],
+        time: 1793800010000,
+      },
+      base
+    );
+    expect(file!.type).toBe('group_file');
+    expect(file!.local_path).toBeTruthy();
+    expect(file!.local_path!.endsWith('report.pdf')).toBe(true);
+
+    const urlImage = buildSelfMessageRecord(
+      {
+        peer: `user_${FRIEND_QQ}`,
+        msgId: 10,
+        message: [{ type: 'image', data: { file: 'https://example.com/a.png' } }],
+        time: 1793800011000,
+      },
+      base
+    );
+    expect(urlImage!.local_path).toBeNull();
+
+    const b64Image = buildSelfMessageRecord(
+      {
+        peer: `user_${FRIEND_QQ}`,
+        msgId: 11,
+        message: [{ type: 'image', data: { file: 'base64://iVBORw0KGgo=' } }],
+        time: 1793800012000,
+      },
+      base
+    );
+    expect(b64Image!.local_path).toBeNull();
+  });
 });
 
 describe('契约测试: 出站消息自身落库 (真实 WS 网关 + SQLite 闭环)', () => {
@@ -183,12 +233,15 @@ describe('契约测试: 出站消息自身落库 (真实 WS 网关 + SQLite 闭�
       logger: noopLogger(),
       onMessageSent: (event) => {
         sentEvents.push(event);
-        recordOutboundSelfMessage(event, {
+        const record = recordOutboundSelfMessage(event, {
           db,
           botQQ: BOT_QQ,
           senderName: SENDER_NAME,
           logger: noopLogger(),
         });
+        if (record) {
+          void enrichOutboundMediaRecord(server, db, record, noopLogger());
+        }
       },
     });
     await server.start();
@@ -305,6 +358,66 @@ describe('契约测试: 出站消息自身落库 (真实 WS 网关 + SQLite 闭�
     const history = db.readHistory(`group_${GROUP_ID}`, { self_only: true });
     expect(history.messages).toHaveLength(1);
     expect(history.messages[0].content).toBe('幂等消息');
+  });
+
+  it('端到端 7: 图片出站 → local_path 立即落库，get_msg 回查补全 file_id 与 raw', async () => {
+    const pending = server.sendGroupMsg(GROUP_ID, [
+      { type: 'image', data: { file: 'file:///C:/tmp/outbound-image.png' } },
+    ]);
+    await respondTo('send_group_msg', { message_id: 314159 });
+    await pending;
+
+    // payload 版本：local_path 已解析，file_id 尚未知
+    const before = db.getMessage(314159)!;
+    expect(before.local_path).toBeTruthy();
+    expect(before.local_path!.endsWith('outbound-image.png')).toBe(true);
+    expect(before.file_id).toBeNull();
+
+    // NapCat 回查：返回完整消息对象（含媒体信息）
+    await respondTo('get_msg', {
+      message: [
+        {
+          type: 'image',
+          data: {
+            file: '9E64D1403F9FBA2D5F9CB90289AD23F4.jpg',
+            url: 'https://multimedia.example/download?fileid=mock',
+            file_size: '12345',
+          },
+        },
+      ],
+    });
+
+    // 等待异步补全完成
+    let after = db.getMessage(314159)!;
+    for (let i = 0; i < 100 && after.file_id === null; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      after = db.getMessage(314159)!;
+    }
+
+    expect(after.file_id).toBe('9E64D1403F9FBA2D5F9CB90289AD23F4.jpg');
+    // payload 解析出的源文件路径必须优先保留
+    expect(after.local_path).toBe(before.local_path);
+    expect(JSON.parse(after.raw)[0].data.url).toContain('multimedia.example');
+  });
+
+  it('端到端 8: get_msg 回查失败 → 保留 payload 版本，不丢记录', async () => {
+    const pending = server.sendGroupMsg(GROUP_ID, [
+      { type: 'file', data: { file: 'file:///C:/tmp/report.pdf' } },
+    ]);
+    await respondTo('send_group_msg', { message_id: 271828 });
+    await pending;
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    const req = received.find((r) => r.action === 'get_msg')!;
+    expect(req).toBeDefined();
+    client.send(
+      JSON.stringify({ echo: req.echo, status: 'failed', retcode: 100, data: null })
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    const after = db.getMessage(271828)!;
+    expect(after.local_path).toBeTruthy();
+    expect(after.local_path!.endsWith('report.pdf')).toBe(true);
   });
 });
 

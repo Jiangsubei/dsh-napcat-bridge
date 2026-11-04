@@ -260,10 +260,10 @@ export interface ReadChatHistoryParams {
   /** 是否仅查询机器人自己发出的消息 (self = 1) */
   self_only?: boolean;
   /**
-   * 按消息来源筛选: 'qq' = 真实 QQ 消息；'agent' = Agent 内部协同通讯。
-   * 缺省不筛选（两者都返回）。支持单值或数组。
+   * 按消息来源筛选: 'qq' = 真实 QQ 消息；'agent' = Agent 内部协同通讯；
+   * 'all' = 不过滤（两者都返回）。缺省按 'qq' 处理（历史查询默认不展示内部通讯）。
    */
-  source?: MessageSource | MessageSource[];
+  source?: MessageSource | 'all' | Array<MessageSource | 'all'>;
   /** 返回最大条数 (默认 20，上限 100) */
   limit?: number;
   /** 时间排序 (默认 'desc' 倒序，取最新消息) */

@@ -24,6 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { MessageDatabase } from '../../src/storage/database.js';
+import { readChatHistory } from '../../src/tools/index.js';
 import {
   buildInternalMessageRecords,
   INTERNAL_MESSAGE_SENDER_NAME,
@@ -203,6 +204,24 @@ describe('契约测试: messages 表 source 维度与 read_chat_history 筛选',
 
     expect(db.readHistory(TARGET_PEER, { source: 'agent' }).total).toBe(1);
     expect(db.readHistory(`user_${FRIEND_A}`, { source: 'agent' }).total).toBe(1);
+  });
+
+  it('契约 12: read_chat_history 缺省只返回真实 QQ 消息；显式 agent/all 才展示内部通讯', async () => {
+    for (const record of buildInternalMessageRecords(internalPayload())) {
+      db.saveMessageIfNotExists(record);
+    }
+    db.saveMessage(qqRecord());
+
+    const defaultResult = await readChatHistory(TARGET_PEER, {}, db);
+    expect(defaultResult.total).toBe(1);
+    expect(defaultResult.messages[0].source).toBe('qq');
+
+    const agentResult = await readChatHistory(TARGET_PEER, { source: 'agent' }, db);
+    expect(agentResult.total).toBe(1);
+    expect(agentResult.messages[0].source).toBe('agent');
+
+    const allResult = await readChatHistory(TARGET_PEER, { source: 'all' }, db);
+    expect(allResult.total).toBe(2);
   });
 });
 

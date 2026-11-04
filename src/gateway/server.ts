@@ -413,10 +413,10 @@ export class NapCatGatewayServer {
   /**
    * OneBot 11 get_msg: 根据 message_id 获取单条消息详情
    */
-  async getMsg(messageId: number | string): Promise<OneBotActionResponse> {
+  async getMsg(messageId: number | string, timeoutMs = 15000): Promise<OneBotActionResponse> {
     return this.sendAction('get_msg', {
       message_id: Number(messageId),
-    });
+    }, timeoutMs);
   }
 
   /**

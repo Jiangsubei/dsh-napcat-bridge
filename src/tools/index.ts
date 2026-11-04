@@ -733,6 +733,15 @@ export async function readChatHistory(
     return { messages: [], total: 0 };
   }
 
+  // 默认只查真实 QQ 消息：内部协同通讯需显式传 source='agent' 才展示；
+  // source='all' 表示两者都要。
+  if (params.source === 'all') {
+    const { source: _all, ...rest } = params;
+    params = rest;
+  } else if (params.source === undefined) {
+    params = { ...params, source: 'qq' };
+  }
+
   return db.readHistory(peer, params);
 }
 
@@ -1498,6 +1507,11 @@ export async function recallMessage(
         : await sendTask();
 
     if (res && (res.status === 'ok' || res.retcode === 0)) {
+      // 撤回成功立即标记本地记录：不依赖 NapCat 是否回流自身撤回 notice，
+      // 自身消息保留原文（markRecalled 内部按 self 区分）。
+      try {
+        ctx.db?.markRecalled(rawId);
+      } catch {}
       return toLosslessJson({
         success: true,
         message: `消息已成功撤回 (ID: ${rawId})。`,
@@ -1624,9 +1638,9 @@ export function registerAgentTools(
             self_only: { type: 'boolean', description: '是否仅查询机器人自身的发言 (默认 false)' },
             source: {
               type: 'string',
-              enum: ['qq', 'agent'],
+              enum: ['qq', 'agent', 'all'],
               description:
-                "按消息来源筛选：'qq' 仅真实 QQ 收发消息，'agent' 仅 Agent 内部协同通讯（sender_name 为「内部通讯」，user_id 形如 agent:<来源SessionID>）。缺省则两者都返回。",
+                "按消息来源筛选：默认（不传）仅返回真实 QQ 消息；'agent' 仅返回 Agent 内部协同通讯（sender_name 为「内部通讯」，user_id 形如 agent:<来源SessionID>）；'all' 返回两者。",
             },
             limit: { type: 'number', description: '返回最大条数 (默认 20，上限 100)' },
             order: { type: 'string', enum: ['asc', 'desc'], description: "时间排序 (默认 'desc' 倒序，取最新消息)" },

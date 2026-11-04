@@ -119,6 +119,32 @@ export function isQQSession(sessionId: string): boolean {
 }
 
 /**
+ * 从会话标题中反向提取显示名称（用于“名字未知时不得降级覆盖已有标题”）。
+ * 兼容 "群聊: 名称 8000000001 #1" 与 "群聊: 8000000001 #1" 两种形态；
+ * 无法提取出名称时返回 undefined。
+ */
+export function extractNameFromSessionTitle(
+  title: string | undefined,
+  peer: string
+): string | undefined {
+  if (!title || typeof title !== 'string') return undefined;
+
+  const stripped = title
+    .replace(/^(私聊|群聊|QQ):\s*/, '')
+    .replace(/\s+#\d+.*$/, '')
+    .trim();
+  if (!stripped) return undefined;
+
+  const idMatch = peer.match(/^(?:group_|user_|qq-group-|qq-user-)([^-]+)/);
+  const peerId = idMatch?.[1];
+  let name = stripped;
+  if (peerId && name.endsWith(peerId)) {
+    name = name.slice(0, -peerId.length).trim();
+  }
+  return name || undefined;
+}
+
+/**
  * 根据 peer、sessionId 与群名/昵称格式化会话标题 (支持多轮归档格式如 #1 (1))
  */
 export function formatSessionTitle(
@@ -200,7 +226,7 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
       `【内部协同消息】${headerTime}\n` +
       `来源会话 Session ID: ${fromSession}\n\n` +
       `消息内容:\n${payload.content}\n\n` +
-      `（说明：这是来自其他 Agent 工作区的内部协作指令/消息，QQ 真实用户完全不可见。请根据上述内容推进；若需要向目标用户私聊询问，请调用 send_qq_message 发送真实私聊。完成任务后可通过 send_agent_message 回复上述 Session ID。${replyTag}）`
+      `（说明：这是来自其他 Agent 工作区的内部协作指令/消息，QQ 真实用户完全不可见。请根据上述内容推进；若需要向目标用户私聊询问，请调用 send_qq_message 发送真实私聊。完成任务后可通过 send_agent_message 回复上述 Session ID。回执一次即视为闭环：除非任务确实需要对方继续处理，不要再次跟发确认或致谢；作为发起方收到回执后，用户没有新的明确要求也无需再回复。${replyTag}）`
     );
   }
 

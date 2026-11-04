@@ -707,9 +707,19 @@ export class MessageDatabase {
     return Number(row?.max_id ?? 0);
   }
 
+  /**
+   * 标记消息已撤回。
+   * - 机器人自身消息：仅置 recalled=1，保留原文（上下文压缩后仍能回溯自己说过什么）；
+   * - 他人消息：内容替换为占位符（不保留被撤回者原文）。
+   */
   markRecalled(msgId: number): void {
     const db = this.ensureDb();
-    db.prepare(`UPDATE messages SET recalled = 1, content = '〔已撤回〕' WHERE msg_id = ?`).run(msgId);
+    db.prepare(
+      `UPDATE messages
+         SET recalled = 1,
+             content = CASE WHEN self = 1 THEN content ELSE '〔已撤回〕' END
+       WHERE msg_id = ?`
+    ).run(msgId);
   }
 
   getMessage(msgId: number): MessageRecord | null {
@@ -757,6 +767,45 @@ export class MessageDatabase {
     } else {
       db.prepare(`UPDATE messages SET local_path = ? WHERE msg_id = ?`).run(localPath, msgId);
     }
+  }
+
+  /**
+   * 出站媒体元数据补全：仅更新传入的字段（file_id / busid / local_path / raw），
+   * 绝不覆盖未传入的已有值，保证 get_msg 回填失败时 payload 版本仍然可用。
+   */
+  updateMessageMedia(
+    msgId: number,
+    patch: {
+      file_id?: string | null;
+      busid?: number | null;
+      local_path?: string | null;
+      raw?: string;
+    }
+  ): void {
+    const db = this.ensureDb();
+    const sets: string[] = [];
+    const values: any[] = [];
+
+    if (patch.file_id !== undefined) {
+      sets.push('file_id = ?');
+      values.push(patch.file_id ?? null);
+    }
+    if (patch.busid !== undefined) {
+      sets.push('busid = ?');
+      values.push(patch.busid ?? null);
+    }
+    if (patch.local_path !== undefined) {
+      sets.push('local_path = ?');
+      values.push(patch.local_path ?? null);
+    }
+    if (patch.raw !== undefined) {
+      sets.push('raw = ?');
+      values.push(patch.raw);
+    }
+    if (sets.length === 0) return;
+
+    values.push(msgId);
+    db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE msg_id = ?`).run(...values);
   }
 
   updateLocalPathByFileId(fileId: string, localPath: string, fingerprint?: string | null): void {

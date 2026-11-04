@@ -68,6 +68,7 @@ import {
   buildSessionId,
   generateSessionHash,
   formatSessionTitle,
+  extractNameFromSessionTitle,
   formatWakeupPrompt,
   isQQSession,
 } from './id-resolver.js';
@@ -84,6 +85,9 @@ export interface AgentRunnerDelegate {
 }
 
 export class SessionAgentRunner {
+  /** 会话/群昵称持久化键（跨重启保留，避免标题退化为纯号码） */
+  private static readonly PEER_NAMES_KEY = 'napcat_peer_names';
+
   private activeHandles = new Map<string, AgentHandle>();
   private busySessions = new Set<string>();
   private peerNames = new Map<string, string>();
@@ -98,7 +102,9 @@ export class SessionAgentRunner {
     private readonly modelSelector: SessionModelSelector,
     private readonly delegate: AgentRunnerDelegate,
     private readonly options?: SessionManagerOptions
-  ) {}
+  ) {
+    this.loadPeerNames();
+  }
 
   private getConfig(): any {
     const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
@@ -208,11 +214,93 @@ export class SessionAgentRunner {
   public setPeerName(peer: string, name: string): void {
     if (name && typeof name === 'string' && name.trim()) {
       this.peerNames.set(peer, name.trim());
+      this.persistPeerNames();
     }
   }
 
   public getPeerName(peer: string): string | undefined {
     return this.peerNames.get(peer);
+  }
+
+  /**
+   * 确保 peer 名称已解析：优先内存/持久化缓存，缺失时通过 NapCat 查询群信息或用户资料。
+   * 网络查询带超时，失败返回 undefined，绝不阻塞主链路。
+   */
+  public async resolvePeerName(peer: string, timeoutMs = 3000): Promise<string | undefined> {
+    const cached = this.getPeerName(peer);
+    if (cached) return cached;
+
+    const gateway: any =
+      safeGetService(this.ctx, 'napcat-gateway') || (this.ctx as any)['napcat-gateway'];
+    if (!gateway) return undefined;
+
+    const { type, id } = parsePeerTarget(peer);
+    if (!id) return undefined;
+
+    try {
+      const request: Promise<any> =
+        type === 'group' ? gateway.getGroupInfo?.(id) : gateway.getStrangerInfo?.(id);
+      if (!request || typeof request.then !== 'function') return undefined;
+
+      const res: any = await Promise.race([
+        request,
+        new Promise((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+      ]);
+      const data = res?.data;
+      if (!data) return undefined;
+
+      const name =
+        type === 'group'
+          ? String(data.group_name || data.group_remark || '').trim()
+          : String(data.nickname || data.remark || '').trim();
+      if (!name) return undefined;
+
+      this.setPeerName(peer, name);
+      return name;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private loadPeerNames(): void {
+    try {
+      const raw = this.persistence.getPluginConfig(SessionAgentRunner.PEER_NAMES_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      for (const [peer, name] of Object.entries(parsed)) {
+        if (typeof peer === 'string' && peer && typeof name === 'string' && name.trim()) {
+          this.peerNames.set(peer, name.trim());
+        }
+      }
+    } catch {
+      // 持久化数据损坏时忽略，按无缓存继续
+    }
+  }
+
+  private persistPeerNames(): void {
+    try {
+      this.persistence.setPluginConfig(
+        SessionAgentRunner.PEER_NAMES_KEY,
+        JSON.stringify(Object.fromEntries(this.peerNames))
+      );
+    } catch {}
+  }
+
+  private getSessionTitle(session: any, sessionId: string): string | undefined {
+    const titleSvc = safeGetService(this.ctx, 'sessionTitle');
+    try {
+      const snapshot = titleSvc?.get?.(session);
+      if (typeof snapshot?.title === 'string') return snapshot.title;
+    } catch {}
+
+    const sessionsSvc = safeGetService(this.ctx, 'sessions');
+    try {
+      const s = sessionsSvc?.get?.(sessionId);
+      return typeof s?.title === 'string' ? s.title : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   public hasActiveHandle(sessionId: string): boolean {
@@ -304,8 +392,18 @@ export class SessionAgentRunner {
     if (name) {
       this.setPeerName(peer, name);
     }
-    const currentName = name || this.getPeerName(peer);
+
+    const existingTitle = this.getSessionTitle(session, sessionId);
+    // 名字来源优先级：显式传入 > 内存/持久化缓存 > 从现有标题反向提取
+    const currentName =
+      name || this.getPeerName(peer) || extractNameFromSessionTitle(existingTitle, peer);
+
+    // 已知标题但无法解析出昵称时，绝不降级为「群聊: 123456 #1」这类纯号码标题
+    if (!currentName && existingTitle) return;
+
     const title = formatSessionTitle(peer, sessionId, currentName);
+    if (existingTitle === title) return;
+
     const sessionTitleSvc = this.ctx.get?.('sessionTitle') || (this.ctx as any).sessionTitle;
     if (sessionTitleSvc && typeof sessionTitleSvc.rename === 'function') {
       try {

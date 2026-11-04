@@ -19,6 +19,7 @@ export {
   findSmallestAvailableVersion,
   buildSessionId,
   formatSessionTitle,
+  extractNameFromSessionTitle,
   formatWakeupPrompt,
   isQQSession,
 } from './session/id-resolver.js';
@@ -33,6 +34,7 @@ import {
   generateSessionHash,
   findSmallestAvailableVersion,
   buildSessionId,
+  extractNameFromSessionTitle,
   formatWakeupPrompt,
   isQQSession,
   peerToBaseId,
@@ -391,19 +393,24 @@ export class SessionManager {
     const peerName = this.getPeerName(peer);
     if (peerName) return peerName;
 
+    // 1. 从活跃 Agent 的会话标题（log-backed sessionTitle）反向提取
+    const titleSvc = this.ctx.get?.('sessionTitle') || (this.ctx as any)?.sessionTitle;
+    try {
+      const agent = this.getAgent(sessionId);
+      const session = (agent as any)?.session;
+      const snapshot = session ? titleSvc?.get?.(session) : undefined;
+      if (typeof snapshot?.title === 'string') {
+        const name = extractNameFromSessionTitle(snapshot.title, peer);
+        if (name) return name;
+      }
+    } catch {}
+
+    // 2. 回退到 sessions store 的标题
     const sessionsSvc = this.ctx.get?.('sessions') || (this.ctx as any)?.sessions;
     if (sessionsSvc?.get && typeof sessionsSvc.get === 'function') {
       try {
         const s = sessionsSvc.get(sessionId);
-        if (s?.title) {
-          const cleaned = s.title
-            .replace(/^(私聊|群聊|QQ):\s*/, '')
-            .replace(/\s+#\d+.*$/, '')
-            .replace(/\s+\d+$/, '')
-            .trim();
-          if (cleaned) return cleaned;
-          return s.title;
-        }
+        return extractNameFromSessionTitle(s?.title, peer);
       } catch {}
     }
     return undefined;
@@ -445,6 +452,14 @@ export class SessionManager {
 
   public getPeerName(peer: string): string | undefined {
     return this.agentRunner.getPeerName(peer);
+  }
+
+  /**
+   * 确保 peer 的显示名称已解析（优先缓存/持久化，缺失时通过 NapCat 查询群信息或用户资料）。
+   * 供内部主动创建会话（create_user_agent / send_agent_message）在首次建会话前预热标题。
+   */
+  public async ensurePeerName(peer: string): Promise<string | undefined> {
+    return this.agentRunner.resolvePeerName(peer);
   }
 
   public isQQSession(sessionId: string): boolean {
