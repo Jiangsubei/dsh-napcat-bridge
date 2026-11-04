@@ -13,6 +13,19 @@ import type {
   OneBotRequestEvent,
 } from '../types/index.js';
 
+/** 出站消息成功发送后的事件（供插件自记录落库，不依赖 reportSelfMessage） */
+export interface OutboundSentEvent {
+  action: 'send_group_msg' | 'send_private_msg' | 'send_msg';
+  /** 目标会话 peer (group_xxx / user_xxx) */
+  peer: string;
+  /** NapCat 返回的消息 ID（群聊可能为负数） */
+  msgId: number;
+  /** 发送时的 OneBot 消息段或纯文本 */
+  message: unknown;
+  /** 发送完成时间（毫秒时间戳） */
+  time: number;
+}
+
 export interface GatewayServerOptions {
   host?: string;
   port: number;
@@ -23,7 +36,14 @@ export interface GatewayServerOptions {
     error?: (...args: any[]) => void;
     debug?: (...args: any[]) => void;
   };
+  /**
+   * 出站消息发送成功且拿到有效 message_id 后的回调。
+   * 用于插件自身落库，避免完全依赖 NapCat 的 message_sent 上报。
+   */
+  onMessageSent?: (event: OutboundSentEvent) => void;
 }
+
+const OUTBOUND_SEND_ACTIONS = new Set(['send_group_msg', 'send_private_msg', 'send_msg']);
 
 export type MessageHandler = (event: OneBotMessageEvent) => void | Promise<void>;
 export type NoticeHandler = (event: OneBotNoticeEvent) => void | Promise<void>;
@@ -280,7 +300,7 @@ export class NapCatGatewayServer {
       echo,
     });
 
-    return new Promise<OneBotActionResponse<T>>((resolve, reject) => {
+    const response = await new Promise<OneBotActionResponse<T>>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pendingActions.has(echo)) {
           this.pendingActions.delete(echo);
@@ -302,6 +322,58 @@ export class NapCatGatewayServer {
         }
       });
     });
+
+    // 出站消息成功发送后立即回调，供插件主动落库（不依赖 OneBot 自身消息上报）
+    this.notifyOutboundSent(action, params, response as OneBotActionResponse);
+    return response;
+  }
+
+  /**
+   * 出站发送成功（status ok / retcode 0 且有有效 message_id）时触发 onMessageSent。
+   * 失败或无 message_id 的应答一律不触发，避免写入无法寻址的记录。
+   */
+  private notifyOutboundSent(
+    action: string,
+    params: Record<string, any>,
+    response: OneBotActionResponse
+  ): void {
+    if (!OUTBOUND_SEND_ACTIONS.has(action)) return;
+
+    const isSuccess =
+      (response as any).status === 'ok' || (response as any).retcode === 0;
+    if (!isSuccess) return;
+
+    const msgId = Number((response as any).data?.message_id);
+    if (!Number.isSafeInteger(msgId) || msgId === 0) return;
+
+    let peer = '';
+    if (action === 'send_group_msg') {
+      if (params.group_id === undefined || params.group_id === null) return;
+      peer = `group_${params.group_id}`;
+    } else if (action === 'send_private_msg') {
+      if (params.user_id === undefined || params.user_id === null) return;
+      peer = `user_${params.user_id}`;
+    } else {
+      if (params.group_id !== undefined && params.group_id !== null) {
+        peer = `group_${params.group_id}`;
+      } else if (params.user_id !== undefined && params.user_id !== null) {
+        peer = `user_${params.user_id}`;
+      } else {
+        return;
+      }
+    }
+
+    try {
+      this.options.onMessageSent?.({
+        action: action as OutboundSentEvent['action'],
+        peer,
+        msgId,
+        message: params.message,
+        time: Date.now(),
+      });
+    } catch (err) {
+      this.options.logger?.warn?.('[GatewayServer] onMessageSent 回调异常:', err);
+    }
   }
 
   async sendGroupMsg(groupId: number | string, message: any): Promise<OneBotActionResponse> {

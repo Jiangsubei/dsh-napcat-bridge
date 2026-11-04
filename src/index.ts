@@ -34,6 +34,7 @@ import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
 import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
 import { createMemoryToolDefinitions } from './memory/tools.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
+import { recordOutboundSelfMessage } from './outbound/self-record.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
@@ -271,6 +272,23 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   const db = new MessageDatabase(dbPath);
   db.init();
 
+  // 2.1 出站消息自记录：发送成功即主动落库 (self = 1)，
+  //     不再单点依赖 NapCat 的 reportSelfMessage 自身消息上报。
+  server.options.onMessageSent = (event) => {
+    try {
+      const cfg = currentConfig();
+      recordOutboundSelfMessage(event, {
+        db,
+        botQQ: String(cfg.bot_qq || ''),
+        senderName: (cfg as any).bot_nickname || cfg.aliases?.[0] || '智能助手',
+        getFaceByMd5: (md5: string) => db.getFaceByMd5(md5),
+        logger,
+      });
+    } catch (err) {
+      logger.warn?.('[Plugin] 出站消息自记录异常:', err);
+    }
+  };
+
   // 启动时自动规范化存量表情包存储路径，并从工作区 profiles 目录自愈找回物理文件
   try {
     const rawFaceDir = currentConfig().face_store_dir;
@@ -471,11 +489,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       (ctx as any).provide('napcat-proactive');
       (ctx as any).provide('napcat-session');
       (ctx as any).provide('napcat-bridge-config');
+      // 网关实例暴露至 Cordis 上下文，供内部模块与装配契约测试访问（出站落库 onMessageSent 接线断言）
+      (ctx as any).provide('napcat-gateway', server);
     }
   } catch {}
   (ctx as any)['napcat-proactive'] = proactiveManager;
   (ctx as any)['napcat-session'] = sessionManager;
   (ctx as any)['napcat-bridge-config'] = currentConfig;
+  (ctx as any)['napcat-gateway'] = server;
   if (typeof (ctx as any).set === 'function') {
     (ctx as any).set('napcat-proactive', proactiveManager);
     (ctx as any).set('napcat-session', sessionManager);
