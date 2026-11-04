@@ -133,18 +133,15 @@
 
     /** 内部消息内容 (必填，清晰说明协同意图、上下文或交付成果) */
     message: string;
-
-    /** 发起方回传标识 (可选，缺省时自动使用当前会话 Session ID，方便接收方原路回传) */
-    reply_to_session_id?: string;
   }
   ```
 * **底层唤醒机制**:
-  - 底层调用 `dispatchWakeup`，构建结构化提示注入目标上下文：
+  - 底层调用 `dispatchWakeup`，自动从当前上下文提取来源并构建结构化提示注入目标上下文：
     ```text
     【内部协同消息】
-    来源会话: <reply_to_session_id>
+    来源会话 Session ID: <from_session>
     消息内容: <message>
-    提示: 这是来自其他 Agent 的内部协作消息，QQ 真实用户不可见。请根据上述内容推进，并在有结果时调用 send_agent_message 回复该会话。
+    提示: 这是来自其他 Agent 的内部协作消息，QQ 真实用户不可见。请根据上述内容推进，并在有结果时直接调用 send_agent_message 回复上述 Session ID。
     ```
   - 若目标 Agent 正在运行，借力底层的 `resolveNewMessageBehavior()`，自动按用户的配置执行 `steer`（插话引导）或 `queue`（排队等待），平滑无冲突。
 
