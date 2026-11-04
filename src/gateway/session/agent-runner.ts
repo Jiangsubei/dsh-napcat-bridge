@@ -685,7 +685,9 @@ export class SessionAgentRunner {
     const sessionId = (agent as any).session?.id || this.delegate.peerToSessionId(payload.peer);
 
     // 若唤醒消息携带发送者昵称，更新私聊会话标题锁定
-    if (payload.from_name) {
+    // 注意：内部协同消息 (internal_agent) 的 from_name 是系统身份「协同 Agent」，
+    // 绝不能用它覆盖会话展示标题，否则来源私聊会话会被永久改名为协同身份。
+    if (payload.from_name && payload.trigger !== 'internal_agent') {
       if (payload.peer.startsWith('user_') || payload.peer.startsWith('qq-user-')) {
         this.updateSessionTitle((agent as any).session, payload.peer, sessionId, payload.from_name);
       }

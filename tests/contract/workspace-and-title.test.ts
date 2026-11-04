@@ -162,6 +162,27 @@ describe('NapCat 顶层工作区与会话标题契约测试', () => {
         '私聊: 张三丰 2000000001 #1'
       );
     });
+
+    it('内部协同消息 (internal_agent) 的 from_name 绝不能覆盖私聊会话标题与 peer 名称', async () => {
+      const payload: WakeupPayload = {
+        peer: 'user_2000000001',
+        trigger: 'internal_agent',
+        from_user: 'qq-user-1000000002',
+        from_name: '协同 Agent',
+        from_session: 'qq-user-1000000002',
+        content: '111',
+        timestamp: '2026-08-31 04:05:00',
+      };
+
+      await sessionManager.dispatchWakeup(payload);
+
+      // peer 名称绝不能被系统协同身份污染
+      expect(sessionManager.getPeerName('user_2000000001')).toBeUndefined();
+      // 所有标题重命名都不允许出现「协同 Agent」
+      for (const call of mockSessionTitle.rename.mock.calls) {
+        expect(String(call[1])).not.toContain('协同 Agent');
+      }
+    });
   });
 
   describe('4. DSH 0.2.x 工作区 candidateMatches 契约与未分组防掉落', () => {
