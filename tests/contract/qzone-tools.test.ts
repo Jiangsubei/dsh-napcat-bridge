@@ -389,6 +389,100 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     expect(res.feeds).toEqual([]);
     assertNoUndefinedDeep(res);
   });
+
+  it('2.6 自动多页聚合补齐 (Fill-to-Limit) 与自适应严谨 next_offset 计算契约', async () => {
+    // 场景 A: 请求 limit=5，第一页过滤后只有 2 条有效说说，底层自动沿 cursor 补拉第二页凑齐 5 条
+    const mockGatewayA: any = {
+      sendAction: vi.fn().mockImplementation((action: string, params: any) => {
+        if (action === 'get_qzone_feeds') {
+          if (!params.cursor) {
+            // 第 1 轮：包含广告和官方号，有效真实动态仅 2 条
+            return Promise.resolve({
+              status: 'ok',
+              retcode: 0,
+              data: {
+                feeds: [
+                  { uin: 0, tid: 'ad_1', content: '广告' },
+                  { uin: 20050606, tid: 'official_1', content: '官方软文' },
+                  { uin: 1000000003, tid: 'real_1', nickname: '好友甲', content: '第一轮真实动态1' },
+                  { uin: 1000000004, tid: 'real_2', nickname: '好友乙', content: '第一轮真实动态2' },
+                ],
+                has_more: true,
+                next_cursor: 'cursor_round_1',
+              },
+            });
+          }
+          if (params.cursor === 'cursor_round_1') {
+            // 第 2 轮：补充 4 条真实动态
+            return Promise.resolve({
+              status: 'ok',
+              retcode: 0,
+              data: {
+                feeds: [
+                  { uin: 1000000005, tid: 'real_3', nickname: '好友丙', content: '第二轮真实动态3' },
+                  { uin: 1000000006, tid: 'real_4', nickname: '好友丁', content: '第二轮真实动态4' },
+                  { uin: 1000000007, tid: 'real_5', nickname: '好友戊', content: '第二轮真实动态5' },
+                  { uin: 1000000008, tid: 'real_6', nickname: '好友己', content: '第二轮真实动态6' },
+                ],
+                has_more: true,
+                next_cursor: 'cursor_round_2',
+              },
+            });
+          }
+        }
+        return Promise.resolve({ status: 'ok', retcode: 0, data: null });
+      }),
+    };
+
+    const resA = await readQzoneFeeds(
+      { scope: 'friends', limit: 5 },
+      { gateway: mockGatewayA, botQq: '1000000001' }
+    );
+
+    // 验证：自动补齐至 5 条满额交付给 Agent
+    expect(resA.success).toBe(true);
+    expect(resA.feeds).toHaveLength(5);
+    expect(resA.feeds.map(f => f.feed_id)).toEqual(['real_1', 'real_2', 'real_3', 'real_4', 'real_5']);
+    // 验证：has_more 为 true
+    expect(resA.has_more).toBe(true);
+    // 验证：自适应严格计算 next_offset = startIndex + sliced.length = 0 + 5 = 5 (绝不直接加 limit 跳号)
+    expect(resA.next_offset).toBe(5);
+    // 验证：next_cursor 精确为第二轮的最新游标
+    expect(resA.next_cursor).toBe('cursor_round_2');
+    assertNoUndefinedDeep(resA);
+
+    // 场景 B: 数据未满额终结场景，验证自适应严谨 next_offset 计算
+    // 用户请求 limit=10, offset=2，但整个空间过滤后共 5 条真实动态，切片交付 3 条（索引 2~4），且无更多
+    const mockGatewayB: any = {
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'ok',
+        retcode: 0,
+        data: {
+          feeds: [
+            { uin: 1000000003, tid: 'f_1', content: '1' },
+            { uin: 1000000004, tid: 'f_2', content: '2' },
+            { uin: 1000000005, tid: 'f_3', content: '3' },
+            { uin: 1000000006, tid: 'f_4', content: '4' },
+            { uin: 1000000007, tid: 'f_5', content: '5' },
+          ],
+          has_more: false,
+          next_cursor: null,
+        },
+      }),
+    };
+
+    const resB = await readQzoneFeeds(
+      { scope: 'friends', limit: 10, offset: 2 },
+      { gateway: mockGatewayB, botQq: '1000000001' }
+    );
+
+    expect(resB.success).toBe(true);
+    expect(resB.feeds).toHaveLength(3);
+    expect(resB.feeds.map(f => f.feed_id)).toEqual(['f_3', 'f_4', 'f_5']);
+    expect(resB.has_more).toBe(false);
+    expect(resB.next_offset).toBeUndefined(); // 无更多时不应返回 next_offset
+    assertNoUndefinedDeep(resB);
+  });
 });
 
 describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {

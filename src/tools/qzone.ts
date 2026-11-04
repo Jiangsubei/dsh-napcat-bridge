@@ -146,24 +146,70 @@ export async function readQzoneFeeds(
     let nextCursor: string | undefined = undefined;
 
     if (scope === 'friends') {
-      // 场景 A: 好友动态流 (支持 cursor 游标透传与 count)
-      const actionPayload: Record<string, any> = {
-        count: Math.max(limit * 2, 10), // 适度多拉几条以补偿被清洗的广告卡，确保有效动态满额
-      };
-      if (params.cursor) {
-        actionPayload.cursor = params.cursor;
+      // 场景 A: 好友动态流 (支持 cursor 游标透传、多页自动补齐 Fill-to-Limit 与 after_feed_id)
+      const validFeeds: any[] = [];
+      let currentCursor: string | undefined = params.cursor ? String(params.cursor).trim() : undefined;
+      let protoHasMore = true;
+      let latestNextCursor: string | undefined = undefined;
+      let fetchRounds = 0;
+      const MAX_FETCH_ROUNDS = 3;
+
+      // 当未传入显式游标时（默认拉取、offset 翻页或 after_feed_id 续读），启用自动多页聚合补齐 (Fill-to-Limit)；
+      // 若调用方传入了显式 cursor，则遵守原生游标单页单步契约，不跨游标侵入
+      const isExplicitCursor = Boolean(params.cursor);
+
+      while (fetchRounds < MAX_FETCH_ROUNDS) {
+        fetchRounds++;
+        const actionPayload: Record<string, any> = {
+          count: Math.max(limit * 2, 10), // 适度多拉几条以补偿被清洗的广告卡
+        };
+        if (currentCursor) {
+          actionPayload.cursor = currentCursor;
+        }
+
+        const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_feeds', actionPayload);
+        const rawFeeds: any[] = res?.data?.feeds || [];
+        const protoCursor = res?.data?.next_cursor || res?.data?.attach_info;
+        latestNextCursor = protoCursor ? String(protoCursor) : undefined;
+        protoHasMore = res?.data?.has_more !== undefined ? Boolean(res.data.has_more) : Boolean(protoCursor);
+
+        // Filter-Before-Slice: 先清洗掉广告占位卡与官方空间号，避免占用用户 limit 配额
+        const filtered = rawFeeds.filter((item) => isRealUserFeed(item));
+        for (const item of filtered) {
+          const fid = item.tid || item.key;
+          if (!fid || !validFeeds.some((v) => (v.tid || v.key) === fid)) {
+            validFeeds.push(item);
+          }
+        }
+
+        // 若为显式游标模式，单轮即停止，保持游标单步幂等与 next_cursor 精确对应
+        if (isExplicitCursor) {
+          break;
+        }
+
+        // 计算当前有效条数是否已满足本次请求所需
+        let targetNeeded = offset + limit;
+        if (params.after_feed_id) {
+          const targetId = params.after_feed_id.trim();
+          const foundIdx = validFeeds.findIndex(
+            (f) => (f.tid && f.tid === targetId) || (f.key && f.key === targetId)
+          );
+          if (foundIdx !== -1) {
+            targetNeeded = foundIdx + 1 + limit;
+          } else {
+            // 尚未找到指定断点，需要继续拉取
+            targetNeeded = validFeeds.length + limit;
+          }
+        }
+
+        // 如果已经凑够所需条数，或者协议端明确没有下一页 / 没有游标，则结束补拉
+        if (validFeeds.length >= targetNeeded || !protoHasMore || !latestNextCursor) {
+          break;
+        }
+
+        // 继续下一轮游标拉取
+        currentCursor = latestNextCursor;
       }
-
-      const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_feeds', actionPayload);
-
-      const rawFeeds: any[] = res?.data?.feeds || [];
-      const protoNextCursor = res?.data?.next_cursor || res?.data?.attach_info;
-      if (protoNextCursor) {
-        nextCursor = String(protoNextCursor);
-      }
-
-      // Filter-Before-Slice: 先清洗掉广告占位卡与官方空间号，避免占用用户 limit 配额
-      const validFeeds = rawFeeds.filter((item) => isRealUserFeed(item));
 
       // 支持 after_feed_id 续读定位
       let startIndex = offset;
@@ -178,12 +224,20 @@ export async function readQzoneFeeds(
       }
 
       const sliced = validFeeds.slice(startIndex, startIndex + limit);
-      hasMore = res?.data?.has_more !== undefined
-        ? Boolean(res.data.has_more)
-        : validFeeds.length > startIndex + limit;
+
+      // 判断是否有更多：
+      // 1. 本地收集池中在当前切片后还有剩余数据；
+      // 2. 协议端在最后一轮仍然明确还有更多且提供了 next_cursor。
+      const hasRemainingInPool = validFeeds.length > startIndex + sliced.length;
+      hasMore = hasRemainingInPool || (protoHasMore && Boolean(latestNextCursor));
 
       if (hasMore) {
-        nextOffset = startIndex + limit;
+        // 自适应严谨计算：严格按照实际交付条目数累加，严禁直接 + limit 跳号
+        nextOffset = startIndex + sliced.length;
+      }
+
+      if (latestNextCursor) {
+        nextCursor = latestNextCursor;
       }
 
       for (const item of sliced) {
