@@ -57,7 +57,12 @@ CREATE INDEX idx_messages_peer_source_time ON messages (peer, source, time);
 
 ### 2.4 查询维度
 
-`read_chat_history` 新增 `source` 参数（`'qq' | 'agent'`，缺省不过滤），
+`read_chat_history` 新增 `source` 参数（`'qq' | 'agent' | 'all'`）：
+
+- **缺省等价 `'qq'`**：日常历史查询默认不展示内部通讯，避免协同消息被误认为群友/好友发言；
+- `'agent'`：仅查看 Agent 内部协同通讯；
+- `'all'`：两者都返回。
+
 返回的每条消息摘要新增 `source` 字段。原有 `user_id` 过滤同样可用于
 `agent:<来源SessionID>` 精确检索。
 
