@@ -279,6 +279,21 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       expect(res2.error).toContain('初始消息不能为空');
       assertNoUndefinedFields(res2);
     });
+
+    it('真实装配契约: execute 从 exec.agent.session.id 注入发起方 Session ID，不依赖全局上下文', async () => {
+      const tool = createCreateUserAgentTool(() => ({ sessionManager: mockSessionManager }));
+
+      const res = await (tool as any).execute(
+        { user_id: '1000000002', initial_message: '请跟进发票单号' },
+        { agent: { session: { id: 'qq-user-1000000001' } } }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.created).toBe(true);
+      expect(dispatchedPayloads).toHaveLength(1);
+      expect(dispatchedPayloads[0].from_session).toBe('qq-user-1000000001');
+      assertNoUndefinedFields(res);
+    });
   });
 
   describe('3. send_agent_message 内部通信与成果交付契约', () => {
@@ -311,6 +326,37 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       const res = await sendAgentMessage({ target_session_id: '', message: 'hi' }, { sessionManager: mockSessionManager });
       expect(res.success).toBe(false);
       expect(res.error).toContain('目标 Session ID 不能为空');
+      assertNoUndefinedFields(res);
+    });
+
+    it('归一化幂等契约: 非法 Session ID 明确拦截，绝不再拼出 qq-agent / qq-qq-agent 幽灵会话', async () => {
+      for (const bogus of ['agent', 'qq-agent']) {
+        const res = await sendAgentMessage(
+          { target_session_id: bogus, message: '回执测试' },
+          { sessionManager: mockSessionManager, sessionId: 'qq-user-1000000002' }
+        );
+        expect(res.success).toBe(false);
+        expect(res.error).toContain('不是合法的 QQ 会话标识');
+        expect(res.error).not.toContain('最新活跃会话');
+        expect(res.error).not.toContain('qq-qq-agent');
+      }
+      expect(dispatchedPayloads).toHaveLength(0);
+    });
+
+    it('真实装配契约: execute 从 exec.agent.session.id 注入发起方 Session ID，回执地址绝不为字面量 agent', async () => {
+      const tool = createSendAgentMessageTool(() => ({ sessionManager: mockSessionManager }));
+
+      const res = await (tool as any).execute(
+        { target_session_id: 'qq-group-8000000001', message: '111 已落地' },
+        { agent: { session: { id: 'qq-user-1000000002' } } }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.delivered).toBe(true);
+      expect(dispatchedPayloads).toHaveLength(1);
+      expect(dispatchedPayloads[0].from_session).toBe('qq-user-1000000002');
+      expect(dispatchedPayloads[0].from_user).toBe('qq-user-1000000002');
+      expect(dispatchedPayloads[0].from_user).not.toBe('agent');
       assertNoUndefinedFields(res);
     });
 

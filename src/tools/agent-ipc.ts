@@ -27,8 +27,24 @@ import type {
 import type { ToolExecutionContext } from './index.js';
 import { toLosslessJson } from './member-info.js';
 import { parsePeerTarget } from '../gateway/session/agent-runner.js';
+import { parseSessionId } from '../gateway/session/id-resolver.js';
 
 export { toLosslessJson };
+
+/**
+ * 从本次工具调用的执行上下文补齐真实发起方 Session ID。
+ *
+ * Agent IPC 的 contextGetter 读取的是进程级 globalToolContext，它不携带调用方身份；
+ * 若只依赖 ctx.sessionId，send_agent_message / create_user_agent 会把来源写成
+ * 字面量 'agent'，导致对方收到无法寻址的回执地址。
+ */
+function withInvocationSession(ctx: ToolExecutionContext, exec: any): ToolExecutionContext {
+  const rawSessionId = exec?.agent?.session?.id;
+  if (typeof rawSessionId !== 'string' || rawSessionId.trim() === '') {
+    return ctx;
+  }
+  return { ...ctx, sessionId: rawSessionId };
+}
 
 // ==================== 1. list_active_agents (查询活跃 Agent 列表) ====================
 
@@ -159,8 +175,8 @@ export function createListActiveAgentsTool(
         return [{ type: 'text', text: lines.join('\n') }];
       },
     },
-    execute: async (args) => {
-      const ctx = contextGetter();
+    execute: async (args, exec) => {
+      const ctx = withInvocationSession(contextGetter(), exec);
       return queryActiveAgents((args || {}) as ListActiveAgentsParams, ctx) as any;
     },
   });
@@ -292,8 +308,8 @@ export function createCreateUserAgentTool(
         return [{ type: 'text', text: `用户 Agent [${v.session_id}] 创建成功并已注入初始消息。` }];
       },
     },
-    execute: async (args) => {
-      const ctx = contextGetter();
+    execute: async (args, exec) => {
+      const ctx = withInvocationSession(contextGetter(), exec);
       return createUserAgent(args as CreateUserAgentParams, ctx) as any;
     },
   });
@@ -332,6 +348,17 @@ export async function sendAgentMessage(
 
   const targetSessionId = String(params.target_session_id).trim();
 
+  // 0. 目标 Session ID 必须显式匹配 QQ 会话规范，绝不允许把任意字符串当作 peer 再套前缀。
+  //    历史缺陷：'agent' → sessionIdToPeer 原样返回 → peerToSessionId 拼成 'qq-agent'
+  //    → 再传 'qq-agent' → 'qq-qq-agent'，每次投递多裹一层前缀且提示的"最新会话"根本不存在。
+  const parsedTarget = parseSessionId(targetSessionId);
+  if (!parsedTarget) {
+    return toLosslessJson({
+      success: false,
+      error: `目标 Session ID [${targetSessionId}] 不是合法的 QQ 会话标识。请调用 list_active_agents 获取目标 Agent 的完整 Session ID（如 "qq-user-1000000001" 或 "qq-group-8000000001"）后重试。`,
+    });
+  }
+
   // 1. 目标会话状态校验：过滤已被归档或标记为僵尸/删除的会话
   if (
     typeof sessionManager.isSessionArchived === 'function' &&
@@ -353,15 +380,8 @@ export async function sendAgentMessage(
     });
   }
 
-  // 解析出底层 peer
-  const targetPeer =
-    typeof sessionManager.sessionIdToPeer === 'function'
-      ? sessionManager.sessionIdToPeer(targetSessionId)
-      : targetSessionId.startsWith('qq-user-')
-      ? `user_${targetSessionId.slice(8)}`
-      : targetSessionId.startsWith('qq-group-')
-      ? `group_${targetSessionId.slice(9)}`
-      : targetSessionId;
+  // 解析出底层 peer（规范化来源仅为已通过 parseSessionId 校验的合法 QQ 会话）
+  const targetPeer = parsedTarget.peer;
 
   // 2. 核心校验：确保 targetSessionId 仍是该 Peer 最新的活跃会话，防止向已被轮换的旧版本会话发送消息
   if (typeof sessionManager.peerToSessionId === 'function') {
@@ -448,8 +468,8 @@ export function createSendAgentMessageTool(
         return [{ type: 'text', text: `内部消息成功送达目标 Agent [${v.target_session_id}]。` }];
       },
     },
-    execute: async (args) => {
-      const ctx = contextGetter();
+    execute: async (args, exec) => {
+      const ctx = withInvocationSession(contextGetter(), exec);
       return sendAgentMessage(args as SendAgentMessageParams, ctx) as any;
     },
   });
