@@ -1632,8 +1632,14 @@ export function registerAgentTools(
           async execute(args, exec) {
             const session = (exec.agent as any)?.session;
             const rawPeer = session?.id || 'common';
-            const peer = normalizePeer(rawPeer);
-            return (await readChatHistory(peer, args, options.db)) as any;
+            const currentPeer = normalizePeer(rawPeer);
+            // 显式传入的 peer 优先于当前会话：支持在私聊中只读查看某个群/其他好友的近期消息
+            const requestedPeer =
+              typeof (args as any)?.peer === 'string' && String((args as any).peer).trim()
+                ? normalizePeer(String((args as any).peer).trim())
+                : currentPeer;
+            const { peer: _peer, ...params } = (args || {}) as any;
+            return (await readChatHistory(requestedPeer, params, options.db)) as any;
           },
         })
       )
