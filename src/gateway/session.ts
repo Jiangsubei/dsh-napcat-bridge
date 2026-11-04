@@ -43,7 +43,7 @@ import {
 import { SessionWorkspaceManager } from './session/workspace.js';
 import { SessionPersistenceManager } from './session/persistence.js';
 import { SessionModelSelector } from './session/model-selector.js';
-import { SessionAgentRunner } from './session/agent-runner.js';
+import { SessionAgentRunner, isSystemSenderName } from './session/agent-runner.js';
 
 export class SessionManager {
   private peerCurrentSessionId = new Map<string, string>();
@@ -393,6 +393,15 @@ export class SessionManager {
     const peerName = this.getPeerName(peer);
     if (peerName) return peerName;
 
+    // 私聊标题可能被旧版本的系统身份（如「系统定时任务」）污染，展示时直接忽略
+    const isUserPeer = peer.startsWith('user_') || peer.startsWith('qq-user-');
+    const cleanName = (title: string | undefined): string | undefined => {
+      const name = extractNameFromSessionTitle(title, peer);
+      if (!name) return undefined;
+      if (isUserPeer && isSystemSenderName(name)) return undefined;
+      return name;
+    };
+
     // 1. 从活跃 Agent 的会话标题（log-backed sessionTitle）反向提取
     const titleSvc = this.ctx.get?.('sessionTitle') || (this.ctx as any)?.sessionTitle;
     try {
@@ -400,7 +409,7 @@ export class SessionManager {
       const session = (agent as any)?.session;
       const snapshot = session ? titleSvc?.get?.(session) : undefined;
       if (typeof snapshot?.title === 'string') {
-        const name = extractNameFromSessionTitle(snapshot.title, peer);
+        const name = cleanName(snapshot.title);
         if (name) return name;
       }
     } catch {}
@@ -410,7 +419,7 @@ export class SessionManager {
     if (sessionsSvc?.get && typeof sessionsSvc.get === 'function') {
       try {
         const s = sessionsSvc.get(sessionId);
-        return extractNameFromSessionTitle(s?.title, peer);
+        return cleanName(s?.title);
       } catch {}
     }
     return undefined;

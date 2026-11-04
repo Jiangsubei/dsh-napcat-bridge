@@ -42,6 +42,33 @@ export function parsePeerTarget(peer: string): { type: 'user' | 'group'; id: str
 }
 
 /**
+ * 系统触发器可能写入 `payload.from_name` 的伪发送者名称。
+ * 这些名称绝不能进入会话标题或昵称缓存，否则私聊会话会被永久改名成系统身份。
+ */
+const SYSTEM_SENDER_NAMES = new Set([
+  '系统定时任务',
+  '协同 Agent',
+  '系统协作总线',
+  '内部通讯',
+]);
+
+/**
+ * 只有这些触发源的 from_name 才能代表真实 QQ 发送者。
+ * - at / mention / quote / poke：生产链路真实消息与戳一戳；
+ * - private：历史/兼容标识，语义同样是真实私聊发送者。
+ */
+const REAL_SENDER_TRIGGERS = new Set(['at', 'mention', 'quote', 'poke', 'private']);
+
+function isUserPeer(peer: string): boolean {
+  return peer.startsWith('user_') || peer.startsWith('qq-user-');
+}
+
+/** 判断名称是否为系统伪发送者名称（用于标题与昵称缓存的历史污染清理） */
+export function isSystemSenderName(name: string | undefined): boolean {
+  return typeof name === 'string' && SYSTEM_SENDER_NAMES.has(name.trim());
+}
+
+/**
  * dsh-napcat-bridge: Agent 运行时生命周期与执行调度模块
  * 负责 Agent 创建与恢复、会话独占锁与看门狗、以及入站唤醒 (dispatchWakeup) 的消息排队下发。
  */
@@ -268,11 +295,21 @@ export class SessionAgentRunner {
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      let dropped = false;
       for (const [peer, name] of Object.entries(parsed)) {
         if (typeof peer === 'string' && peer && typeof name === 'string' && name.trim()) {
-          this.peerNames.set(peer, name.trim());
+          const trimmed = name.trim();
+          // 历史污染清理：旧版本曾把定时任务的「系统定时任务」写进私聊昵称缓存。
+          // 这不是真实昵称，跳过；后续真实消息 / ensurePeerName 会重新解析正确昵称。
+          if (isUserPeer(peer) && isSystemSenderName(trimmed)) {
+            dropped = true;
+            continue;
+          }
+          this.peerNames.set(peer, trimmed);
         }
       }
+      // 把清理结果回写持久化，避免每次启动都重复丢弃同一批污染数据
+      if (dropped) this.persistPeerNames();
     } catch {
       // 持久化数据损坏时忽略，按无缓存继续
     }
@@ -394,12 +431,18 @@ export class SessionAgentRunner {
     }
 
     const existingTitle = this.getSessionTitle(session, sessionId);
+    const existingName = extractNameFromSessionTitle(existingTitle, peer);
+    // 历史污染自愈：旧版本曾把系统身份（如「系统定时任务」）写进私聊标题。
+    // 它不是真实昵称，视为无名称，允许重写为中性号码标题；真实消息到达后会补回昵称。
+    const isPollutedName = isUserPeer(peer) && isSystemSenderName(existingName);
+
     // 名字来源优先级：显式传入 > 内存/持久化缓存 > 从现有标题反向提取
     const currentName =
-      name || this.getPeerName(peer) || extractNameFromSessionTitle(existingTitle, peer);
+      name || this.getPeerName(peer) || (isPollutedName ? undefined : existingName);
 
     // 已知标题但无法解析出昵称时，绝不降级为「群聊: 123456 #1」这类纯号码标题
-    if (!currentName && existingTitle) return;
+    // （系统身份污染标题除外：它本就不是有效昵称，重写为中性标题属于自愈）
+    if (!currentName && existingTitle && !isPollutedName) return;
 
     const title = formatSessionTitle(peer, sessionId, currentName);
     if (existingTitle === title) return;
@@ -782,13 +825,15 @@ export class SessionAgentRunner {
     const agent = await this.getOrCreateAgent(payload.peer);
     const sessionId = (agent as any).session?.id || this.delegate.peerToSessionId(payload.peer);
 
-    // 若唤醒消息携带发送者昵称，更新私聊会话标题锁定
-    // 注意：内部协同消息 (internal_agent) 的 from_name 是系统身份「协同 Agent」，
-    // 绝不能用它覆盖会话展示标题，否则来源私聊会话会被永久改名为协同身份。
-    if (payload.from_name && payload.trigger !== 'internal_agent') {
-      if (payload.peer.startsWith('user_') || payload.peer.startsWith('qq-user-')) {
-        this.updateSessionTitle((agent as any).session, payload.peer, sessionId, payload.from_name);
-      }
+    // 仅当唤醒来源是真实 QQ 发送者（消息 / 戳一戳）时才允许用 from_name 更新私聊标题。
+    // 系统触发器（scheduled / proactive / internal_agent）的 from_name 是系统身份
+    // 「系统定时任务」「协同 Agent」等，若写入标题会把私聊永久改名成系统身份。
+    if (
+      payload.from_name &&
+      REAL_SENDER_TRIGGERS.has(String(payload.trigger)) &&
+      isUserPeer(payload.peer)
+    ) {
+      this.updateSessionTitle((agent as any).session, payload.peer, sessionId, payload.from_name);
     }
 
     const promptText = formatWakeupPrompt(payload);
