@@ -190,6 +190,20 @@ export function formatWakeupPrompt(payload: WakeupPayload): string {
       : '';
   const headerTime = timeStr ? ` [${timeStr}]` : '';
 
+  if (payload.trigger === 'internal_agent') {
+    const fromSession = payload.from_session || payload.from_user || '其他工作区';
+    const replyTag =
+      fromSession && fromSession !== '其他工作区'
+        ? `\n（若需向发起方回复或交付成果，请直接调用 send_agent_message 工具，将 target_session_id 设为 "${fromSession}"）`
+        : '';
+    return (
+      `【内部协同消息】${headerTime}\n` +
+      `来源会话 Session ID: ${fromSession}\n\n` +
+      `消息内容:\n${payload.content}\n\n` +
+      `（说明：这是来自其他 Agent 工作区的内部协作指令/消息，QQ 真实用户完全不可见。请根据上述内容推进；若需要向目标用户私聊询问，请调用 send_qq_message 发送真实私聊。完成任务后可通过 send_agent_message 回复上述 Session ID。${replyTag}）`
+    );
+  }
+
   if (payload.trigger === 'poke') {
     return `${channelStr}${msgIdStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
   }

@@ -93,6 +93,22 @@ export {
   queryGroupNotice,
 };
 import {
+  createListActiveAgentsTool,
+  createCreateUserAgentTool,
+  createSendAgentMessageTool,
+  queryActiveAgents,
+  createUserAgent,
+  sendAgentMessage,
+} from './agent-ipc.js';
+export {
+  createListActiveAgentsTool,
+  createCreateUserAgentTool,
+  createSendAgentMessageTool,
+  queryActiveAgents,
+  createUserAgent,
+  sendAgentMessage,
+};
+import {
   readQzoneFeeds,
   publishQzoneFeed,
   commentQzoneFeed,
@@ -136,6 +152,10 @@ export interface ToolExecutionContext {
   scheduler?: TaskScheduler | null;
   /** 黑话存储管理器 */
   slangStorage?: SlangStorage;
+  /** 当前工具执行所在的 Session ID */
+  sessionId?: string;
+  /** 会话管理器实例 (供跨 Agent IPC 工具调度) */
+  sessionManager?: any;
 }
 
 let globalToolContext: ToolExecutionContext = {};
@@ -1510,6 +1530,10 @@ export interface AgentToolsOptions {
   inboundMsgIdGetter?: (peer: string) => number | undefined;
   scheduler?: TaskScheduler;
   slangStorage?: SlangStorage;
+  /** 当前工具执行所在的 Session ID */
+  sessionId?: string;
+  /** 会话管理器实例 (供跨 Agent IPC 工具调度) */
+  sessionManager?: any;
   config?: (() => BridgePluginConfig) | BridgePluginConfig;
 }
 
@@ -1548,6 +1572,7 @@ export function registerAgentTools(
     faceStoreMax: currentCfg.face_store_max,
     faceEvictPolicy: currentCfg.face_evict_policy,
     scheduler: options.scheduler,
+    sessionManager: options.sessionManager || (ctx as any).sessionManager || (ctx as any).get?.('sessionManager'),
   });
 
   const unregisters: Array<() => void> = [];
@@ -2545,6 +2570,22 @@ export function registerAgentTools(
     unregisters.push(tools.register(createGetUserProfileTool(contactContextGetter)));
     unregisters.push(tools.register(createGetGroupInfoTool(contactContextGetter)));
     unregisters.push(tools.register(createGetGroupNoticeTool(contactContextGetter)));
+
+    // 15. 跨 Agent 内部协同工具集 (Agent IPC)
+    const ipcContextGetter = () => {
+      const g = getGlobalToolContext();
+      return {
+        ...g,
+        sessionManager:
+          options.sessionManager ||
+          g.sessionManager ||
+          (ctx as any).sessionManager ||
+          (typeof (ctx as any).get === 'function' ? (ctx as any).get('sessionManager') : undefined),
+      };
+    };
+    unregisters.push(tools.register(createListActiveAgentsTool(ipcContextGetter)));
+    unregisters.push(tools.register(createCreateUserAgentTool(ipcContextGetter)));
+    unregisters.push(tools.register(createSendAgentMessageTool(ipcContextGetter)));
 
     // 13. get_group_member_info (群成员信息查询)
     unregisters.push(

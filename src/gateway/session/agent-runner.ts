@@ -667,6 +667,7 @@ export class SessionAgentRunner {
     const isNoMessageWakeup =
       payload.trigger === 'poke' ||
       payload.trigger === 'scheduled' ||
+      payload.trigger === 'internal_agent' ||
       (payload.trigger === 'proactive' && payload.sub_trigger === 'idle') ||
       (!(payload as any).msg_id && !payload.from_user);
 
@@ -676,7 +677,7 @@ export class SessionAgentRunner {
         msg_id: undefined,
         from_user: '',
         is_group: isGroup,
-        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : 'idle',
+        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : payload.trigger === 'internal_agent' ? 'direct' : 'idle',
       });
     }
 
@@ -703,7 +704,7 @@ export class SessionAgentRunner {
         msg_id: undefined,
         from_user: '',
         is_group: isGroup,
-        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : 'idle',
+        trigger: payload.trigger === 'poke' ? 'poke' : payload.trigger === 'scheduled' ? 'scheduled' : payload.trigger === 'internal_agent' ? 'direct' : 'idle',
       });
     }
 

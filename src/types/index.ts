@@ -163,7 +163,7 @@ export interface OneBotActionResponse<T = any> {
 
 // ==================== 2. 唤醒包契约 ====================
 
-export type WakeupTriggerType = 'at' | 'mention' | 'quote' | 'poke' | 'proactive' | 'scheduled';
+export type WakeupTriggerType = 'at' | 'mention' | 'quote' | 'poke' | 'proactive' | 'scheduled' | 'internal_agent';
 
 export interface WakeupPayload {
   msg_id?: number;
@@ -197,6 +197,10 @@ export interface WakeupPayload {
     images?: string[];
   };
   images?: string[];
+  /** 内部 Agent 协作来源会话 ID (当 trigger === 'internal_agent' 时提供) */
+  from_session?: string;
+  /** 内部 Agent 协作成果回传目标会话 ID (当 trigger === 'internal_agent' 时提供) */
+  reply_to_session?: string;
   timestamp: number;
 }
 
@@ -1120,7 +1124,6 @@ export interface CreateUserAgentResult {
 export interface SendAgentMessageParams {
   target_session_id: string;
   message: string;
-  reply_to_session_id?: string;
 }
 
 export interface SendAgentMessageResult {

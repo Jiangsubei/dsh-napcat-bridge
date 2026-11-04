@@ -349,6 +349,10 @@ export class SessionManager {
     this.agentRunner.updateSessionTitle(session, peer, sessionId, name);
   }
 
+  public getActiveHandleKeys(): IterableIterator<string> {
+    return this.agentRunner.getActiveHandleKeys();
+  }
+
   public async getOrCreateAgent(peerOrSessionId: string): Promise<Agent> {
     return this.agentRunner.getOrCreateAgent(peerOrSessionId);
   }
