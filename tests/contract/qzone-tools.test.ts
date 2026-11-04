@@ -3,7 +3,11 @@
  *
  * 覆盖规范清单:
  * 契约 1: 真实装配下，QQ 会话 assemble 结果中包含 read_qzone_feeds, publish_qzone_feed, comment_qzone_feed, delete_qzone_feed 工具；
- * 契约 2: readQzoneFeeds 执行契约（好友流、指定好友、自身动态、limit 截断保护、评论区解析与 is_self 标记、多模态图片下载本地化）；
+ * 契约 2: readQzoneFeeds 执行契约：
+ *   - 好友流、指定好友、自身动态空值保底；
+ *   - 结构化过滤广告占位 (uin<=0) 与官方空间常驻软文 (uin=20050606)，且不误伤改名好友，limit 配额不受损；
+ *   - 原生游标续读 (cursor / next_cursor) 与断点说说定位续读 (after_feed_id)；
+ *   - limit 截断保护、评论区解析与 is_self 标记、多模态图片下载本地化；
  * 契约 3: publishQzoneFeed 执行契约（纯文本发布、图片绝对路径转 file:///、发布成功返回 feed_id 与冷却时间门控拦截）；
  * 契约 4: commentQzoneFeed 执行契约（参数必填校验、评论发送与评论冷却时间门控拦截）；
  * 契约 5: deleteQzoneFeed 执行契约（参数校验、调用 delete_qzone_msg 物理删除）；
@@ -21,6 +25,7 @@ import {
   commentQzoneFeed,
   deleteQzoneFeed,
   QzoneRateLimiter,
+  isRealUserFeed,
 } from '../../src/tools/qzone.js';
 import type {
   ReadQzoneFeedsParams,
@@ -107,10 +112,10 @@ describe('契约 1: QQ 空间动态工具组真实装配与存在性契约', () 
   });
 });
 
-describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
+describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契约', () => {
   it('2.1 好友流模式 (scope=friends)：正确映射结构化数据并下载多模态图片', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockImplementation((action: string) => {
+      sendAction: vi.fn().mockImplementation((action: string) => {
         if (action === 'get_qzone_feeds') {
           return Promise.resolve({
             status: 'ok',
@@ -128,7 +133,7 @@ describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
                   comment_count: 2,
                 },
               ],
-              attach_info: 'cursor_123',
+              next_cursor: 'cursor_123',
             },
           });
         }
@@ -160,7 +165,7 @@ describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
     };
 
     const mockMediaManager: any = {
-      downloadAndCacheMedia: vi.fn().mockResolvedValue('/data/cache/qzone/photo1.jpg'),
+      downloadAndSave: vi.fn().mockResolvedValue({ localPath: '/data/cache/qzone/photo1.jpg' }),
     };
 
     const res = await readQzoneFeeds(
@@ -190,12 +195,147 @@ describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
     expect(feed.comments[0].is_self).toBe(true);
     expect(feed.comments[1].is_self).toBe(false);
 
+    // 验证 next_cursor 返回
+    expect(res.next_cursor).toBe('cursor_123');
+
     assertNoUndefinedDeep(res);
   });
 
-  it('2.2 指定好友列表 (scope=user)：传递 target_uin 并做 limit 硬截断上限', async () => {
+  it('2.2 结构化去伪与配额保全：过滤广告卡(uin<=0)与官方号(uin=20050606)，不误杀改名好友，limit 配额不受损', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'ok',
+        retcode: 0,
+        data: {
+          feeds: [
+            // 广告占位卡：应该被过滤
+            {
+              uin: 0,
+              tid: 'advertisement_outlink_0',
+              nickname: '',
+              content: '',
+              images: [],
+            },
+            // 官方 Qzone 软文：应该被过滤 (uin=20050606)
+            {
+              uin: 20050606,
+              tid: 'aef23101297f236ae4f10600',
+              nickname: '官方Qzone',
+              content: '21年了，QQ空间也记得...',
+              images: [],
+            },
+            // 整活好友（昵称恰好叫“官方Qzone”，但 uin 正常）：必须保留！绝不误杀！
+            {
+              uin: 1000000003,
+              tid: 'tid_real_friend_1',
+              nickname: '官方Qzone',
+              content: '我只是个改名整活的好友',
+              images: [],
+            },
+            // 正常好友动态 2
+            {
+              uin: 1000000004,
+              tid: 'tid_real_friend_2',
+              nickname: '好友A',
+              content: '今天天气不错',
+              images: [],
+            },
+            // 正常好友动态 3
+            {
+              uin: 1000000005,
+              tid: 'tid_real_friend_3',
+              nickname: '好友B',
+              content: '晚上吃什么',
+              images: [],
+            },
+          ],
+        },
+      }),
+    };
+
+    // 请求 limit: 2，前面 2 个是广告和官方系统号
+    // 预期：必须返回 2 条有效好友动态（tid_real_friend_1 和 tid_real_friend_2），配额不被侵蚀！
+    const res = await readQzoneFeeds(
+      { scope: 'friends', limit: 2 },
+      { gateway: mockGateway }
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.feeds).toHaveLength(2);
+    expect(res.feeds[0].feed_id).toBe('tid_real_friend_1');
+    expect(res.feeds[0].author.user_id).toBe(1000000003);
+    expect(res.feeds[0].content).toBe('我只是个改名整活的好友');
+
+    expect(res.feeds[1].feed_id).toBe('tid_real_friend_2');
+    expect(res.feeds[1].author.user_id).toBe(1000000004);
+
+    assertNoUndefinedDeep(res);
+  });
+
+  it('2.3 原生游标续读 (cursor) 与说说断点定位续读 (after_feed_id)', async () => {
+    const mockGateway: any = {
+      sendAction: vi.fn().mockImplementation((action: string, params: any) => {
+        if (params.cursor === 'cursor_page_1') {
+          return Promise.resolve({
+            status: 'ok',
+            retcode: 0,
+            data: {
+              feeds: [
+                {
+                  uin: 1000000006,
+                  tid: 'tid_page_2_item_1',
+                  nickname: '好友C',
+                  content: '第二页第1条动态',
+                  images: [],
+                },
+              ],
+              next_cursor: 'cursor_page_2',
+            },
+          });
+        }
+        return Promise.resolve({
+          status: 'ok',
+          retcode: 0,
+          data: {
+            feeds: [
+              { uin: 1000000002, tid: 'tid_first', nickname: '张', content: '第一条' },
+              { uin: 1000000003, tid: 'tid_target', nickname: '李', content: '定位目标' },
+              { uin: 1000000004, tid: 'tid_after_1', nickname: '王', content: '目标之后的动态1' },
+              { uin: 1000000005, tid: 'tid_after_2', nickname: '赵', content: '目标之后的动态2' },
+            ],
+          },
+        });
+      }),
+    };
+
+    // 1. 验证 cursor 游标透传
+    const resCursor = await readQzoneFeeds(
+      { scope: 'friends', cursor: 'cursor_page_1', limit: 5 },
+      { gateway: mockGateway }
+    );
+    expect(mockGateway.sendAction).toHaveBeenCalledWith(
+      'get_qzone_feeds',
+      expect.objectContaining({ cursor: 'cursor_page_1' })
+    );
+    expect(resCursor.feeds[0].feed_id).toBe('tid_page_2_item_1');
+    expect(resCursor.next_cursor).toBe('cursor_page_2');
+
+    // 2. 验证 after_feed_id 续读定位：指定 after_feed_id: 'tid_target'，跳过前面两条，从后面的开始切片
+    const resAfter = await readQzoneFeeds(
+      { scope: 'friends', after_feed_id: 'tid_target', limit: 2 },
+      { gateway: mockGateway }
+    );
+    expect(resAfter.feeds).toHaveLength(2);
+    expect(resAfter.feeds[0].feed_id).toBe('tid_after_1');
+    expect(resAfter.feeds[1].feed_id).toBe('tid_after_2');
+
+    assertNoUndefinedDeep(resCursor);
+    assertNoUndefinedDeep(resAfter);
+  });
+
+  it('2.4 指定好友列表 (scope=user)：传递 target_uin 并做 limit 硬截断上限', async () => {
+    const mockGateway: any = {
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: {
@@ -219,20 +359,19 @@ describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
     );
 
     expect(res.success).toBe(true);
-    expect(mockGateway.callAction).toHaveBeenCalledWith(
+    expect(mockGateway.sendAction).toHaveBeenCalledWith(
       'get_qzone_msg_list',
       expect.objectContaining({
         target_uin: 1000000002,
-        num: 10, // 截断生效
       })
     );
     expect(res.feeds[0].feed_id).toBe('tid_user_002');
     assertNoUndefinedDeep(res);
   });
 
-  it('2.3 自身动态为空时保底 (scope=self，msglist=null 兼容)', async () => {
+  it('2.5 自身动态为空时保底 (scope=self，msglist=null 兼容)', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: {
@@ -255,7 +394,7 @@ describe('契约 2: readQzoneFeeds 核心执行与数据转换契约', () => {
 describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {
   it('3.1 正常发布纯文本说说与图片路径转换 (file:// 格式标准化)', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: {
@@ -280,7 +419,7 @@ describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {
 
     expect(res.success).toBe(true);
     expect(res.feed_id).toBe('new_tid_001');
-    expect(mockGateway.callAction).toHaveBeenCalledWith('send_qzone_msg', {
+    expect(mockGateway.sendAction).toHaveBeenCalledWith('send_qzone_msg', {
       content: '你好世界！',
       images: ['file:///D:/mock/images/sample.png'],
     });
@@ -290,7 +429,7 @@ describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {
 
   it('3.2 连续调用受到发动态冷却时间拦截 (60s 冷却)', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: { tid: 'tid_ok' },
@@ -321,7 +460,7 @@ describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {
 describe('契约 4: commentQzoneFeed 评论执行契约与冷却拦截', () => {
   it('4.1 评论参数必填校验与发送', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: null,
@@ -343,7 +482,7 @@ describe('契约 4: commentQzoneFeed 评论执行契约与冷却拦截', () => {
     );
 
     expect(res.success).toBe(true);
-    expect(mockGateway.callAction).toHaveBeenCalledWith('comment_qzone', {
+    expect(mockGateway.sendAction).toHaveBeenCalledWith('comment_qzone', {
       tid: 'tid_target',
       target_uin: 1000000002,
       content: '赞同这个想法！',
@@ -354,7 +493,7 @@ describe('契约 4: commentQzoneFeed 评论执行契约与冷却拦截', () => {
 
   it('4.2 评论冷却保护 (15s 冷却)', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({ status: 'ok', retcode: 0 }),
+      sendAction: vi.fn().mockResolvedValue({ status: 'ok', retcode: 0 }),
     };
 
     const rateLimiter = new QzoneRateLimiter(60000, 15000);
@@ -378,7 +517,7 @@ describe('契约 4: commentQzoneFeed 评论执行契约与冷却拦截', () => {
 describe('契约 5: deleteQzoneFeed 删除动态契约', () => {
   it('5.1 删除动态成功调用 delete_qzone_msg', async () => {
     const mockGateway: any = {
-      callAction: vi.fn().mockResolvedValue({
+      sendAction: vi.fn().mockResolvedValue({
         status: 'ok',
         retcode: 0,
         data: null,
@@ -392,7 +531,7 @@ describe('契约 5: deleteQzoneFeed 删除动态契约', () => {
 
     expect(res.success).toBe(true);
     expect(res.feed_id).toBe('tid_to_delete');
-    expect(mockGateway.callAction).toHaveBeenCalledWith('delete_qzone_msg', {
+    expect(mockGateway.sendAction).toHaveBeenCalledWith('delete_qzone_msg', {
       tid: 'tid_to_delete',
     });
 

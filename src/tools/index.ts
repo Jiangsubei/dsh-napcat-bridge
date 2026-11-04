@@ -2362,6 +2362,14 @@ export function registerAgentTools(
               type: 'number',
               description: '分页偏移量（从 0 开始），用于翻页查看更早的动态。',
             },
+            cursor: {
+              type: 'string',
+              description: '上一页返回的 next_cursor 游标。用于原生游标连续翻页。',
+            },
+            after_feed_id: {
+              type: 'string',
+              description: '断点续读动态 ID。指定某条已读动态的 ID，工具将定位并仅返回该条之后的更早动态。',
+            },
           },
           output: {
             schema: { type: 'json' },

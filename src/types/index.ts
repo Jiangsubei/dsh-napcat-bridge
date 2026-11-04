@@ -790,6 +790,8 @@ export interface ReadQzoneFeedsParams {
   target_qq?: string | number;
   limit?: number;
   offset?: number;
+  cursor?: string;
+  after_feed_id?: string;
 }
 
 export interface ReadQzoneFeedsResult {
@@ -799,6 +801,7 @@ export interface ReadQzoneFeedsResult {
   feeds: QzoneFeedItem[];
   has_more: boolean;
   next_offset?: number;
+  next_cursor?: string;
   message?: string;
 }
 

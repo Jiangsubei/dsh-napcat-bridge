@@ -26,6 +26,21 @@ export function toLosslessJson<T>(val: T): T {
 }
 
 /**
+ * 判定一条动态是否为真实好友动态
+ * 1. 过滤广告/推广占位卡: uin <= 0 或 feed_id 带 advertisement_
+ * 2. 过滤 QQ 空间官方账号: uin === 20050606 (空间上线日系统保留固定号，非好友关系链)
+ */
+export function isRealUserFeed(item: any, defaultUin = 0): boolean {
+  const rawUin = item?.uin !== undefined ? Number(item.uin) : defaultUin;
+  const uin = Number(rawUin) || 0;
+  if (uin <= 0) return false;
+  if (uin === 20050606) return false;
+  const tid = String(item?.tid || item?.key || '');
+  if (tid.startsWith('advertisement_')) return false;
+  return true;
+}
+
+/**
  * QQ 空间风控限流器：防止频繁调用写操作触发腾讯滑块验证码或账号异常
  */
 export class QzoneRateLimiter {
@@ -128,18 +143,47 @@ export async function readQzoneFeeds(
     const feedItems: QzoneFeedItem[] = [];
     let hasMore = false;
     let nextOffset: number | undefined = undefined;
+    let nextCursor: string | undefined = undefined;
 
     if (scope === 'friends') {
-      // 场景 A: 好友动态流
-      const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_feeds', {
-        attach_info: '',
-      });
+      // 场景 A: 好友动态流 (支持 cursor 游标透传与 count)
+      const actionPayload: Record<string, any> = {
+        count: Math.max(limit * 2, 10), // 适度多拉几条以补偿被清洗的广告卡，确保有效动态满额
+      };
+      if (params.cursor) {
+        actionPayload.cursor = params.cursor;
+      }
+
+      const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_feeds', actionPayload);
 
       const rawFeeds: any[] = res?.data?.feeds || [];
-      const sliced = rawFeeds.slice(offset, offset + limit);
-      hasMore = rawFeeds.length > offset + limit;
+      const protoNextCursor = res?.data?.next_cursor || res?.data?.attach_info;
+      if (protoNextCursor) {
+        nextCursor = String(protoNextCursor);
+      }
+
+      // Filter-Before-Slice: 先清洗掉广告占位卡与官方空间号，避免占用用户 limit 配额
+      const validFeeds = rawFeeds.filter((item) => isRealUserFeed(item));
+
+      // 支持 after_feed_id 续读定位
+      let startIndex = offset;
+      if (params.after_feed_id) {
+        const targetId = params.after_feed_id.trim();
+        const foundIdx = validFeeds.findIndex(
+          (f) => (f.tid && f.tid === targetId) || (f.key && f.key === targetId)
+        );
+        if (foundIdx !== -1) {
+          startIndex = foundIdx + 1;
+        }
+      }
+
+      const sliced = validFeeds.slice(startIndex, startIndex + limit);
+      hasMore = res?.data?.has_more !== undefined
+        ? Boolean(res.data.has_more)
+        : validFeeds.length > startIndex + limit;
+
       if (hasMore) {
-        nextOffset = offset + limit;
+        nextOffset = startIndex + limit;
       }
 
       for (const item of sliced) {
@@ -230,13 +274,28 @@ export async function readQzoneFeeds(
 
       const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_msg_list', actionParams);
       const rawList: any[] = res?.data?.msglist || [];
-      const total = Number(res?.data?.total) || rawList.length;
-      hasMore = total > offset + rawList.length;
-      if (hasMore) {
-        nextOffset = offset + rawList.length;
+
+      // 清洗无效条目 (传入空间归属者的 targetUin)
+      const validFeeds = rawList.filter((item) => isRealUserFeed(item, targetUin));
+
+      // 支持 after_feed_id 续读定位
+      let startIndex = 0;
+      if (params.after_feed_id) {
+        const targetId = params.after_feed_id.trim();
+        const foundIdx = validFeeds.findIndex((f) => f.tid === targetId);
+        if (foundIdx !== -1) {
+          startIndex = foundIdx + 1;
+        }
       }
 
-      for (const item of rawList) {
+      const sliced = validFeeds.slice(startIndex, startIndex + limit);
+      const total = Number(res?.data?.total) || validFeeds.length;
+      hasMore = total > offset + startIndex + sliced.length;
+      if (hasMore) {
+        nextOffset = offset + startIndex + sliced.length;
+      }
+
+      for (const item of sliced) {
         const feedId = item.tid || '';
         const authorUin = targetUin;
         const authorNick = item.name || item.nickname || (scope === 'self' ? '自己' : '');
@@ -282,6 +341,7 @@ export async function readQzoneFeeds(
       feeds: feedItems,
       has_more: hasMore,
       ...(nextOffset !== undefined ? { next_offset: nextOffset } : {}),
+      ...(nextCursor ? { next_cursor: nextCursor } : {}),
       message: `成功拉取到 ${feedItems.length} 条空间动态`,
     });
   } catch (err: any) {
