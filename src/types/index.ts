@@ -753,6 +753,91 @@ export interface ManageSlangResult {
   error?: string;
 }
 
+// ==================== 4.7 QQ 空间动态互动契约 ====================
+
+export interface QzoneImageItem {
+  url: string;
+  local_path?: string;
+}
+
+export interface QzoneCommentItem {
+  comment_id?: string;
+  author: {
+    user_id: number;
+    nickname: string;
+  };
+  content: string;
+  create_time?: string;
+  is_self: boolean;
+}
+
+export interface QzoneFeedItem {
+  feed_id: string;
+  author: {
+    user_id: number;
+    nickname: string;
+  };
+  publish_time: string;
+  content: string;
+  images: QzoneImageItem[];
+  comments: QzoneCommentItem[];
+  total_comment_count: number;
+  like_count?: number;
+}
+
+export interface ReadQzoneFeedsParams {
+  scope?: 'friends' | 'self' | 'user';
+  target_qq?: string | number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ReadQzoneFeedsResult {
+  [key: string]: any;
+  success: boolean;
+  scope: 'friends' | 'self' | 'user';
+  feeds: QzoneFeedItem[];
+  has_more: boolean;
+  next_offset?: number;
+  message?: string;
+}
+
+export interface PublishQzoneFeedParams {
+  content: string;
+  images?: string[];
+}
+
+export interface PublishQzoneFeedResult {
+  [key: string]: any;
+  success: boolean;
+  feed_id?: string;
+  message: string;
+}
+
+export interface CommentQzoneFeedParams {
+  feed_id: string;
+  target_qq: string | number;
+  content: string;
+}
+
+export interface CommentQzoneFeedResult {
+  [key: string]: any;
+  success: boolean;
+  comment_id?: string;
+  message: string;
+}
+
+export interface DeleteQzoneFeedParams {
+  feed_id: string;
+}
+
+export interface DeleteQzoneFeedResult {
+  [key: string]: any;
+  success: boolean;
+  feed_id?: string;
+  message: string;
+}
+
 // ==================== 5. 插件配置接口 ====================
 
 export interface BridgePluginConfig {

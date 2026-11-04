@@ -68,6 +68,22 @@ import {
   formatMemberInfo,
 } from './member-info.js';
 export { createGetGroupMemberInfoTool, queryGroupMemberInfo, formatMemberInfo };
+import {
+  readQzoneFeeds,
+  publishQzoneFeed,
+  commentQzoneFeed,
+  deleteQzoneFeed,
+  QzoneRateLimiter,
+  defaultQzoneRateLimiter,
+} from './qzone.js';
+export {
+  readQzoneFeeds,
+  publishQzoneFeed,
+  commentQzoneFeed,
+  deleteQzoneFeed,
+  QzoneRateLimiter,
+  defaultQzoneRateLimiter,
+};
 
 export interface ToolExecutionContext {
   db?: MessageDatabase | null;
@@ -2317,6 +2333,165 @@ export function registerAgentTools(
             scheduler: options.scheduler || g.scheduler,
             peer: g.peer,
           };
+        })
+      )
+    );
+
+    // 14. QQ 空间动态工具集 (read_qzone_feeds, publish_qzone_feed, comment_qzone_feed, delete_qzone_feed)
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'read_qzone_feeds',
+          description:
+            '浏览 QQ 空间动态（说说）。可查看好友动态流（scope="friends"，默认）、自己发表过的动态（scope="self"）或指定好友的动态（scope="user"）。支持分页与条数限制（默认 5 条，上限 10 条）。返回内容包含发布者 QQ 与昵称、文字正文、图片（包含原 URL 与已自动下载落盘供多模态视觉模型消费的本地路径）以及评论区摘要（包含评论者信息、内容并标记是否为 AI 自身发表）。',
+          parameters: {
+            scope: {
+              type: 'string',
+              enum: ['friends', 'self', 'user'],
+              description: '查看范围：friends=好友动态流(默认)，self=查看自己发表的动态，user=查看指定好友的动态',
+            },
+            target_qq: {
+              oneOf: [{ type: 'number' }, { type: 'string' }],
+              description: '当 scope 为 user 时必填，指定欲查看的好友 QQ 号。',
+            },
+            limit: {
+              type: 'number',
+              description: '单次拉取动态条数，默认 5 条，硬上限 10 条。',
+            },
+            offset: {
+              type: 'number',
+              description: '分页偏移量（从 0 开始），用于翻页查看更早的动态。',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
+              },
+            ],
+          },
+          async execute(args) {
+            const cfg = typeof options.config === 'function' ? options.config() : options.config;
+            const res = await readQzoneFeeds(args as any, {
+              gateway: options.gateway,
+              mediaManager: options.mediaManager,
+              botQq: cfg?.bot_qq,
+            });
+            return toLosslessJson(res) as any;
+          },
+        })
+      )
+    );
+
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'publish_qzone_feed',
+          description:
+            '向当前登录账号的 QQ 空间发布一条动态（说说）。支持纯文本正文与附加图片列表（支持本地沙箱图片路径、本地文件绝对路径或网络图片 URL）。注意：为防止账号风控，该操作内置冷却时间限制（默认 60 秒），不可高频连续发布。',
+          parameters: {
+            content: {
+              type: 'string',
+              required: true,
+              description: '欲发布的动态正文内容。',
+            },
+            images: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '可选的配图路径或 URL 列表。支持本地绝对路径、沙箱图片路径或网络 HTTP/HTTPS 链接。',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
+              },
+            ],
+          },
+          async execute(args) {
+            const res = await publishQzoneFeed(args as any, {
+              gateway: options.gateway,
+            });
+            return toLosslessJson(res) as any;
+          },
+        })
+      )
+    );
+
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'comment_qzone_feed',
+          description:
+            '在指定的 QQ 空间动态（说说）下方发表评论。需要提供目标动态 ID (feed_id)、目标动态发布者的 QQ 号 (target_qq) 以及评论文本内容。内置 15 秒冷却时间以防账号风控。',
+          parameters: {
+            feed_id: {
+              type: 'string',
+              required: true,
+              description: '目标动态的唯一 ID（来自 read_qzone_feeds 返回结果中的 feed_id）。',
+            },
+            target_qq: {
+              oneOf: [{ type: 'number' }, { type: 'string' }],
+              required: true,
+              description: '目标动态发布者的 QQ 号。',
+            },
+            content: {
+              type: 'string',
+              required: true,
+              description: '欲发表的评论文字内容。',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
+              },
+            ],
+          },
+          async execute(args) {
+            const res = await commentQzoneFeed(args as any, {
+              gateway: options.gateway,
+            });
+            return toLosslessJson(res) as any;
+          },
+        })
+      )
+    );
+
+    unregisters.push(
+      tools.register(
+        defineTool({
+          name: 'delete_qzone_feed',
+          description:
+            '删除当前登录账号自己发布过的某条 QQ 空间动态（说说）。需传入动态 ID (feed_id)。动态将被物理删除，无法撤销。',
+          parameters: {
+            feed_id: {
+              type: 'string',
+              required: true,
+              description: '欲删除的动态唯一 ID（来自 publish_qzone_feed 的返回值或 read_qzone_feeds 的查询结果）。',
+            },
+          },
+          output: {
+            schema: { type: 'json' },
+            render: (_args, value) => [
+              {
+                type: 'text',
+                text: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
+              },
+            ],
+          },
+          async execute(args) {
+            const res = await deleteQzoneFeed(args as any, {
+              gateway: options.gateway,
+            });
+            return toLosslessJson(res) as any;
+          },
         })
       )
     );
