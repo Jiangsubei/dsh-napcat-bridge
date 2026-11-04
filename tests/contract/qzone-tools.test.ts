@@ -483,6 +483,49 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     expect(resB.next_offset).toBeUndefined(); // 无更多时不应返回 next_offset
     assertNoUndefinedDeep(resB);
   });
+
+  it('2.7 空间权限与异常状态码拦截：精准区分好友无动态与无权访问', async () => {
+    // 场景 A: 对方设置了权限拒绝访问 (status=failed, message="对不起，您没有权限查看该空间")
+    const mockGatewayForbidden: any = {
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'failed',
+        retcode: 1200,
+        message: '对不起，您没有权限查看该空间',
+        data: null,
+      }),
+    };
+
+    const resForbidden = await readQzoneFeeds(
+      { scope: 'user', target_qq: '1000000008' },
+      { gateway: mockGatewayForbidden, botQq: '1000000001' }
+    );
+
+    // 必须返回 success: false，绝不能静默误报为 0 条动态！
+    expect(resForbidden.success).toBe(false);
+    expect(resForbidden.message).toContain('对不起，您没有权限查看该空间');
+    expect(resForbidden.feeds).toEqual([]);
+    assertNoUndefinedDeep(resForbidden);
+
+    // 场景 B: 好友流首次请求协议端返回失败 (status=failed)
+    const mockGatewayFeedsFailed: any = {
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'failed',
+        retcode: 1400,
+        message: '网关或协议端错误',
+        data: null,
+      }),
+    };
+
+    const resFeedsFailed = await readQzoneFeeds(
+      { scope: 'friends' },
+      { gateway: mockGatewayFeedsFailed, botQq: '1000000001' }
+    );
+
+    expect(resFeedsFailed.success).toBe(false);
+    expect(resFeedsFailed.message).toContain('网关或协议端错误');
+    expect(resFeedsFailed.feeds).toEqual([]);
+    assertNoUndefinedDeep(resFeedsFailed);
+  });
 });
 
 describe('契约 3: publishQzoneFeed 执行契约与冷却时间拦截', () => {

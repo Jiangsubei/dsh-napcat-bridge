@@ -168,6 +168,19 @@ export async function readQzoneFeeds(
         }
 
         const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_feeds', actionPayload);
+        if (res && (res.status === 'failed' || (res.retcode !== undefined && res.retcode !== 0))) {
+          if (fetchRounds === 1) {
+            const reason = res.message || res.wording || '获取好友动态流失败';
+            return toLosslessJson({
+              success: false,
+              scope,
+              feeds: [],
+              has_more: false,
+              message: `读取空间动态失败: ${reason}`,
+            });
+          }
+          break;
+        }
         const rawFeeds: any[] = res?.data?.feeds || [];
         const protoCursor = res?.data?.next_cursor || res?.data?.attach_info;
         latestNextCursor = protoCursor ? String(protoCursor) : undefined;
@@ -327,6 +340,16 @@ export async function readQzoneFeeds(
       }
 
       const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_msg_list', actionParams);
+      if (res && (res.status === 'failed' || (res.retcode !== undefined && res.retcode !== 0))) {
+        const reason = res.message || res.wording || '获取指定空间说说失败（可能无访问权限或目标空间未开放）';
+        return toLosslessJson({
+          success: false,
+          scope,
+          feeds: [],
+          has_more: false,
+          message: `读取空间动态失败: ${reason}`,
+        });
+      }
       const rawList: any[] = res?.data?.msglist || [];
 
       // 清洗无效条目 (传入空间归属者的 targetUin)
