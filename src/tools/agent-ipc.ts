@@ -54,10 +54,26 @@ export async function queryActiveAgents(
   for (const sid of activeKeys) {
     if (typeof sid !== 'string' || !sid) continue;
 
+    // 过滤已被归档或僵尸的会话
+    if (typeof sessionManager.isSessionArchived === 'function' && sessionManager.isSessionArchived(sid)) {
+      continue;
+    }
+    if (typeof sessionManager.isSessionZombie === 'function' && sessionManager.isSessionZombie(sid)) {
+      continue;
+    }
+
     const peer =
       typeof sessionManager.sessionIdToPeer === 'function'
         ? sessionManager.sessionIdToPeer(sid)
         : sid;
+
+    // 过滤已被新版本替换的陈旧会话，确保只列出当前 Peer 最新的活跃会话
+    if (typeof sessionManager.peerToSessionId === 'function') {
+      const latestSid = sessionManager.peerToSessionId(peer);
+      if (latestSid && latestSid !== sid) {
+        continue;
+      }
+    }
 
     const { type, id } = parsePeerTarget(peer);
     if (params.target_type && params.target_type !== type) {
@@ -116,7 +132,7 @@ export function createListActiveAgentsTool(
 // ==================== 2. create_user_agent (创建/唤醒用户专属 Agent) ====================
 
 export const CREATE_USER_AGENT_DESCRIPTION =
-  '为指定 QQ 用户创建或激活其专属的常驻 Agent 会话，并注入初始指令或使命背景。返回该 Agent 的 Session ID，便于后续通过 send_agent_message 发送内部消息。适用于跨会话委派任务或需要主动私下联系某位用户。';
+  '为指定 QQ 用户创建其专属的常驻 Agent 会话，并注入初始使命指令。注意：如果该用户此前已存在专属 Agent，本工具将直接返回其 Session ID 并提示已存在，不会重复发送消息，后续请直接调用 send_agent_message 进行通信；仅在该用户此前尚无专属 Agent 时，本工具才会真正创建并注入初始消息。';
 
 export async function createUserAgent(
   params: CreateUserAgentParams,
@@ -151,11 +167,35 @@ export async function createUserAgent(
       ? sessionManager.peerToSessionId(peer)
       : `qq-user-${userIdStr}`;
 
+  // 1. 判断目标用户的 Agent 是否已存在（且未归档、未删除）
+  const isArchived =
+    typeof sessionManager.isSessionArchived === 'function' && sessionManager.isSessionArchived(sessionId);
+  const isZombie =
+    typeof sessionManager.isSessionZombie === 'function' && sessionManager.isSessionZombie(sessionId);
+
+  const isExisting =
+    !isArchived &&
+    !isZombie &&
+    ((typeof sessionManager.hasActiveHandle === 'function' && sessionManager.hasActiveHandle(sessionId)) ||
+      (typeof sessionManager.isSessionActiveOrPresent === 'function' &&
+        sessionManager.isSessionActiveOrPresent(sessionId)));
+
+  if (isExisting) {
+    return toLosslessJson({
+      success: true,
+      created: false,
+      session_id: sessionId,
+      peer,
+      user_id: userIdStr,
+      message: `该用户已存在专属 Agent (Session ID: ${sessionId})。未重复注入初始消息。请直接调用 send_agent_message 工具向该 Session ID 发送内部消息。`,
+    });
+  }
+
   try {
-    // 1. 初始化或获取目标用户的常驻 Agent
+    // 2. 目标用户此前无专属 Agent，首次创建并初始化
     await sessionManager.getOrCreateAgent(peer);
 
-    // 2. 注入初始指令与唤醒
+    // 3. 注入初始使命指令与唤醒
     const currentSessionId =
       ctx.sessionId ||
       (ctx.peer && typeof sessionManager.peerToSessionId === 'function'
@@ -166,7 +206,6 @@ export async function createUserAgent(
       peer,
       trigger: 'internal_agent',
       from_session: currentSessionId,
-      reply_to_session: currentSessionId,
       from_user: currentSessionId || 'system',
       from_name: '系统协作总线',
       content: String(params.initial_message).trim(),
@@ -175,15 +214,16 @@ export async function createUserAgent(
 
     return toLosslessJson({
       success: true,
+      created: true,
       session_id: sessionId,
       peer,
       user_id: userIdStr,
-      message: '用户专属 Agent 已就绪并唤醒。',
+      message: '用户专属 Agent 创建成功，已注入初始消息并唤醒。',
     });
   } catch (err: any) {
     return toLosslessJson({
       success: false,
-      error: `创建或唤醒目标 Agent 失败: ${err?.message || String(err)}`,
+      error: `创建目标 Agent 失败: ${err?.message || String(err)}`,
     });
   }
 }
@@ -209,7 +249,10 @@ export function createCreateUserAgentTool(
       render: (_args, value) => {
         const v = value as unknown as CreateUserAgentResult;
         if (!v || !v.success) return [{ type: 'text', text: `创建失败: ${v?.error || '未知错误'}` }];
-        return [{ type: 'text', text: `用户 Agent [${v.session_id}] 创建/唤醒成功。` }];
+        if (v.created === false) {
+          return [{ type: 'text', text: `用户 Agent 已存在 [${v.session_id}]。未重复发消息，请直接调用 send_agent_message 发送内部消息。` }];
+        }
+        return [{ type: 'text', text: `用户 Agent [${v.session_id}] 创建成功并已注入初始消息。` }];
       },
     },
     execute: async (args) => {
@@ -252,6 +295,27 @@ export async function sendAgentMessage(
 
   const targetSessionId = String(params.target_session_id).trim();
 
+  // 1. 目标会话状态校验：过滤已被归档或标记为僵尸/删除的会话
+  if (
+    typeof sessionManager.isSessionArchived === 'function' &&
+    sessionManager.isSessionArchived(targetSessionId)
+  ) {
+    return toLosslessJson({
+      success: false,
+      error: `目标会话 [${targetSessionId}] 已被归档。请调用 list_active_agents 重新查询当前最新活跃会话后重试。`,
+    });
+  }
+
+  if (
+    typeof sessionManager.isSessionZombie === 'function' &&
+    sessionManager.isSessionZombie(targetSessionId)
+  ) {
+    return toLosslessJson({
+      success: false,
+      error: `目标会话 [${targetSessionId}] 已失效或被删除。请调用 list_active_agents 重新查询当前活跃会话后重试。`,
+    });
+  }
+
   // 解析出底层 peer
   const targetPeer =
     typeof sessionManager.sessionIdToPeer === 'function'
@@ -261,6 +325,32 @@ export async function sendAgentMessage(
       : targetSessionId.startsWith('qq-group-')
       ? `group_${targetSessionId.slice(9)}`
       : targetSessionId;
+
+  // 2. 核心校验：确保 targetSessionId 仍是该 Peer 最新的活跃会话，防止向已被轮换的旧版本会话发送消息
+  if (typeof sessionManager.peerToSessionId === 'function') {
+    const latestSid = sessionManager.peerToSessionId(targetPeer);
+    if (latestSid && latestSid !== targetSessionId) {
+      return toLosslessJson({
+        success: false,
+        error: `目标会话 [${targetSessionId}] 已不是最新活跃会话（该对象当前最新活跃会话为: ${latestSid}）。请调用 list_active_agents 重新查询最新状态，并向最新的 Session ID 发送消息。`,
+      });
+    }
+  }
+
+  // 3. 校验目标会话是否处于活跃状态（已创建/已注册 handle）
+  const hasHandle =
+    typeof sessionManager.hasActiveHandle === 'function' &&
+    sessionManager.hasActiveHandle(targetSessionId);
+  const isActiveOrPresent =
+    typeof sessionManager.isSessionActiveOrPresent === 'function' &&
+    sessionManager.isSessionActiveOrPresent(targetSessionId);
+
+  if (!hasHandle && !isActiveOrPresent) {
+    return toLosslessJson({
+      success: false,
+      error: `目标 Agent 会话 [${targetSessionId}] 尚未激活或不存在。若需要为该用户建立专属会话，请先调用 create_user_agent 创建并激活。`,
+    });
+  }
 
   const currentSessionId =
     ctx.sessionId ||

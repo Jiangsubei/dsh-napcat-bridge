@@ -1114,6 +1114,7 @@ export interface CreateUserAgentParams {
 
 export interface CreateUserAgentResult {
   success: boolean;
+  created?: boolean;
   session_id?: string;
   peer?: string;
   user_id?: string;

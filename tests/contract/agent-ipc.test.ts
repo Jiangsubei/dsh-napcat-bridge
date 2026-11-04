@@ -65,6 +65,8 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
         return peer;
       },
       isSessionBusy: (sid: string) => sid === 'qq-group-8000000001',
+      hasActiveHandle: (sid: string) => ['qq-user-1000000001', 'qq-group-8000000001'].includes(sid),
+      isSessionActiveOrPresent: (sid: string) => ['qq-user-1000000001', 'qq-group-8000000001'].includes(sid),
       getOrCreateAgent: async (peer: string) => ({
         session: { id: peer.startsWith('user_') ? `qq-user-${peer.slice(5)}` : `qq-group-${peer.slice(6)}` },
       }),
@@ -105,10 +107,32 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       expect(res.agents[0].session_id).toBe('qq-user-1000000001');
       assertNoUndefinedFields(res);
     });
+
+    it('过滤归档与僵尸契约: 已归档或已标记为僵尸的 Session ID 绝不出现在活跃列表中', async () => {
+      mockSessionManager.isSessionArchived = (sid) => sid === 'qq-user-1000000001';
+      const res = await queryActiveAgents({}, { sessionManager: mockSessionManager });
+      expect(res.success).toBe(true);
+      expect(res.agents).toHaveLength(1);
+      expect(res.agents[0].session_id).toBe('qq-group-8000000001');
+      assertNoUndefinedFields(res);
+    });
+
+    it('轮换旧版本过滤契约: 若某 peer 已发生会话轮换，旧版本 Session ID 绝不出现在活跃列表中', async () => {
+      // 模拟 activeKeys 中残留旧 session，但 peerToSessionId 已指向新版本 _v2
+      mockSessionManager.getActiveHandleKeys = () => ['qq-user-1000000001', 'qq-group-8000000001'][Symbol.iterator]();
+      mockSessionManager.peerToSessionId = (peer) => peer === 'user_1000000001' ? 'qq-user-1000000001_v2' : 'qq-group-8000000001';
+
+      const res = await queryActiveAgents({}, { sessionManager: mockSessionManager });
+      expect(res.success).toBe(true);
+      // 旧版 qq-user-1000000001 被过滤，只剩 qq-group-8000000001
+      expect(res.agents).toHaveLength(1);
+      expect(res.agents[0].session_id).toBe('qq-group-8000000001');
+      assertNoUndefinedFields(res);
+    });
   });
 
   describe('2. create_user_agent 用户常驻 Agent 创建契约', () => {
-    it('为指定用户创建常驻 Agent 并注入初始指令，返回 session_id', async () => {
+    it('首次创建: 用户此前无专属 Agent 时真正创建并注入初始指令，返回 created: true', async () => {
       const res = await createUserAgent(
         {
           user_id: '1000000002',
@@ -121,6 +145,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       );
 
       expect(res.success).toBe(true);
+      expect(res.created).toBe(true);
       expect(res.session_id).toBe('qq-user-1000000002');
       expect(res.peer).toBe('user_1000000002');
       expect(res.user_id).toBe('1000000002');
@@ -132,6 +157,55 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       expect(payload.trigger).toBe('internal_agent');
       expect(payload.content).toBe('主人安排向你询问发票单号，请协助私聊跟进。');
       expect(payload.from_session).toBe('qq-group-8000000001');
+      assertNoUndefinedFields(res);
+    });
+
+    it('已存在抑制契约: 用户已存在活跃 Agent 时返回 created: false 并告知 Session ID，绝不重复发送消息', async () => {
+      // 模拟 1000000001 已存在于 active handles 中
+      mockSessionManager.hasActiveHandle = (sid) => sid === 'qq-user-1000000001';
+
+      const res = await createUserAgent(
+        {
+          user_id: '1000000001',
+          initial_message: '重复消息',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-group-8000000001',
+        }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.created).toBe(false);
+      expect(res.session_id).toBe('qq-user-1000000001');
+      expect(res.message).toContain('已存在专属 Agent');
+      expect(res.message).toContain('send_agent_message');
+
+      // 验证绝不触发 dispatchWakeup，保持消息通道唯一归属于 send_agent_message
+      expect(dispatchedPayloads).toHaveLength(0);
+      assertNoUndefinedFields(res);
+    });
+
+    it('归档或僵尸失效契约: 若已存在记录已被归档或为僵尸，重新走首次创建与注入链路', async () => {
+      mockSessionManager.hasActiveHandle = (sid) => sid === 'qq-user-1000000001';
+      // 标记为已归档
+      mockSessionManager.isSessionArchived = (sid) => sid === 'qq-user-1000000001';
+
+      const res = await createUserAgent(
+        {
+          user_id: '1000000001',
+          initial_message: '重新创建消息',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-group-8000000001',
+        }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.created).toBe(true);
+      expect(res.session_id).toBe('qq-user-1000000001');
+      expect(dispatchedPayloads).toHaveLength(1);
       assertNoUndefinedFields(res);
     });
 
@@ -178,6 +252,73 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
       const res = await sendAgentMessage({ target_session_id: '', message: 'hi' }, { sessionManager: mockSessionManager });
       expect(res.success).toBe(false);
       expect(res.error).toContain('目标 Session ID 不能为空');
+      assertNoUndefinedFields(res);
+    });
+
+    it('旧版本轮换拦截契约: 向已不是最新活跃的旧 Session ID 发送消息时明确报错并告知最新 ID', async () => {
+      // 模拟用户已创建新版本会话 _v2
+      mockSessionManager.peerToSessionId = (peer) =>
+        peer === 'user_1000000001' ? 'qq-user-1000000001_v2' : peer;
+
+      const res = await sendAgentMessage(
+        {
+          target_session_id: 'qq-user-1000000001',
+          message: '向旧会话发送消息',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-group-8000000001',
+        }
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('已不是最新活跃会话');
+      expect(res.error).toContain('qq-user-1000000001_v2');
+      expect(res.error).toContain('list_active_agents');
+      expect(dispatchedPayloads).toHaveLength(0);
+      assertNoUndefinedFields(res);
+    });
+
+    it('归档拦截契约: 向已被归档的 Session ID 发送消息时拦截并提示重新查询', async () => {
+      mockSessionManager.isSessionArchived = (sid) => sid === 'qq-user-1000000001';
+
+      const res = await sendAgentMessage(
+        {
+          target_session_id: 'qq-user-1000000001',
+          message: '向已归档会话发消息',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-group-8000000001',
+        }
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('已被归档');
+      expect(res.error).toContain('list_active_agents');
+      expect(dispatchedPayloads).toHaveLength(0);
+      assertNoUndefinedFields(res);
+    });
+
+    it('未激活拦截契约: 向从未创建或未处于活跃状态的 Session ID 发送消息时拦截并提示调用 create_user_agent', async () => {
+      mockSessionManager.hasActiveHandle = () => false;
+      mockSessionManager.isSessionActiveOrPresent = () => false;
+
+      const res = await sendAgentMessage(
+        {
+          target_session_id: 'qq-user-9999999999',
+          message: '向未激活用户发消息',
+        },
+        {
+          sessionManager: mockSessionManager,
+          sessionId: 'qq-group-8000000001',
+        }
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('尚未激活或不存在');
+      expect(res.error).toContain('create_user_agent');
+      expect(dispatchedPayloads).toHaveLength(0);
       assertNoUndefinedFields(res);
     });
   });
