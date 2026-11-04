@@ -159,8 +159,10 @@ export async function bootDshNapcatBridge(options: BootDshOptions = {}): Promise
   });
 
   // 6. 若要求挂载本插件，则挂载 NapCatBridgePlugin
+  // 必须 await 插件 fiber：Cordis 的插件激活是微任务调度，不等待会出现
+  // “boot 已返回但插件尚未 apply”的装配竞态，导致 ctx 上读不到插件服务。
   if (options.mountPlugin !== false) {
-    ctx.plugin(NapCatBridgePlugin, options.config || {});
+    await (ctx.plugin(NapCatBridgePlugin, options.config || {}) as any);
   }
 
   const dispose = async () => {

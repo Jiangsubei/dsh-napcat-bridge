@@ -1596,7 +1596,7 @@ export function registerAgentTools(
             },
             keyword: { type: 'string', description: '按消息文本内容关键词模糊搜索' },
             sender_name: { type: 'string', description: '按发送者昵称或群名片模糊搜索' },
-            user_id: { type: 'string', description: '按指定发送者 QQ 号精确筛选' },
+            user_id: { type: 'string', description: '按指定发送者 QQ 号精确筛选（内部通讯为 agent:<来源SessionID>，无来源时为 agent:system）' },
             type: {
               type: 'string',
               description:
@@ -1622,6 +1622,12 @@ export function registerAgentTools(
             },
             exclude_self: { type: 'boolean', description: '是否排除机器人自身的发言 (默认 false)' },
             self_only: { type: 'boolean', description: '是否仅查询机器人自身的发言 (默认 false)' },
+            source: {
+              type: 'string',
+              enum: ['qq', 'agent'],
+              description:
+                "按消息来源筛选：'qq' 仅真实 QQ 收发消息，'agent' 仅 Agent 内部协同通讯（sender_name 为「内部通讯」，user_id 形如 agent:<来源SessionID>）。缺省则两者都返回。",
+            },
             limit: { type: 'number', description: '返回最大条数 (默认 20，上限 100)' },
             order: { type: 'string', enum: ['asc', 'desc'], description: "时间排序 (默认 'desc' 倒序，取最新消息)" },
           },

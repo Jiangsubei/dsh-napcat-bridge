@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
 import type { MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
+import { buildInternalMessageRecords } from '../storage/internal-message.js';
 import { encodeSegment } from '../utils/path.js';
 
 // 导出所有下沉子模块中的类型与异常
@@ -476,7 +477,28 @@ export class SessionManager {
       onMessageCreated?: (userMsg: any) => void;
     }
   ): Promise<any> {
-    return this.agentRunner.dispatchWakeup(payload, options);
+    const userMsg = await this.agentRunner.dispatchWakeup(payload, options);
+    // 内部协同通讯：投递成功后落库（目标 + 发送方各一份），供上下文压缩后回溯任务来源
+    if (payload.trigger === 'internal_agent') {
+      this.persistInternalMessages(payload);
+    }
+    return userMsg;
+  }
+
+  /**
+   * 内部通讯落库（幂等）：sender_name='内部通讯'、source='agent'、self=0，
+   * 并提供 user_id='agent:<来源SessionID>' 以便按身份检索。
+   * 落库失败绝不影响消息投递主链路。
+   */
+  private persistInternalMessages(payload: WakeupPayload): void {
+    if (!this.db) return;
+    try {
+      for (const record of buildInternalMessageRecords(payload)) {
+        this.db.saveMessageIfNotExists(record);
+      }
+    } catch (err) {
+      this.ctx.logger?.('dsh-napcat-bridge')?.warn?.('[SessionManager] 内部通讯落库失败:', err);
+    }
   }
 
   // --- 会话寻址与路由核心逻辑 ---

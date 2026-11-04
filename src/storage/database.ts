@@ -210,7 +210,8 @@ export class MessageDatabase {
         fingerprint TEXT,
         recalled INTEGER NOT NULL DEFAULT 0,
         self INTEGER NOT NULL DEFAULT 0,
-        reply_to INTEGER
+        reply_to INTEGER,
+        source TEXT NOT NULL DEFAULT 'qq'
       );
 
       CREATE INDEX IF NOT EXISTS idx_messages_peer_user_time ON messages (peer, user_id, time);
@@ -300,6 +301,14 @@ export class MessageDatabase {
     try {
       this.db.prepare('ALTER TABLE faces ADD COLUMN deleted_at INTEGER').run();
     } catch {}
+
+    // 消息来源列（qq = 真实 QQ 消息 / agent = Agent 内部协同通讯），存量数据默认 'qq'
+    try {
+      this.db.prepare("ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT 'qq'").run();
+    } catch {}
+    try {
+      this.db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_peer_source_time ON messages (peer, source, time)').run();
+    } catch {}
   }
 
   private ensureDb(): DatabaseType {
@@ -314,10 +323,10 @@ export class MessageDatabase {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO messages (
         msg_id, peer, user_id, sender_name, time, type, content, raw,
-        file_id, busid, local_path, fingerprint, recalled, self, reply_to
+        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source
       ) VALUES (
         @msg_id, @peer, @user_id, @sender_name, @time, @type, @content, @raw,
-        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to
+        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source
       )
     `);
 
@@ -337,6 +346,7 @@ export class MessageDatabase {
       recalled: record.recalled ? 1 : 0,
       self: record.self ? 1 : 0,
       reply_to: record.reply_to ?? null,
+      source: record.source ?? 'qq',
     });
   }
 
@@ -370,10 +380,10 @@ export class MessageDatabase {
     const stmt = db.prepare(`
       INSERT OR IGNORE INTO messages (
         msg_id, peer, user_id, sender_name, time, type, content, raw,
-        file_id, busid, local_path, fingerprint, recalled, self, reply_to
+        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source
       ) VALUES (
         @msg_id, @peer, @user_id, @sender_name, @time, @type, @content, @raw,
-        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to
+        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source
       )
     `);
 
@@ -393,6 +403,7 @@ export class MessageDatabase {
       recalled: record.recalled ? 1 : 0,
       self: record.self ? 1 : 0,
       reply_to: record.reply_to ?? null,
+      source: record.source ?? 'qq',
     });
 
     return result.changes > 0;
@@ -492,6 +503,21 @@ export class MessageDatabase {
       conditions.push('self = 1');
     }
 
+    // 9. 消息来源筛选 (qq = 真实 QQ 消息 / agent = Agent 内部协同通讯)
+    if (params.source !== undefined) {
+      const rawSources = Array.isArray(params.source) ? params.source : [params.source];
+      const sources = rawSources.filter(
+        (s): s is 'qq' | 'agent' => s === 'qq' || s === 'agent'
+      );
+      if (sources.length === 1) {
+        conditions.push('source = ?');
+        sqlParams.push(sources[0]);
+      } else if (sources.length > 1) {
+        conditions.push(`source IN (${sources.map(() => '?').join(', ')})`);
+        sqlParams.push(...sources);
+      }
+    }
+
     const whereClause = conditions.join(' AND ');
     const countRow = db.prepare(`SELECT count(*) as count FROM messages WHERE ${whereClause}`).get(...sqlParams) as { count: number };
     const total = countRow ? countRow.count : 0;
@@ -519,6 +545,7 @@ export class MessageDatabase {
       reply_to: row.reply_to !== null && row.reply_to !== undefined ? Number(row.reply_to) : null,
       local_path: row.local_path ?? null,
       file_id: row.file_id ?? null,
+      source: row.source === 'agent' ? 'agent' : 'qq',
     }));
 
     return {

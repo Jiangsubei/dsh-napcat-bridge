@@ -206,6 +206,9 @@ export interface WakeupPayload {
 
 // ==================== 3. 存储表契约 ====================
 
+/** 消息来源：qq = 真实 QQ 收发；agent = Agent 内部协同通讯（QQ 用户不可见） */
+export type MessageSource = 'qq' | 'agent';
+
 export interface MessageRecord {
   msg_id: number;
   peer: string;
@@ -222,6 +225,8 @@ export interface MessageRecord {
   recalled: number; // 0 | 1
   self: number; // 0 | 1
   reply_to: number | null;
+  /** 消息来源，缺省视为 'qq'（存量数据同值） */
+  source?: MessageSource;
 }
 
 // ==================== 4. 工具入参/出参 Schema ====================
@@ -254,6 +259,11 @@ export interface ReadChatHistoryParams {
   exclude_self?: boolean;
   /** 是否仅查询机器人自己发出的消息 (self = 1) */
   self_only?: boolean;
+  /**
+   * 按消息来源筛选: 'qq' = 真实 QQ 消息；'agent' = Agent 内部协同通讯。
+   * 缺省不筛选（两者都返回）。支持单值或数组。
+   */
+  source?: MessageSource | MessageSource[];
   /** 返回最大条数 (默认 20，上限 100) */
   limit?: number;
   /** 时间排序 (默认 'desc' 倒序，取最新消息) */
@@ -273,6 +283,8 @@ export interface ChatMessageSummary {
   reply_to?: number | null;
   local_path?: string | null;
   file_id?: string | null;
+  /** 消息来源: 'qq' | 'agent' */
+  source?: MessageSource;
 }
 
 export interface ReadChatHistoryResult {
