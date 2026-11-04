@@ -4,13 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.2.0-4f46e5)](https://github.com/deepseek-ai/dsh)
 
-DeepSeek Harness × NapCat QQ 接入插件 —— 既是随叫随到的专业助手，也是懂梗斗图、能学黑话、主动冒泡的灵魂群友。让 DSH Agent 在 QQ 群聊 / 私聊中开箱即用。
+DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业助手，也是懂梗斗图、能学黑话、主动冒泡的灵魂群友。让 DSH Agent 在 QQ 群聊 / 私聊中开箱即用。
 
 ---
 
 ## ✨ 功能特性
 
-- **QQ 群聊 / 私聊全场景接入**：基于 NapCat（OneBot 11 协议）反向 WebSocket 连接。
+- **QQ 群聊 / 私聊全场景接入**：基于 OneBot 11 协议标准反向 WebSocket 连接，开箱支持 NapCat 与 SnowLuma 等协议端。
 - **QQ 会话专属预设（`qq-session`）**：构建期与运行时单一真相源（SSOT）自动同步，专属注入 QQ 工具集，彻底杜绝工具向 Web UI 常规会话泄露；深度补齐工作区、跨平台 Shell（Windows pwsh / Linux bash）、Web 搜索、交互提问与技能系统，并抑制多余快照。
 - **用户侧静默出站体系**：遵循「用户侧静默原则」，废除纯文本直接推流；文本出站统一由 **`send_qq_message`** 工具驱动，由模型根据入站标头 `[消息ID: <id>]` 与上下文逻辑自主决定是否引用原消息（`reply_to`）或艾特用户（`at_user`）。
 - **工具与回合解耦（单 Agent 顺手维护）**：执行出站工具不强行终止回合，模型在回复用户后可在同一轮次中顺手调用记忆或表情管理工具，自然平稳终结。
@@ -32,7 +32,9 @@ DeepSeek Harness × NapCat QQ 接入插件 —— 既是随叫随到的专业助
 ### 前置条件
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/dsh) (`npm install -g @deepseek-ai/dsh`) `>= 0.2.0`
-- [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 机器人协议端）
+- **QQ 机器人协议端（二选一）**：
+  - [NapCat](https://github.com/NapNeko/NapCatQQ)（基准环境，经过大量测试验证）
+  - [SnowLuma](https://github.com/snowluma/snowluma)（实测核心功能完全兼容）
 - Node.js `>= 22.12.0`（受 `better-sqlite3` 原生依赖约束，低于此版本无法加载）
 - pnpm `>= 9.0.0`（仅源码安装需要）
 
@@ -70,18 +72,24 @@ dsh plugin --profile web add link:.
 
 ### 配置与运行
 
-1. **NapCat 添加反向 WebSocket 客户端**：
-   在 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）的网络配置中新增反向 WebSocket 客户端：
-   - **URL**：`ws://127.0.0.1:8080/`（插件显式绑定本地环回地址 `127.0.0.1`，端口需与插件 `ws_port` 对齐）
-   - **Token**：**必填项**，必须与插件 `ws_token` 保持一致（严禁留空；若未配置或两端不一致，网关握手将直接拒绝连接并返回 401 Unauthorized）
-   - **心跳周期**：`30000` ms，**重连间隔**：`3000` ms
+1. **协议端添加反向 WebSocket 客户端（二选一）**：
+   - **NapCat 用户**：在 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）的「网络配置」中新增反向 WebSocket 客户端。
+   - **SnowLuma 用户**：在 SnowLuma WebUI（默认 `http://127.0.0.1:5099/`）中新增反向 WebSocket 客户端。
+   - **客户端连接参数（两端完全一致）**：
+     - **URL**：`ws://127.0.0.1:8080/`（插件显式绑定本地环回地址 `127.0.0.1`，端口需与插件 `ws_port` 对齐）
+     - **Token**：**必填项**，必须与插件 `ws_token` 保持一致（严禁留空；若未配置或两端不一致，网关握手将直接拒绝连接并返回 401 Unauthorized）
+     - **心跳周期**：`30000` ms，**重连间隔**：`3000` ms
+
+> [!NOTE]
+> **SnowLuma 兼容性说明**：SnowLuma 在反向 WS 握手、Token 鉴权、文本/图片收发、撤回、历史消息分页漫游、表情回应与戳一戳等核心功能上均已实测 100% 兼容。唯一细节是其 `get_recent_contact` 接口暂返回空列表，因此在服务断线重连瞬间的离线消息主动探测补全会跳过，完全依赖后续到来的实时消息。
+
 2. **启动 DSH**：
    ```bash
    dsh --profile web
    ```
 3. **DSH WebUI 配置核心参数**：
    访问 DSH Web UI（默认 `http://127.0.0.1:3080/`），进入 **dsh-napcat-bridge** 设置卡片（标有 `*` 的为必填字段）：
-   - **`ws_token`**（**核心必填项**）：NapCat 连接鉴权 Token。用于网关握手安全鉴权，留空时网关将直接拒绝连接并产生警告；WebUI 保存时服务端亦会强校验拦截空 Token（返回 400 Bad Request）。
+   - **`ws_token`**（**核心必填项**）：协议端连接鉴权 Token（NapCat / SnowLuma）。用于网关握手安全鉴权，留空时网关将直接拒绝连接并产生警告；WebUI 保存时服务端亦会强校验拦截空 Token（返回 400 Bad Request）。
    - **`bot_qq`**（**核心必填项**）：填写机器人的 QQ 号，用于过滤自身消息防死循环，并作为群聊识别 @机器人的基准。
    - **`admins`**：填写管理员 QQ 号，授权执行斜杠命令。
    - 其他可选参数（人设、主动回复、记忆预算、表情包开关等）按需调整，保存即时热更新生效。
@@ -95,7 +103,7 @@ dsh plugin --profile web add link:.
 ### 1. 连接设置 (Connection)
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `ws_port` | `number` | `8080` | WebSocket 监听端口（NapCat 连接目标，变更时服务热重启） |
+| `ws_port` | `number` | `8080` | WebSocket 监听端口（协议端连接目标，变更时服务热重启） |
 | `ws_token` | `string` | `""` | 连接鉴权 Token（必填项，空着直接拒绝连接） |
 | `bot_qq` | `string` | `""` | 机器人自身 QQ 号（**核心必填项**，自循环防护与识别锚点） |
 | `admins` | `string[]` | `[]` | 管理员 QQ 号白名单（斜杠命令授权） |

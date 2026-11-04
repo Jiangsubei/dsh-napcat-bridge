@@ -1,6 +1,6 @@
 # dsh-napcat-bridge 文档
 
-本项目是 DeepSeek Harness (DSH) 的 NapCat QQ 接入插件。插件通过 OneBot 11 协议对接 NapCat，为 DSH Agent 提供 QQ 群聊与私聊消息收发、专属预设隔离（`qq-session`）、用户侧静默出站体系、两层记忆体系与单 Agent 顺手提炼、表情包管理、黑话学习等能力。
+本项目是 DeepSeek Harness (DSH) 的 OneBot 11 QQ 接入插件。插件基于 OneBot 11 协议标准对接 NapCat 与 SnowLuma 等协议端，为 DSH Agent 提供 QQ 群聊与私聊消息收发、专属预设隔离（`qq-session`）、用户侧静默出站体系、两层记忆体系与单 Agent 顺手提炼、表情包管理、黑话学习等能力。
 
 ---
 

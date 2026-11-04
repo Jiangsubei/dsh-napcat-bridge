@@ -11,7 +11,9 @@
 - **Node.js**: `>= 22.12.0`（推荐 `22.x` LTS）
 - **pnpm**: `>= 9.0.0`
 - **DeepSeek Harness (DSH)**: `>= 0.2.0`
-- **NapCatQQ**: OneBot 11 协议端（桌面版、Shell 版或 Docker 版均可）
+- **QQ 机器人协议端（二选一）**:
+  - [NapCatQQ](https://github.com/NapNeko/NapCatQQ)：基准环境，经过大量测试验证（桌面版、Shell 版或 Docker 版均可）
+  - [SnowLuma](https://github.com/snowluma/snowluma)：实测核心功能完全兼容
 
 ---
 
@@ -58,16 +60,22 @@ dsh plugin --profile web add link:.
 
 ---
 
-## 3. NapCat 反向 WebSocket 配置
+## 3. 协议端反向 WebSocket 配置（NapCat / SnowLuma）
 
-插件启动后会显式绑定到本地环回地址 `127.0.0.1` 监听指定端口（默认 `8080`），作为反向 WebSocket 服务端接收 NapCat 的连接，避免全网暴露带来的安全隐患。
+插件启动后会显式绑定到本地环回地址 `127.0.0.1` 监听指定端口（默认 `8080`），作为反向 WebSocket 服务端接收协议端的连接，避免全网暴露带来的安全隐患。
 
-在 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）的网络配置中，添加反向 WebSocket 客户端：
+根据所使用的协议端，在对应 WebUI 中添加反向 WebSocket 客户端：
+- **NapCat 用户**：在 NapCat WebUI（默认 `http://127.0.0.1:6099/webui`）的「网络配置」中添加反向 WebSocket 客户端；
+- **SnowLuma 用户**：在 SnowLuma WebUI（默认 `http://127.0.0.1:5099/`）中添加反向 WebSocket 客户端。
 
+连接配置参数（两端完全一致）：
 - **URL**: `ws://127.0.0.1:8080/`（需与插件 `ws_port` 端口保持一致）
-- **Token**: **必填**。必须在 NapCat 与插件两端配置完全一致的 Token。若未配置 Token，服务端握手将直接返回 `401 Unauthorized` 拒绝连接。
+- **Token**: **必填**。必须在协议端与插件两端配置完全一致的 Token。若未配置 Token，服务端握手将直接返回 `401 Unauthorized` 拒绝连接。
 - **心跳周期**: `30000` 毫秒
 - **重连间隔**: `3000` 毫秒
+
+> [!NOTE]
+> **SnowLuma 兼容性说明**：SnowLuma 在反向 WS 握手、Token 鉴权、文本/图片收发、撤回、历史消息分页漫游、表情回应与戳一戳等核心链路均已实测 100% 兼容。唯一细节是其 `get_recent_contact` 接口暂返回空列表，因此在服务断线重连瞬间的离线消息主动探测补全会跳过，完全依赖后续到来的实时消息。
 
 保存并启用该反向 WebSocket 客户端。
 
@@ -83,7 +91,7 @@ dsh --profile web
 
 打开浏览器访问 DSH WebUI（默认 `http://127.0.0.1:3080/`），进入设置页面中的 **dsh-napcat-bridge** 设置卡片（前端标注 `*` 为必填项），填写核心参数：
 
-1. **`ws_token`**（**必填项**，标注 `*`）：NapCat 连接鉴权 Token。用于保障反向 WS 网关安全连接；若未配置，服务端启动会输出黄色 Warning 警告并在握手阶段拒绝连接；同时在 WebUI 面板保存时服务端会进行强校验拦截，空 Token 将直接返回 `400 Bad Request` 拒绝保存。
+1. **`ws_token`**（**必填项**，标注 `*`）：协议端连接鉴权 Token（NapCat / SnowLuma）。用于保障反向 WS 网关安全连接；若未配置，服务端启动会输出黄色 Warning 警告并在握手阶段拒绝连接；同时在 WebUI 面板保存时服务端会进行强校验拦截，空 Token 将直接返回 `400 Bad Request` 拒绝保存。
 2. **`bot_qq`**（**必填项**，标注 `*`）：机器人的 QQ 号。用于过滤自身发出的消息（防止死循环）并在群聊中作为判断是否 @机器人 的基准。未配置时控制台会在启动时告警。
 3. **`admins`**：管理员 QQ 号列表（数组），只有列表中的 QQ 号才能在聊天中执行 `/模型`、`/新建`、`/权限` 等管理类斜杠命令。
 4. **`ws_port`**：WebSocket 监听端口，默认为 `8080`（显式绑定本地 `127.0.0.1` 环回接口）。
