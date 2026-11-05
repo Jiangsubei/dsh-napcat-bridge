@@ -7,7 +7,7 @@
  * 覆盖规范:
  * 1. Gateway 动作接入契约: 准确发送 OneBot 11 对应动作与参数 (尤其是 _get_group_notice)
  * 2. 字段清洗与降噪契约: 剥离无用冗余字段，仅向 Agent 暴露高价值核心信息
- * 3. 模糊检索与安全分页契约: 支持 query 匹配与 page/limit 标准分页元数据
+ * 3. 模糊检索与安全分页契约: 支持 query 匹配与 offset/limit 标准分页元数据、确定性排序与连续序号
  * 4. 内存 TTL 缓存契约: 默认命中缓存，no_cache 强制穿透
  * 5. 跨会话查群解耦契约: 允许显式传入 group_id 解除会话硬绑定
  * 6. DSH Lossless JSON 红线契约: 断言所有工具执行结果绝不包含 undefined
@@ -257,15 +257,54 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       assertNoUndefinedFields(res2);
     });
 
-    it('分页逻辑契约: 支持 page 与 limit 分页并生成友好提示语', async () => {
-      const res = await queryFriendList({ page: 1, limit: 2 }, { gateway: mockGateway });
+    it('分页逻辑契约: 支持 offset 与 limit 分页并生成可直接回填的 next_offset', async () => {
+      const res = await queryFriendList({ offset: 0, limit: 2 }, { gateway: mockGateway });
       expect(res.friends).toHaveLength(2);
       expect(res.total).toBe(2);
       expect(res.total_matched).toBe(3);
-      expect(res.total_pages).toBe(2);
+      expect(res.offset).toBe(0);
+      expect(res.limit).toBe(2);
       expect(res.has_more).toBe(true);
-      expect(res.message).toContain('若需继续浏览，请再次调用并传入 page: 2');
+      expect(res.next_offset).toBe(2);
+      expect(res.message).toContain('本次展示序号 1~2');
+      expect(res.message).toContain('继续浏览请传入 offset: 2');
+      expect((res as any).page).toBeUndefined();
+      expect((res as any).total_pages).toBeUndefined();
       assertNoUndefinedFields(res);
+    });
+
+    it('offset 翻页与越界契约: 第二页取余量，越界返回空且给出范围提示', async () => {
+      const resSecond = await queryFriendList({ offset: 2, limit: 2 }, { gateway: mockGateway });
+      expect(resSecond.friends).toHaveLength(1);
+      expect(resSecond.friends[0].user_id).toBe('1000000003');
+      expect(resSecond.offset).toBe(2);
+      expect(resSecond.has_more).toBe(false);
+      expect(resSecond.next_offset).toBeUndefined();
+      expect(resSecond.message).toContain('已展示至最后一页');
+
+      const resOut = await queryFriendList({ offset: 99, limit: 20 }, { gateway: mockGateway });
+      expect(resOut.friends).toHaveLength(0);
+      expect(resOut.offset).toBe(99);
+      expect(resOut.has_more).toBe(false);
+      expect(resOut.message).toContain('超出范围');
+      assertNoUndefinedFields(resOut);
+    });
+
+    it('确定性排序契约: 好友结果按 user_id 数值升序，不受 OneBot 原始顺序影响', async () => {
+      const shuffledGateway = {
+        getFriendList: async () => ({
+          status: 'ok',
+          retcode: 0,
+          data: [
+            { user_id: 1000000003, nickname: 'C' },
+            { user_id: 1000000001, nickname: 'A' },
+            { user_id: 1000000002, nickname: 'B' },
+          ],
+        }),
+      };
+      friendListCache.clearAll();
+      const res = await queryFriendList({}, { gateway: shuffledGateway });
+      expect(res.friends.map((f) => f.user_id)).toEqual(['1000000001', '1000000002', '1000000003']);
     });
 
     it('缓存机制契约: 默认命中内存缓存，no_cache 穿透拉取', async () => {
@@ -308,6 +347,9 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(text).toContain('小爱(助理)');
       expect(text).toContain('1000000002');
       expect(text).toContain('Bob');
+      // 必须有跨页连续的全局序号，便于模型直接换算 offset
+      expect(text).toContain('1. **Alice**');
+      expect(text).toContain('3. **Charlie**');
     });
   });
 
@@ -381,6 +423,33 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(text).toContain('8000000001');
       expect(text).toContain('核心技术交流群');
       expect(text).toContain('88/200');
+      expect(text).toContain('1. **核心技术交流群**');
+    });
+
+    it('分页与确定性排序契约: offset/limit 切片按 group_id 升序并返回 next_offset', async () => {
+      const shuffledGateway = {
+        getGroupList: async () => ({
+          status: 'ok',
+          retcode: 0,
+          data: [
+            { group_id: 8000000003, group_name: 'C群', member_count: 3, max_member_count: 200 },
+            { group_id: 8000000001, group_name: 'A群', member_count: 1, max_member_count: 200 },
+            { group_id: 8000000002, group_name: 'B群', member_count: 2, max_member_count: 200 },
+          ],
+        }),
+      };
+      groupListCache.clearAll();
+      const first = await queryGroupList({ offset: 0, limit: 2 }, { gateway: shuffledGateway });
+      expect(first.groups.map((g) => g.group_id)).toEqual(['8000000001', '8000000002']);
+      expect(first.offset).toBe(0);
+      expect(first.total_matched).toBe(3);
+      expect(first.has_more).toBe(true);
+      expect(first.next_offset).toBe(2);
+
+      const second = await queryGroupList({ offset: 2, limit: 2 }, { gateway: shuffledGateway });
+      expect(second.groups.map((g) => g.group_id)).toEqual(['8000000003']);
+      expect(second.has_more).toBe(false);
+      assertNoUndefinedFields(second);
     });
   });
 

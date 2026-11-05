@@ -58,6 +58,11 @@ import type { NapCatGatewayServer } from '../gateway/server.js';
 import type { MessageWaitRegistry, WaitCollectedMessage } from '../gateway/server.js';
 import type { SerialSender } from '../types/index.js';
 import { classifySendFileSource, detectSendFileType } from './file-source.js';
+import {
+  buildOffsetMessage,
+  normalizeLimit,
+  normalizeOffset,
+} from './pagination.js';
 import { downloadPrivateFile } from './private-file.js';
 import { resolveDshPath } from '../utils/path.js';
 import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
@@ -1005,18 +1010,27 @@ export async function listFaces(
   params: ListFacesParams,
   context?: ToolExecutionContext
 ): Promise<ListFacesResult> {
+  const offset = normalizeOffset(params?.offset);
+  const limit = normalizeLimit(params?.limit, 100, 100);
   const ctx = { ...globalToolContext, ...context };
   if (!ctx.db) {
-    return { faces: [], total: 0 };
+    return {
+      faces: [],
+      total: 0,
+      total_matched: 0,
+      offset,
+      limit,
+      has_more: false,
+      message: '数据库不可用，暂时无法检索表情包。',
+    };
   }
-  const limit = Math.min(Math.max(params?.limit ?? 100, 1), 100);
   const queryRes = ctx.db.queryFaces({
     query: params?.query,
     mood: params?.mood,
     tag: params?.tag,
     untagged: params?.untagged,
     limit,
-    offset: 0,
+    offset,
     enabledOnly: true,
   });
 
@@ -1037,9 +1051,31 @@ export async function listFaces(
     return item;
   });
 
+  const hasMore = offset + faces.length < queryRes.total;
+  const nextOffset = hasMore ? offset + faces.length : undefined;
+  let message: string | undefined;
+  if (queryRes.total === 0) {
+    message = '未找到符合条件的表情包。';
+  } else {
+    message = buildOffsetMessage({
+      offset,
+      returned: faces.length,
+      totalMatched: queryRes.total,
+      hasMore,
+      ...(nextOffset !== undefined ? { nextOffset } : {}),
+      unit: '个表情',
+    });
+  }
+
   const res: ListFacesResult = {
     faces,
-    total: queryRes.total,
+    total: faces.length,
+    total_matched: queryRes.total,
+    offset,
+    limit,
+    has_more: hasMore,
+    ...(nextOffset !== undefined ? { next_offset: nextOffset } : {}),
+    ...(message ? { message } : {}),
   };
 
   return toLosslessJson(res);
@@ -2163,7 +2199,7 @@ export function registerAgentTools(
           defineTool({
             name: 'list_faces',
             description:
-              '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；返回合法 face_id、标签、情绪及本地路径。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
+              '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；结果按收录时间倒序排列，可通过 offset/limit 分页并直接回填 next_offset。返回合法 face_id、标签、情绪及本地路径。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
             parameters: {
               query: {
                 type: 'string',
@@ -2181,9 +2217,13 @@ export function registerAgentTools(
                 type: 'boolean',
                 description: '是否只检索尚未打标的表情（默认 false）。设为 true 可配合读图查看并调用 collect_face 进行补标。',
               },
+              offset: {
+                type: 'number',
+                description: '起始序号偏移，从 0 开始（0 表示第 1 个）。翻页时建议直接传入上次结果的 next_offset。',
+              },
               limit: {
                 type: 'number',
-                description: '返回数量上限 (默认 100，上限 100)',
+                description: '单次返回数量上限 (默认 100，上限 100)',
               },
             },
             output: {
@@ -2191,14 +2231,26 @@ export function registerAgentTools(
               render: (_args, value) => {
                 const v = value as any;
                 if (!v || !Array.isArray(v.faces) || v.faces.length === 0) {
-                  return [{ type: 'text', text: '未找到符合条件的表情包。' }];
+                  return [{ type: 'text', text: v?.message || '未找到符合条件的表情包。' }];
                 }
-                const lines = [`共找到 ${v.total} 个可用表情 (本次返回 ${v.faces.length} 个):`];
-                for (const f of v.faces) {
+                const baseOffset = v.offset ?? 0;
+                const totalMatched = v.total_matched ?? v.total;
+                const lines = [
+                  `共匹配 ${totalMatched} 个可用表情（序号 ${baseOffset + 1}~${baseOffset + v.faces.length}，本次返回 ${v.faces.length} 个）:`,
+                ];
+                for (let i = 0; i < v.faces.length; i++) {
+                  const f = v.faces[i];
                   const moodStr = f.mood ? ` [情绪: ${f.mood}]` : '';
                   const tagStr = f.tags && f.tags.length > 0 ? ` 标签: [${f.tags.join(', ')}]` : ' [无标签]';
                   const pathStr = f.file_path ? ` | 路径: ${f.file_path}` : '';
-                  lines.push(`• ID: ${f.id} (${f.format})${moodStr}${tagStr}${pathStr}`);
+                  lines.push(`${baseOffset + i + 1}. ID: ${f.id} (${f.format})${moodStr}${tagStr}${pathStr}`);
+                }
+                if (v.has_more && v.next_offset !== undefined) {
+                  lines.push(
+                    `\n> 还有 ${totalMatched - baseOffset - v.faces.length} 个未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+                  );
+                } else if (v.message) {
+                  lines.push(`\n> ${v.message}`);
                 }
                 return [{ type: 'text', text: lines.join('\n') }];
               },
@@ -2428,7 +2480,7 @@ export function registerAgentTools(
         defineTool({
           name: 'read_qzone_feeds',
           description:
-            '浏览 QQ 空间动态（说说）。可查看好友动态流（scope="friends"，默认）、自己发表过的动态（scope="self"）或指定好友的动态（scope="user"）。支持分页与条数限制（默认 5 条，上限 10 条）。返回内容包含发布者 QQ 与昵称、文字正文、图片（包含原 URL 与已自动下载落盘供多模态视觉模型消费的本地路径）以及评论区摘要（包含评论者信息、内容并标记是否为 AI 自身发表）。',
+            '浏览 QQ 空间动态（说说）。可查看好友动态流（scope="friends"，默认）、自己发表过的动态（scope="self"）或指定好友的动态（scope="user"）。支持分页与条数限制（默认 5 条，上限 10 条）；好友动态流翻页请优先使用 cursor/next_cursor，offset 仅在未传 cursor 时生效。返回内容包含发布者 QQ 与昵称、文字正文、图片（包含原 URL 与已自动下载落盘供多模态视觉模型消费的本地路径）以及评论区摘要（包含评论者信息、内容并标记是否为 AI 自身发表）。',
           parameters: {
             scope: {
               type: 'string',
@@ -2445,15 +2497,16 @@ export function registerAgentTools(
             },
             offset: {
               type: 'number',
-              description: '分页偏移量（从 0 开始），用于翻页查看更早的动态。',
+              description:
+                '起始偏移量（从 0 开始）。仅用于好友动态流未传 cursor 时，或查看自己/指定好友动态时；好友动态流翻页请优先传 cursor。',
             },
             cursor: {
               type: 'string',
-              description: '上一页返回的 next_cursor 游标。用于原生游标连续翻页。',
+              description: '好友动态流翻页游标（优先于 offset）。原样传入上一页返回的 next_cursor 即可连续翻页。',
             },
             after_feed_id: {
               type: 'string',
-              description: '断点续读动态 ID。指定某条已读动态的 ID，工具将定位并仅返回该条之后的更早动态。',
+              description: '断点续读动态 ID。指定某条已读动态的 ID，工具将定位并仅返回该条之后的更早动态；显式 cursor 模式下不生效。',
             },
           },
           output: {

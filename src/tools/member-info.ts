@@ -16,15 +16,20 @@ import type {
   QueryGroupMemberResult,
 } from '../types/index.js';
 import type { ToolExecutionContext } from './index.js';
+import {
+  buildOffsetMessage,
+  paginateByOffset,
+  sortByNumericId,
+} from './pagination.js';
 
 export type { GroupMemberRawItem, QueryGroupMemberParams, FormattedGroupMember, QueryGroupMemberResult };
 
 export const GROUP_MEMBER_INFO_DESCRIPTION =
-  '查询当前群聊中的成员资料、身份角色（群主/管理员/普通成员）、群头衔及进群时间等官方元数据。用于核实群成员的真实身份、判断某人是否为群主或管理员、了解群成员昵称与名片对应关系，或防范其他群成员冒充身份。支持通过 user_id 精确查询、通过 query 模糊搜索昵称名片，或通过 role 直接筛选群主与管理员列表。仅在群聊中有效。';
+  '查询当前群聊中的成员资料、身份角色（群主/管理员/普通成员）、群头衔及进群时间等官方元数据，结果按 QQ 号升序排列。用于核实群成员的真实身份、判断某人是否为群主或管理员、了解群成员昵称与名片对应关系，或防范其他群成员冒充身份。支持通过 user_id 精确查询、通过 query 模糊搜索昵称名片，或通过 role 直接筛选群主与管理员列表。成员较多时可通过 offset/limit 分页浏览，直接回填返回的 next_offset 即可继续。仅在群聊中有效。';
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 默认 5 分钟缓存
-const DEFAULT_PAGE_LIMIT = 20; // 默认单页返回条数
-const MAX_PAGE_LIMIT = 50; // 单页最大返回条数上限
+const DEFAULT_LIST_LIMIT = 20; // 默认单次返回条数
+const MAX_LIST_LIMIT = 50; // 单次最大返回条数上限
 
 class GroupMemberCachePool {
   private cache = new Map<string, { expires: number; members: GroupMemberRawItem[] }>();
@@ -257,36 +262,40 @@ export async function queryGroupMemberInfo(
     filtered = filtered.filter((m) => m.role === params.role);
   }
 
-  const page = Math.max(1, Math.floor(Number(params.page) || 1));
-  const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(Number(params.limit) || DEFAULT_PAGE_LIMIT)));
+  // 4. 确定性排序：按 user_id 数值升序，保证 offset 序号长期稳定
+  filtered = sortByNumericId(filtered, (m) => m.user_id);
 
-  const totalMatched = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalMatched / limit));
-  const startIndex = (page - 1) * limit;
-  const endIndex = Math.min(startIndex + limit, totalMatched);
-  const sliced = startIndex < totalMatched ? filtered.slice(startIndex, endIndex) : [];
-  const hasMore = page < totalPages;
-  const formattedMembers = sliced.map(formatMemberInfo);
+  // 5. 安全切片
+  const page = paginateByOffset(filtered, { offset: params.offset, limit: params.limit }, {
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxLimit: MAX_LIST_LIMIT,
+  });
+  const formattedMembers = page.items.map(formatMemberInfo);
 
   let message: string | undefined;
-  if (totalMatched === 0) {
+  if (page.totalMatched === 0) {
     message = '未找到符合条件的群成员。';
-  } else if (hasMore) {
-    message = `当前展示第 ${startIndex + 1}~${endIndex} 位（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。若需继续浏览，请再次调用并传入 page: ${page + 1}。`;
-  } else if (totalPages > 1) {
-    message = `已展示至最后一页（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。`;
+  } else {
+    message = buildOffsetMessage({
+      offset: page.offset,
+      returned: page.returned,
+      totalMatched: page.totalMatched,
+      hasMore: page.hasMore,
+      ...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+      unit: '人',
+    });
   }
 
   return toLosslessJson({
     success: true,
     group_id: groupId,
     members: formattedMembers,
-    total: formattedMembers.length,
-    total_matched: totalMatched,
-    page,
-    limit,
-    total_pages: totalPages,
-    has_more: hasMore,
+    total: page.returned,
+    total_matched: page.totalMatched,
+    offset: page.offset,
+    limit: page.limit,
+    has_more: page.hasMore,
+    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -327,13 +336,13 @@ export function createGetGroupMemberInfoTool(
         type: 'boolean',
         description: '是否强制穿透缓存刷新群成员数据 (默认 false)',
       },
-      page: {
+      offset: {
         type: 'number',
-        description: '分页页码，从 1 开始。默认为第 1 页。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
       },
       limit: {
         type: 'number',
-        description: '每页返回的群成员数量 (默认 20，单次上限 50)。',
+        description: '单次返回的群成员数量 (默认 20，单次上限 50)。',
       },
     },
     output: {
@@ -347,16 +356,19 @@ export function createGetGroupMemberInfoTool(
         if (v.total === 0) {
           return [{ type: 'text', text: v.message || '未找到符合条件的群成员。' }];
         }
-        const pageInfo = v.page && v.total_pages ? ` (第 ${v.page}/${v.total_pages} 页)` : '';
-        const lines = [`### 群成员查询结果${pageInfo} (共 ${v.total_matched ?? v.total} 人)`];
-        for (const m of v.members) {
+        const baseOffset = v.offset ?? 0;
+        const totalMatched = v.total_matched ?? v.total;
+        const pageInfo = `（序号 ${baseOffset + 1}~${baseOffset + v.total} / 共 ${totalMatched} 人）`;
+        const lines = [`### 群成员查询结果${pageInfo}`];
+        for (let i = 0; i < v.members.length; i++) {
+          const m = v.members[i];
           lines.push(
-            `- **${m.display_name}** (QQ: ${m.user_id}) | 身份: ${m.role} | 头衔: ${m.title} | 入群: ${m.join_time} | 状态: ${m.status}`
+            `${baseOffset + i + 1}. **${m.display_name}** (QQ: ${m.user_id}) | 身份: ${m.role} | 头衔: ${m.title} | 入群: ${m.join_time} | 状态: ${m.status}`
           );
         }
-        if (v.has_more && v.page) {
+        if (v.has_more && v.next_offset !== undefined) {
           lines.push(
-            `\n> 提示：当前还有未展示的成员（共 ${v.total_pages} 页）。如需继续浏览，可再次调用本工具并传入 page: ${v.page + 1}。`
+            `\n> 还有 ${totalMatched - baseOffset - v.total} 人未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
           );
         } else if (v.message) {
           lines.push(`\n> ${v.message}`);

@@ -130,6 +130,77 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(JSON.parse(serialized)).toEqual(resQuery);
   });
 
+  it('契约 1.2: list_faces 支持 offset 分页并返回 next_offset', async () => {
+    for (let i = 1; i <= 5; i++) {
+      db.insertFace({
+        id: `face_page_0${i}`,
+        file_path: `/secret/path/page_${i}.png`,
+        md5: `md5_page_${i}`,
+        source: 'manual',
+        tags: ['分页'],
+        enabled: true,
+        size: 100,
+        format: 'png',
+      });
+    }
+
+    const first = await listFaces({ offset: 0, limit: 2 }, { db });
+    expect(first.faces).toHaveLength(2);
+    expect(first.total).toBe(2);
+    expect(first.total_matched).toBe(5);
+    expect(first.offset).toBe(0);
+    expect(first.limit).toBe(2);
+    expect(first.has_more).toBe(true);
+    expect(first.next_offset).toBe(2);
+
+    const second = await listFaces({ offset: 2, limit: 2 }, { db });
+    expect(second.faces).toHaveLength(2);
+    expect(second.offset).toBe(2);
+    expect(second.has_more).toBe(true);
+    expect(second.next_offset).toBe(4);
+    expect(second.faces.map((f) => f.id)).not.toEqual(first.faces.map((f) => f.id));
+
+    const last = await listFaces({ offset: 4, limit: 2 }, { db });
+    expect(last.faces).toHaveLength(1);
+    expect(last.has_more).toBe(false);
+    expect(last.next_offset).toBeUndefined();
+
+    // 负 offset / 超限 limit 安全收敛
+    const clamped = await listFaces({ offset: -3, limit: 999 }, { db });
+    expect(clamped.offset).toBe(0);
+    expect(clamped.limit).toBe(100);
+    expect(clamped.faces).toHaveLength(5);
+  });
+
+  it('契约 1.3: list_faces Render 使用跨页连续的全局序号', async () => {
+    for (let i = 1; i <= 3; i++) {
+      db.insertFace({
+        id: `face_ordinal_0${i}`,
+        file_path: `/secret/path/ordinal_${i}.png`,
+        md5: `md5_ordinal_${i}`,
+        source: 'manual',
+        tags: [`序号${i}`],
+        enabled: true,
+        size: 100,
+        format: 'png',
+      });
+    }
+
+    const mockTools = { register: vi.fn() };
+    registerAgentTools({ tools: mockTools } as any, {
+      db,
+      mediaManager: {} as any,
+      config: () => ({ face_enabled: true } as any),
+    } as any);
+    const listTool = mockTools.register.mock.calls.map((c) => c[0]).find((t) => t.name === 'list_faces');
+
+    const res = await listFaces({ offset: 1, limit: 2 }, { db });
+    const text = (listTool as any).output.render({}, res)[0].text;
+    expect(text).toContain('2. ');
+    expect(text).toContain('3. ');
+    expect(text).not.toContain('1. ');
+  });
+
   it('契约 2: send_face 构造 sub_type=1 并接入串行队列与更新使用频次', async () => {
     const testImgPath = path.join(faceDir, 'doge.png');
     fs.writeFileSync(testImgPath, 'fake-doge-image-binary');

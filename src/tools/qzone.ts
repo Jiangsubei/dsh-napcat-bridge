@@ -155,8 +155,9 @@ export async function readQzoneFeeds(
       const MAX_FETCH_ROUNDS = 3;
 
       // 当未传入显式游标时（默认拉取、offset 翻页或 after_feed_id 续读），启用自动多页聚合补齐 (Fill-to-Limit)；
-      // 若调用方传入了显式 cursor，则遵守原生游标单页单步契约，不跨游标侵入
+      // 若调用方传入了显式 cursor，则遵守原生游标单页单步契约，不跨游标侵入，且 offset 不参与切片（cursor 优先）
       const isExplicitCursor = Boolean(params.cursor);
+      const effectiveOffset = isExplicitCursor ? 0 : offset;
 
       while (fetchRounds < MAX_FETCH_ROUNDS) {
         fetchRounds++;
@@ -201,8 +202,8 @@ export async function readQzoneFeeds(
         }
 
         // 计算当前有效条数是否已满足本次请求所需
-        let targetNeeded = offset + limit;
-        if (params.after_feed_id) {
+        let targetNeeded = effectiveOffset + limit;
+        if (params.after_feed_id && !isExplicitCursor) {
           const targetId = params.after_feed_id.trim();
           const foundIdx = validFeeds.findIndex(
             (f) => (f.tid && f.tid === targetId) || (f.key && f.key === targetId)
@@ -224,9 +225,9 @@ export async function readQzoneFeeds(
         currentCursor = latestNextCursor;
       }
 
-      // 支持 after_feed_id 续读定位
-      let startIndex = offset;
-      if (params.after_feed_id) {
+      // 支持 after_feed_id 续读定位（显式 cursor 模式下以 cursor 为准，不叠加 offset / after_feed_id）
+      let startIndex = effectiveOffset;
+      if (params.after_feed_id && !isExplicitCursor) {
         const targetId = params.after_feed_id.trim();
         const foundIdx = validFeeds.findIndex(
           (f) => (f.tid && f.tid === targetId) || (f.key && f.key === targetId)

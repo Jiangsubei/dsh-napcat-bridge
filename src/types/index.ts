@@ -365,9 +365,9 @@ export interface QueryGroupMemberParams {
   role?: 'owner' | 'admin' | 'member' | 'all';
   /** 是否强制穿透缓存刷新群成员数据 (默认 false) */
   no_cache?: boolean;
-  /** 分页页码，从 1 开始 (默认 1) */
-  page?: number;
-  /** 每页返回数量 (默认 20，范围 1~50) */
+  /** 起始序号偏移，从 0 开始 (默认 0) */
+  offset?: number;
+  /** 单次返回数量 (默认 20，范围 1~50) */
   limit?: number;
 }
 
@@ -391,10 +391,10 @@ export interface QueryGroupMemberResult {
   members: FormattedGroupMember[];
   total: number;
   total_matched?: number;
-  page?: number;
+  offset?: number;
   limit?: number;
-  total_pages?: number;
   has_more?: boolean;
+  next_offset?: number;
   error?: string;
   message?: string;
 }
@@ -582,12 +582,21 @@ export interface ListFacesParams {
   tag?: string;
   mood?: string;
   untagged?: boolean;
+  offset?: number;
   limit?: number;
 }
 
 export interface ListFacesResult {
   faces: FaceSummaryItem[];
+  /** 本次实际返回条数 */
   total: number;
+  /** 过滤后匹配的总条数 */
+  total_matched: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  next_offset?: number;
+  message?: string;
 }
 
 export interface SendFaceParams {
@@ -1001,7 +1010,7 @@ export interface FriendItem {
 
 export interface GetFriendListParams {
   query?: string;
-  page?: number;
+  offset?: number;
   limit?: number;
   no_cache?: boolean;
 }
@@ -1011,10 +1020,10 @@ export interface GetFriendListResult {
   friends: FriendItem[];
   total: number;
   total_matched: number;
-  page: number;
+  offset: number;
   limit: number;
-  total_pages: number;
   has_more: boolean;
+  next_offset?: number;
   message?: string;
   error?: string;
 }
@@ -1031,7 +1040,7 @@ export interface GroupItem {
 
 export interface GetGroupListParams {
   query?: string;
-  page?: number;
+  offset?: number;
   limit?: number;
   no_cache?: boolean;
 }
@@ -1041,10 +1050,10 @@ export interface GetGroupListResult {
   groups: GroupItem[];
   total: number;
   total_matched: number;
-  page: number;
+  offset: number;
   limit: number;
-  total_pages: number;
   has_more: boolean;
+  next_offset?: number;
   message?: string;
   error?: string;
 }

@@ -320,6 +320,13 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     expect(resCursor.feeds[0].feed_id).toBe('tid_page_2_item_1');
     expect(resCursor.next_cursor).toBe('cursor_page_2');
 
+    // 1.1 cursor 优先：显式传入 cursor 时 offset 不得参与切片
+    const resCursorWithOffset = await readQzoneFeeds(
+      { scope: 'friends', cursor: 'cursor_page_1', limit: 5, offset: 5 },
+      { gateway: mockGateway }
+    );
+    expect(resCursorWithOffset.feeds[0].feed_id).toBe('tid_page_2_item_1');
+
     // 2. 验证 after_feed_id 续读定位：指定 after_feed_id: 'tid_target'，跳过前面两条，从后面的开始切片
     const resAfter = await readQzoneFeeds(
       { scope: 'friends', after_feed_id: 'tid_target', limit: 2 },

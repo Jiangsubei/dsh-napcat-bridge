@@ -67,7 +67,7 @@
 
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
-| `list_faces` | 在机器人本地表情库中检索可用的表情包。支持按情绪（mood）、标签（tag）或自由关键词（query）查验可用库存，返回合法 `face_id`、标签、情绪及本地路径。 | `query` (string, 综合模糊检索，同时匹配标签与情绪)<br>`mood` (string, 按情绪筛选，支持模糊包含匹配)<br>`tag` (string, 按画面元素筛选，支持模糊包含匹配)<br>`untagged` (boolean, 是否只查未打标表情)<br>`limit` (number: 默认 100) |
+| `list_faces` | 在机器人本地表情库中检索可用的表情包。支持按情绪（mood）、标签（tag）或自由关键词（query）查验可用库存；结果按收录时间倒序排列，支持 offset/limit 分页。返回合法 `face_id`、标签、情绪及本地路径。 | `query` (string, 综合模糊检索，同时匹配标签与情绪)<br>`mood` (string, 按情绪筛选，支持模糊包含匹配)<br>`tag` (string, 按画面元素筛选，支持模糊包含匹配)<br>`untagged` (boolean, 是否只查未打标表情)<br>`offset` (number: 起始序号偏移，默认 0，翻页直接回填 `next_offset`)<br>`limit` (number: 默认 100，上限 100) |
 | `send_face` | 根据表情 ID 将一张本地表情包作为独立表情消息发送到聊天中。用于表达情绪、接梗斗图。 | `face_id` (string, 必填: 目标表情 ID，来自 `list_faces` 结果) |
 | `collect_face` | 将聊天中的图片收录入本地表情库，并打上初始标签与情绪。用于用户要求“把这图存成表情”或聊天中出现好梗图时。 | `tags` (string[], 必填: 画面内容与文字标签列表)<br>`mood` (string, 必填: 情绪与语境意图)<br>`message_id` (number, 可选: 目标消息 ID，默认绑定当前入站消息) |
 | `manage_faces` | 管理与维护本地表情包库：更新已有表情标签/情绪、删除表情、查询存储配额占用、或按 LRU 淘汰冷门表情。 | `action` (string, 必填: `update`/`delete`/`query_quota`/`evict`)<br>`face_id` (string, update 或 delete 时必填)<br>`tags` (string[], update 时可选)<br>`mood` (string, update 时可选)<br>`count` (number, evict 时可选淘汰数量) |
@@ -78,7 +78,7 @@
 
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
-| `get_group_member_info` | 查询当前群聊的成员身份与名片信息（包含 QQ 号、群名片、昵称、角色 owner/admin/member 与加群时间）。内置 5 分钟 TTL 本地缓存池。**仅限群聊调用**。 | `user_id` (string \| number, 可选: 目标成员 QQ 号，精确查询)<br>`query` (string, 可选: 按群名片或昵称模糊匹配搜索)<br>`role` (string, 可选: 按角色筛选 `owner`/`admin`/`member`)<br>`no_cache` (boolean, 可选: 强制穿透缓存刷新) |
+| `get_group_member_info` | 查询当前群聊的成员身份与名片信息（包含 QQ 号、群名片、昵称、角色 owner/admin/member 与加群时间），结果按 QQ 号升序排列。内置 5 分钟 TTL 本地缓存池，支持 offset/limit 分页。**仅限群聊调用**。 | `user_id` (string \| number, 可选: 目标成员 QQ 号，精确查询)<br>`query` (string, 可选: 按群名片或昵称模糊匹配搜索)<br>`role` (string, 可选: 按角色筛选 `owner`/`admin`/`member`)<br>`no_cache` (boolean, 可选: 强制穿透缓存刷新)<br>`offset` (number: 起始序号偏移，默认 0，翻页直接回填 `next_offset`)<br>`limit` (number: 默认 20，上限 50) |
 
 ---
 
@@ -114,6 +114,24 @@
 | `send_agent_message` | 向指定 Session ID 的目标 Agent 发送内部协作消息（布置任务、同步上下文或回传成果）。目标会话必须已创建并激活；未激活时先调用 `create_target_agent`。协作遵循「回执即止」：被派发方回执一次即可，发起方收到回执后若无新的明确要求不再回复确认、致谢或追问。 | `target_session_id` (string, 必填: 形如 `qq-user-1000000001` 或 `qq-group-8000000001`)<br>`message` (string, 必填: 内部协作内容) |
 
 ---
+
+---
+
+### 1.11 社交关系链与 QQ 空间工具
+
+好友 / 群 / 群成员列表统一采用 `offset + limit` 分页：`offset` 从 0 开始，作用于过滤后的结果集；翻页时直接回填返回的 `next_offset` 即可。渲染结果带跨页连续的全局序号，便于模型直接换算偏移量。
+
+| 工具名称 | 功能描述 | 关键参数 |
+|---|---|---|
+| `get_friend_list` | 查询机器人 QQ 好友列表，按 QQ 号升序排列，支持昵称/备注模糊搜索。 | `query` (string, 可选)<br>`offset` (number: 默认 0)<br>`limit` (number: 默认 20，上限 50)<br>`no_cache` (boolean, 可选) |
+| `get_group_list` | 查询机器人已加入的群聊列表，按群号升序排列，支持群名/群备注模糊搜索。 | `query` (string, 可选)<br>`offset` (number: 默认 0)<br>`limit` (number: 默认 20，上限 50)<br>`no_cache` (boolean, 可选) |
+| `get_user_profile` | 查询任意 QQ 用户的公开资料卡。 | `user_id` (string \| number, 必填) |
+| `get_group_info` | 查询指定群的基础信息与元数据。 | `group_id` (string \| number, 必填) |
+| `get_group_notice` | 查询指定群的历史公告列表。 | `group_id` (string \| number, 必填) |
+| `read_qzone_feeds` | 浏览 QQ 空间动态。好友动态流翻页**优先使用 `cursor`/`next_cursor`**；`offset` 仅在未传 `cursor` 时生效，查看自己/指定好友动态时直接映射底层位置偏移。 | `scope` (string: `friends` / `self` / `user`)<br>`target_qq` (string \| number, scope=user 时必填)<br>`limit` (number: 默认 5，上限 10)<br>`cursor` (string, 好友流翻页游标，优先于 offset)<br>`offset` (number, 兼容路径)<br>`after_feed_id` (string, 断点续读) |
+| `publish_qzone_feed` | 发布一条 QQ 空间动态（内置 60 秒冷却）。 | `content` (string, 必填)<br>`images` (string[], 可选) |
+| `comment_qzone_feed` | 评论指定 QQ 空间动态（内置 15 秒冷却）。 | `feed_id` (string, 必填)<br>`target_qq` (string \| number, 必填)<br>`content` (string, 必填) |
+| `delete_qzone_feed` | 删除自己发布过的 QQ 空间动态。 | `feed_id` (string, 必填) |
 
 ---
 

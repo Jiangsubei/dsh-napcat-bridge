@@ -34,12 +34,19 @@ import type {
 } from '../types/index.js';
 import type { ToolExecutionContext } from './index.js';
 import { toLosslessJson } from './member-info.js';
+import {
+  buildOffsetMessage,
+  normalizeLimit,
+  normalizeOffset,
+  paginateByOffset,
+  sortByNumericId,
+} from './pagination.js';
 
 export { toLosslessJson };
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 默认 5 分钟缓存
-const DEFAULT_PAGE_LIMIT = 20;
-const MAX_PAGE_LIMIT = 50;
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 50;
 
 /**
  * 内存 TTL 缓存池基类
@@ -77,12 +84,14 @@ export const groupListCache = new MemoryCachePool<any[]>();
 // ==================== 1. 好友列表查询 (get_friend_list) ====================
 
 export const GET_FRIEND_LIST_DESCRIPTION =
-  '分页查询当前机器人的 QQ 好友列表。支持通过 query 关键词模糊搜索好友的昵称或备注名。结果包含 QQ 号、昵称、备注、个性签名、性别、年龄及 QQ 等级等核心字段。用于查找好友 QQ、核对备注或寻找特定联系人。';
+  '按 offset 分页查询当前机器人的 QQ 好友列表，结果按 QQ 号升序排列。支持通过 query 关键词模糊搜索好友的昵称或备注名。结果包含 QQ 号、昵称、备注、个性签名、性别、年龄及 QQ 等级等核心字段。用于查找好友 QQ、核对备注或寻找特定联系人。翻页时直接回填返回的 next_offset 即可。';
 
 export async function queryFriendList(
   params: GetFriendListParams,
   ctx: ToolExecutionContext
 ): Promise<GetFriendListResult> {
+  const offset = normalizeOffset(params?.offset);
+  const limit = normalizeLimit(params?.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   const gateway = ctx.gateway;
   if (!gateway) {
     return toLosslessJson({
@@ -90,9 +99,8 @@ export async function queryFriendList(
       friends: [],
       total: 0,
       total_matched: 0,
-      page: 1,
-      limit: DEFAULT_PAGE_LIMIT,
-      total_pages: 1,
+      offset,
+      limit,
       has_more: false,
       error: 'QQ 网关未连接或离线，暂时无法查询好友列表。',
     });
@@ -118,9 +126,8 @@ export async function queryFriendList(
           friends: [],
           total: 0,
           total_matched: 0,
-          page: 1,
-          limit: DEFAULT_PAGE_LIMIT,
-          total_pages: 1,
+          offset,
+          limit,
           has_more: false,
           error: `获取好友列表失败: ${res?.message || 'OneBot 响应异常'}`,
         });
@@ -131,9 +138,8 @@ export async function queryFriendList(
         friends: [],
         total: 0,
         total_matched: 0,
-        page: 1,
-        limit: DEFAULT_PAGE_LIMIT,
-        total_pages: 1,
+        offset,
+        limit,
         has_more: false,
         error: `调用好友列表接口发生异常: ${err?.message || String(err)}`,
       });
@@ -160,34 +166,38 @@ export async function queryFriendList(
     });
   }
 
-  // 3. 安全分页
-  const page = Math.max(1, Math.floor(Number(params.page) || 1));
-  const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(Number(params.limit) || DEFAULT_PAGE_LIMIT)));
-  const totalMatched = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalMatched / limit));
-  const startIndex = (page - 1) * limit;
-  const endIndex = Math.min(startIndex + limit, totalMatched);
-  const sliced = startIndex < totalMatched ? filtered.slice(startIndex, endIndex) : [];
-  const hasMore = page < totalPages;
+  // 3. 确定性排序：按 user_id 数值升序，保证 offset 序号长期稳定
+  filtered = sortByNumericId(filtered, (f) => f.user_id);
+
+  // 4. 安全切片
+  const page = paginateByOffset(filtered, { offset, limit }, {
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxLimit: MAX_LIST_LIMIT,
+  });
 
   let message: string | undefined;
-  if (totalMatched === 0) {
+  if (page.totalMatched === 0) {
     message = '未找到符合条件的好友。';
-  } else if (hasMore) {
-    message = `当前展示第 ${startIndex + 1}~${endIndex} 位（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。若需继续浏览，请再次调用并传入 page: ${page + 1}。`;
-  } else if (totalPages > 1) {
-    message = `已展示至最后一页（第 ${page}/${totalPages} 页，共 ${totalMatched} 人）。`;
+  } else {
+    message = buildOffsetMessage({
+      offset: page.offset,
+      returned: page.returned,
+      totalMatched: page.totalMatched,
+      hasMore: page.hasMore,
+      ...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+      unit: '人',
+    });
   }
 
   return toLosslessJson({
     success: true,
-    friends: sliced,
-    total: sliced.length,
-    total_matched: totalMatched,
-    page,
-    limit,
-    total_pages: totalPages,
-    has_more: hasMore,
+    friends: page.items,
+    total: page.returned,
+    total_matched: page.totalMatched,
+    offset: page.offset,
+    limit: page.limit,
+    has_more: page.hasMore,
+    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -203,13 +213,13 @@ export function createGetFriendListTool(
         type: 'string',
         description: '模糊搜索关键词，匹配好友昵称或备注名 (不区分大小写)',
       },
-      page: {
+      offset: {
         type: 'number',
-        description: '分页页码，从 1 开始。默认为第 1 页。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
       },
       limit: {
         type: 'number',
-        description: '每页返回条数 (默认 20，单次上限 50)。',
+        description: '单次返回条数 (默认 20，单次上限 50)。',
       },
       no_cache: {
         type: 'boolean',
@@ -223,14 +233,19 @@ export function createGetFriendListTool(
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
         if (v.total === 0) return [{ type: 'text', text: v.message || '未找到符合条件的好友。' }];
         const lines: string[] = [
-          `### 好友列表查询结果 (第 ${v.page}/${v.total_pages} 页，匹配 ${v.total_matched} 人，本页展示 ${v.total} 人)`,
+          `### 好友列表查询结果（序号 ${v.offset + 1}~${v.offset + v.total} / 共 ${v.total_matched} 人）`,
         ];
-        for (const f of v.friends) {
+        for (let i = 0; i < v.friends.length; i++) {
+          const f = v.friends[i];
           const remarkPart = f.remark ? ` (备注: ${f.remark})` : '';
-          lines.push(`- **${f.nickname}**${remarkPart} | QQ: \`${f.user_id}\``);
+          lines.push(`${v.offset + i + 1}. **${f.nickname}**${remarkPart} | QQ: \`${f.user_id}\``);
         }
-        if (v.has_more) {
-          lines.push(`\n> 提示：当前还有未展示的好友。可再次调用本工具并传入 \`page: ${v.page + 1}\` 继续浏览。`);
+        if (v.has_more && v.next_offset !== undefined) {
+          lines.push(
+            `\n> 还有 ${v.total_matched - v.offset - v.total} 人未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+          );
+        } else if (v.message) {
+          lines.push(`\n> ${v.message}`);
         }
         return [{ type: 'text', text: lines.join('\n') }];
       },
@@ -245,12 +260,14 @@ export function createGetFriendListTool(
 // ==================== 2. 群聊列表查询 (get_group_list) ====================
 
 export const GET_GROUP_LIST_DESCRIPTION =
-  '分页查询当前机器人加入的 QQ 群聊列表。支持通过 query 关键词模糊搜索群名称或群备注。结果包含群号、群名称、群备注、群人数、人数上限、群公告摘要及建群时间等元数据。用于定位特定群聊、核对群号。';
+  '按 offset 分页查询当前机器人加入的 QQ 群聊列表，结果按群号升序排列。支持通过 query 关键词模糊搜索群名称或群备注。结果包含群号、群名称、群备注、群人数、人数上限、群公告摘要及建群时间等元数据。用于定位特定群聊、核对群号。翻页时直接回填返回的 next_offset 即可。';
 
 export async function queryGroupList(
   params: GetGroupListParams,
   ctx: ToolExecutionContext
 ): Promise<GetGroupListResult> {
+  const offset = normalizeOffset(params?.offset);
+  const limit = normalizeLimit(params?.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   const gateway = ctx.gateway;
   if (!gateway) {
     return toLosslessJson({
@@ -258,9 +275,8 @@ export async function queryGroupList(
       groups: [],
       total: 0,
       total_matched: 0,
-      page: 1,
-      limit: DEFAULT_PAGE_LIMIT,
-      total_pages: 1,
+      offset,
+      limit,
       has_more: false,
       error: 'QQ 网关未连接或离线，暂时无法查询群聊列表。',
     });
@@ -286,9 +302,8 @@ export async function queryGroupList(
           groups: [],
           total: 0,
           total_matched: 0,
-          page: 1,
-          limit: DEFAULT_PAGE_LIMIT,
-          total_pages: 1,
+          offset,
+          limit,
           has_more: false,
           error: `获取群聊列表失败: ${res?.message || 'OneBot 响应异常'}`,
         });
@@ -299,9 +314,8 @@ export async function queryGroupList(
         groups: [],
         total: 0,
         total_matched: 0,
-        page: 1,
-        limit: DEFAULT_PAGE_LIMIT,
-        total_pages: 1,
+        offset,
+        limit,
         has_more: false,
         error: `调用群列表接口发生异常: ${err?.message || String(err)}`,
       });
@@ -328,34 +342,38 @@ export async function queryGroupList(
     });
   }
 
-  // 3. 安全分页
-  const page = Math.max(1, Math.floor(Number(params.page) || 1));
-  const limit = Math.min(MAX_PAGE_LIMIT, Math.max(1, Math.floor(Number(params.limit) || DEFAULT_PAGE_LIMIT)));
-  const totalMatched = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalMatched / limit));
-  const startIndex = (page - 1) * limit;
-  const endIndex = Math.min(startIndex + limit, totalMatched);
-  const sliced = startIndex < totalMatched ? filtered.slice(startIndex, endIndex) : [];
-  const hasMore = page < totalPages;
+  // 3. 确定性排序：按 group_id 数值升序，保证 offset 序号长期稳定
+  filtered = sortByNumericId(filtered, (g) => g.group_id);
+
+  // 4. 安全切片
+  const page = paginateByOffset(filtered, { offset, limit }, {
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxLimit: MAX_LIST_LIMIT,
+  });
 
   let message: string | undefined;
-  if (totalMatched === 0) {
+  if (page.totalMatched === 0) {
     message = '未找到符合条件的群聊。';
-  } else if (hasMore) {
-    message = `当前展示第 ${startIndex + 1}~${endIndex} 个（第 ${page}/${totalPages} 页，共 ${totalMatched} 个群）。若需继续浏览，请再次调用并传入 page: ${page + 1}。`;
-  } else if (totalPages > 1) {
-    message = `已展示至最后一页（第 ${page}/${totalPages} 页，共 ${totalMatched} 个群）。`;
+  } else {
+    message = buildOffsetMessage({
+      offset: page.offset,
+      returned: page.returned,
+      totalMatched: page.totalMatched,
+      hasMore: page.hasMore,
+      ...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+      unit: '个群',
+    });
   }
 
   return toLosslessJson({
     success: true,
-    groups: sliced,
-    total: sliced.length,
-    total_matched: totalMatched,
-    page,
-    limit,
-    total_pages: totalPages,
-    has_more: hasMore,
+    groups: page.items,
+    total: page.returned,
+    total_matched: page.totalMatched,
+    offset: page.offset,
+    limit: page.limit,
+    has_more: page.hasMore,
+    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -371,13 +389,13 @@ export function createGetGroupListTool(
         type: 'string',
         description: '模糊搜索关键词，匹配群名称或群备注 (不区分大小写)',
       },
-      page: {
+      offset: {
         type: 'number',
-        description: '分页页码，从 1 开始。默认为第 1 页。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
       },
       limit: {
         type: 'number',
-        description: '每页返回条数 (默认 20，单次上限 50)。',
+        description: '单次返回条数 (默认 20，单次上限 50)。',
       },
       no_cache: {
         type: 'boolean',
@@ -391,17 +409,22 @@ export function createGetGroupListTool(
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
         if (v.total === 0) return [{ type: 'text', text: v.message || '未找到符合条件的群聊。' }];
         const lines: string[] = [
-          `### 群聊列表查询结果 (第 ${v.page}/${v.total_pages} 页，匹配 ${v.total_matched} 个群，本页展示 ${v.total} 个)`,
+          `### 群聊列表查询结果（序号 ${v.offset + 1}~${v.offset + v.total} / 共 ${v.total_matched} 个群）`,
         ];
-        for (const g of v.groups) {
+        for (let i = 0; i < v.groups.length; i++) {
+          const g = v.groups[i];
           const remarkPart = g.group_remark ? ` (备注: ${g.group_remark})` : '';
           const memoPart = g.group_memo ? `\n  - 群介绍: ${g.group_memo}` : '';
           lines.push(
-            `- **${g.group_name}**${remarkPart} | 群号: \`${g.group_id}\` | 人数: ${g.member_count}/${g.max_member_count}${memoPart}`
+            `${v.offset + i + 1}. **${g.group_name}**${remarkPart} | 群号: \`${g.group_id}\` | 人数: ${g.member_count}/${g.max_member_count}${memoPart}`
           );
         }
-        if (v.has_more) {
-          lines.push(`\n> 提示：当前还有未展示的群聊。可再次调用本工具并传入 \`page: ${v.page + 1}\` 继续浏览。`);
+        if (v.has_more && v.next_offset !== undefined) {
+          lines.push(
+            `\n> 还有 ${v.total_matched - v.offset - v.total} 个群未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+          );
+        } else if (v.message) {
+          lines.push(`\n> ${v.message}`);
         }
         return [{ type: 'text', text: lines.join('\n') }];
       },

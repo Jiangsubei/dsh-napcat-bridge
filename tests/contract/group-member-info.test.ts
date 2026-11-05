@@ -313,49 +313,100 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(result.hasOwnProperty('error')).toBe(false);
     });
 
-    it('契约 2.9: 分页支持与默认值 (page: 1, limit: 20)，切片与元数据完备', async () => {
-      // mockMembers 共有 4 位成员，若指定 limit: 2, page: 1
+    it('契约 2.9: offset 分页与默认值，切片、next_offset 与序号提示完备', async () => {
+      // mockMembers 共有 4 位成员，若指定 limit: 2, offset: 0
       const res = await queryGroupMemberInfo(
-        { page: 1, limit: 2 },
+        { offset: 0, limit: 2 },
         { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
 
       expect(res.success).toBe(true);
       expect(res.total).toBe(2);
       expect(res.total_matched).toBe(4);
-      expect(res.page).toBe(1);
+      expect(res.offset).toBe(0);
       expect(res.limit).toBe(2);
-      expect(res.total_pages).toBe(2);
       expect(res.has_more).toBe(true);
+      expect(res.next_offset).toBe(2);
       expect(res.members[0].user_id).toBe('10001');
       expect(res.members[1].user_id).toBe('10002');
-      expect(res.message).toContain('page: 2');
+      expect(res.message).toContain('本次展示序号 1~2');
+      expect(res.message).toContain('offset: 2');
+      expect((res as any).page).toBeUndefined();
+      expect((res as any).total_pages).toBeUndefined();
     });
 
-    it('契约 2.10: 翻页行为与末页检测 (page: 2, limit: 2)', async () => {
+    it('契约 2.10: 翻页行为与末页检测 (offset: 2, limit: 2)', async () => {
       const res = await queryGroupMemberInfo(
-        { page: 2, limit: 2 },
+        { offset: 2, limit: 2 },
         { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
 
       expect(res.success).toBe(true);
       expect(res.total).toBe(2);
-      expect(res.page).toBe(2);
+      expect(res.offset).toBe(2);
       expect(res.has_more).toBe(false);
+      expect(res.next_offset).toBeUndefined();
       expect(res.members[0].user_id).toBe('10003');
       expect(res.members[1].user_id).toBe('10004');
     });
 
-    it('契约 2.11: 分页边界安全保护 (limit 超限 clamp 到 50，page < 1 clamp 到 1)', async () => {
+    it('契约 2.11: 分页边界安全保护 (limit 超限 clamp 到 50，负 offset clamp 到 0)', async () => {
       const res = await queryGroupMemberInfo(
-        { page: 0, limit: 100 },
+        { offset: -5, limit: 100 },
         { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
       );
 
       expect(res.success).toBe(true);
-      expect(res.page).toBe(1);
+      expect(res.offset).toBe(0);
       expect(res.limit).toBe(50);
       expect(res.total).toBe(4);
+    });
+
+    it('契约 2.12: offset 越界时返回空列表并给出有效范围提示', async () => {
+      const res = await queryGroupMemberInfo(
+        { offset: 99, limit: 20 },
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.total).toBe(0);
+      expect(res.offset).toBe(99);
+      expect(res.has_more).toBe(false);
+      expect(res.message).toContain('超出范围');
+    });
+
+    it('契约 2.13: 确定性排序，成员按 user_id 数值升序切片', async () => {
+      const shuffledGateway = {
+        getGroupMemberList: vi.fn().mockResolvedValue({
+          status: 'ok',
+          retcode: 0,
+          data: [mockMembers[3], mockMembers[1], mockMembers[0], mockMembers[2]],
+        }),
+      };
+      groupMemberCache.clearAll();
+
+      const res = await queryGroupMemberInfo(
+        { offset: 0, limit: 4 },
+        { gateway: shuffledGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+
+      expect(res.members.map((m) => m.user_id)).toEqual(['10001', '10002', '10003', '10004']);
+    });
+
+    it('契约 2.14: Render 使用跨页连续的全局序号', async () => {
+      const tool = createGetGroupMemberInfoTool(() => ({
+        gateway: mockGateway,
+        peer: 'group_888888888',
+        groupId: 888888888,
+      }));
+      const res = await queryGroupMemberInfo(
+        { offset: 2, limit: 2 },
+        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+      );
+      const rendered = (tool as any).output.render({}, res);
+      const text = rendered[0].text;
+      expect(text).toContain('3. **Charlie**');
+      expect(text).toContain('4. **冒牌群主**');
     });
   });
 
@@ -382,9 +433,10 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         const props = (toolDef.parameters as any).properties || toolDef.parameters;
         // 参数列表中严禁暴露 group_id，模型无需指定
         expect(props.group_id).toBeUndefined();
-        // 声明参数中必须包含 page 与 limit
-        expect(props.page).toBeDefined();
+        // 声明参数中必须包含 offset 与 limit，且不得再暴露 page
+        expect(props.offset).toBeDefined();
         expect(props.limit).toBeDefined();
+        expect(props.page).toBeUndefined();
       } finally {
         await booted.dispose();
       }
