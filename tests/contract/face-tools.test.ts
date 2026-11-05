@@ -165,7 +165,8 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     // 必须经由 sender.enqueue 串行发送
     expect(enqueueSpy).toHaveBeenCalled();
 
-    // 验证 Gateway 调用参数包含 sub_type = 1 且为 file:// 路径
+    // 验证 Gateway 调用参数包含 sub_type = 1 且为 file:// 路径；
+    // 第三个参数为旁路附件描述符（不进入发给 NapCat 的消息段）
     expect(mockGateway.sendGroupMsg).toHaveBeenCalledWith(
       '123456',
       expect.arrayContaining([
@@ -175,6 +176,12 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
             file: expect.stringMatching(/^file:\/\/\//),
             sub_type: 1,
           }),
+        }),
+      ]),
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'sticker',
+          face: expect.objectContaining({ id: 'face_doge' }),
         }),
       ])
     );

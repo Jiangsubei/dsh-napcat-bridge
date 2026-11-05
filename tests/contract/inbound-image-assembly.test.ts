@@ -137,7 +137,7 @@ describe('契约测试: 入站图片落盘真实装配闭环 (Inbound Image Asse
     expect(actions).toContain('get_image');
   });
 
-  it('ASM-2: 四段全失败 → 保持基线（local_path 为空、content 为裸图名、消息照常入库）', async () => {
+  it('ASM-2: 四段全失败 → local_path 为空、content 回落可下载直链、消息照常入库', async () => {
     const deadUrl = await startLoopback(400, '{"retcode":-5503007,"retmsg":"download url has expired"}');
     reply = () => ({ status: 'failed', data: null, wording: 'not available' });
 
@@ -145,7 +145,8 @@ describe('契约测试: 入站图片落盘真实装配闭环 (Inbound Image Asse
 
     const row = await waitForRow('0123456789ABCDEF0123456789ABCDEF.png');
     expect(row.local_path).toBeNull();
-    expect(row.content).toBe('[图片:0123456789ABCDEF0123456789ABCDEF.png]');
+    // 统一渲染：无本地文件时优先展示可下载直链，而不是 QQ 伪文件名
+    expect(row.content).toBe(`[图片:${deadUrl}]`);
     expect(actions).toEqual(expect.arrayContaining(['get_image', 'get_file', 'get_msg']));
   });
 
