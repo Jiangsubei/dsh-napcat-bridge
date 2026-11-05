@@ -4,9 +4,25 @@
  * 出站消息不依赖 NapCat 的 `reportSelfMessage` 上报：只要 OneBot 应答成功且返回
  * message_id，就立即把这条自身消息写入本地 messages 表（self = 1）。
  * 发送失败或无有效 message_id 时不落库，避免写入无法寻址的幽灵记录。
+ *
+ * 附件事实统一来自 `src/attachment/`：发送方可通过 `attachments` 旁路携带
+ * face_id / 情绪 / 本地真实格式；未携带时从消息段推导。
  */
 
-import { fileURLToPath } from 'node:url';
+import {
+  describeMessage,
+  inferDominantType as inferTypeFromSegments,
+  resolveLocalMediaPath,
+  toMessageMediaFields,
+  type MessageDescription,
+  type MessageMediaFields,
+} from '../attachment/classify.js';
+import { normalizeOutboundSegments } from '../attachment/outbound.js';
+import {
+  deserializeAttachments,
+  serializeAttachments,
+} from '../attachment/store.js';
+import type { AttachmentDescriptor } from '../attachment/types.js';
 import { parseNormalizedContent } from '../gateway/wakeup.js';
 import type { MessageRecord } from '../types/index.js';
 import type { OutboundSentEvent, NapCatGatewayServer } from '../gateway/server.js';
@@ -37,6 +53,8 @@ export interface OutboundMediaMeta {
   local_path: string | null;
 }
 
+export { normalizeOutboundSegments, resolveLocalMediaPath };
+
 /** 出站消息是否携带需要异步补全元数据的媒体段 */
 export function hasOutboundMedia(segments: Array<Record<string, any>>): boolean {
   return segments.some((seg) =>
@@ -44,122 +62,77 @@ export function hasOutboundMedia(segments: Array<Record<string, any>>): boolean 
   );
 }
 
-/** 把 file:// URI 或本地绝对路径解析为可读的 OS 路径；URL/base64/相对路径返回 null。 */
-export function resolveLocalMediaPath(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const raw = value.trim();
-  if (!raw) return null;
-
-  if (raw.startsWith('file://')) {
-    try {
-      return fileURLToPath(raw);
-    } catch {
-      return null;
-    }
-  }
-  if (/^[a-zA-Z]:[\\/]/.test(raw) || raw.startsWith('/')) {
-    return raw;
-  }
-  return null;
-}
-
-/** 判断值是否像 OneBot 媒体标识（而非本地路径/URL/base64） */
-function looksLikeMediaId(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const v = value.trim();
-  if (!v) return false;
-  if (/^(file:|https?:|data:|base64:)/i.test(v)) return false;
-  if (/^[a-zA-Z]:[\\/]/.test(v) || v.startsWith('/')) return false;
-  return true;
-}
-
-/**
- * 从出站消息段提取媒体元数据（payload 版本）：
- * - 图片/表情/语音/视频：OneBot 无独立 file_id，`data.file` 是 NapCat 侧文件标识时才采用；
- * - 文件：优先 `data.file_id`；
- * - local_path 只接受 file:// 或本地绝对路径，URL/base64 不落为本地路径。
- */
+/** 从出站消息段提取媒体元数据（payload 版本）。 */
 export function extractOutboundMediaMeta(
   segments: Array<Record<string, any>>
 ): OutboundMediaMeta {
-  const meta: OutboundMediaMeta = { file_id: null, busid: null, local_path: null };
-
-  for (const seg of segments) {
-    const type = String(seg?.type || '');
-    const data = (seg.data || {}) as any;
-
-    if (type === 'image' || type === 'record' || type === 'video') {
-      if (!meta.file_id) {
-        meta.file_id = data.file_id || (looksLikeMediaId(data.file) ? data.file : null);
-      }
-      if (!meta.local_path) meta.local_path = resolveLocalMediaPath(data.local_path || data.file);
-    } else if (type === 'file') {
-      if (!meta.file_id) {
-        meta.file_id = data.file_id || (looksLikeMediaId(data.file) ? data.file : null);
-      }
-      if (!meta.local_path) meta.local_path = resolveLocalMediaPath(data.local_path || data.file);
-      if (meta.busid === null && data.busid !== undefined && data.busid !== null) {
-        meta.busid = Number(data.busid);
-      }
-    } else if (type === 'forward') {
-      if (!meta.file_id) meta.file_id = data.id || data.forward_id || null;
-    }
-  }
-
-  for (const key of Object.keys(meta) as Array<keyof OutboundMediaMeta>) {
-    if (meta[key] === undefined) meta[key] = null;
-  }
-  return meta;
+  const description = describeMessage(segments, {
+    origin: 'outbound',
+    isGroup: false,
+  });
+  const fields = toMessageMediaFields(description);
+  return {
+    file_id: fields.file_id,
+    busid: fields.busid,
+    local_path: fields.local_path,
+  };
 }
 
-/** 把出站 payload（纯文本或 OneBot 消息段数组）归一化为消息段数组。 */
-export function normalizeOutboundSegments(message: unknown): Array<Record<string, any>> {
-  if (typeof message === 'string') {
-    return message.trim() !== '' ? [{ type: 'text', data: { text: message } }] : [];
-  }
-  if (Array.isArray(message)) {
-    return message.filter(
-      (seg): seg is Record<string, any> => Boolean(seg) && typeof seg === 'object'
-    );
-  }
-  return [];
-}
-
-/**
- * 推导出站消息的 dominant type，与入站落库口径保持一致
- * （首个有意义的非文本段决定类型）。
- */
+/** 推导出站消息主导类型（与入站落库口径共用同一规则）。 */
 export function inferOutboundMessageType(
   segments: Array<Record<string, any>>,
   isGroup: boolean
 ): string {
-  let type = 'text';
+  return inferTypeFromSegments(segments, { isGroup });
+}
 
-  for (const seg of segments) {
-    const segType = seg.type;
-    const data = (seg.data || {}) as any;
+/**
+ * 把旁路描述符中的本地事实回填到消息段，供统一渲染读取。
+ * 只补 local / face / summary / unavailable，不改变发送给 NapCat 的原始 payload。
+ */
+function applyDescriptorsToSegments(
+  segments: Array<Record<string, any>>,
+  descriptors: AttachmentDescriptor[]
+): Array<Record<string, any>> {
+  if (descriptors.length === 0) return segments;
 
-    if (segType === 'image') {
-      const isSticker = data.sub_type === 1 || Boolean(data.emoji_package_id);
-      if (type === 'text') type = isSticker ? 'sticker' : 'image';
-    } else if (segType === 'file') {
-      if (type === 'text') type = isGroup ? 'group_file' : 'file';
-    } else if (
-      segType === 'record' ||
-      segType === 'video' ||
-      segType === 'forward' ||
-      segType === 'json' ||
-      segType === 'xml' ||
-      segType === 'reply' ||
-      segType === 'at' ||
-      segType === 'poke' ||
-      segType === 'shake'
-    ) {
-      if (type === 'text') type = segType;
+  const queue = [...descriptors];
+  return segments.map((seg) => {
+    if (!['image', 'file', 'record', 'video', 'forward'].includes(String(seg?.type || ''))) {
+      return seg;
     }
-  }
+    const descriptor = queue.shift();
+    if (!descriptor) return seg;
 
-  return type;
+    const data: Record<string, any> = { ...(seg.data || {}) };
+    if (descriptor.local?.path) {
+      data.local_path = descriptor.local.path;
+      if (descriptor.local.format) data.local_format = descriptor.local.format;
+      if (descriptor.local.md5) data.md5 = descriptor.local.md5;
+      if (descriptor.local.fingerprint) data.fingerprint = descriptor.local.fingerprint;
+    }
+    if (descriptor.face) data.face = descriptor.face;
+    if (descriptor.summary) data.summary = descriptor.summary;
+    if (descriptor.unavailable) data.dl_failed = true;
+    if (descriptor.fileName && !data.file_name) data.file_name = descriptor.fileName;
+    if (descriptor.remote?.fileId) data.file_id = descriptor.remote.fileId;
+    if (descriptor.remote?.url) data.url = descriptor.remote.url;
+    if (descriptor.remote?.busid !== undefined) data.busid = descriptor.remote.busid;
+
+    return { ...seg, data };
+  });
+}
+
+function describeOutbound(
+  segments: Array<Record<string, any>>,
+  isGroup: boolean,
+  provided?: AttachmentDescriptor[]
+): MessageDescription {
+  const derived = describeMessage(segments, { origin: 'outbound', isGroup });
+  if (provided && provided.length > 0) {
+    return { type: derived.type, attachments: provided };
+  }
+  return derived;
 }
 
 /**
@@ -174,9 +147,13 @@ export function buildSelfMessageRecord(
   if (segments.length === 0) return null;
 
   const isGroup = event.peer.startsWith('group_') || event.peer.startsWith('qq-group-');
+  const description = describeOutbound(segments, isGroup, event.attachments);
 
   const parsed = parseNormalizedContent(
-    { message: segments, message_type: isGroup ? 'group' : 'private' } as any,
+    {
+      message: applyDescriptorsToSegments(segments, description.attachments),
+      message_type: isGroup ? 'group' : 'private',
+    } as any,
     {
       getFaceByMd5: options.getFaceByMd5,
     }
@@ -184,7 +161,7 @@ export function buildSelfMessageRecord(
 
   if (!parsed.content || parsed.content.trim() === '') return null;
 
-  const media = extractOutboundMediaMeta(segments);
+  const media: MessageMediaFields = toMessageMediaFields(description);
 
   return {
     msg_id: event.msgId,
@@ -192,16 +169,17 @@ export function buildSelfMessageRecord(
     user_id: options.botQQ,
     sender_name: options.senderName,
     time: event.time,
-    type: inferOutboundMessageType(segments, isGroup),
+    type: media.type,
     content: parsed.content,
     raw: JSON.stringify(segments),
     file_id: media.file_id,
     busid: media.busid,
     local_path: media.local_path,
-    fingerprint: null,
+    fingerprint: media.fingerprint,
     recalled: 0,
     self: 1,
     reply_to: parsed.replyId ?? null,
+    attachments: serializeAttachments(description.attachments),
   };
 }
 
@@ -235,14 +213,29 @@ export function recordOutboundSelfMessage(
   }
 }
 
+/** 合并远端事实：只补 remote，不触碰 local / face / kind / origin。 */
+function mergeRemote(
+  existing: AttachmentDescriptor,
+  fetched: AttachmentDescriptor | undefined
+): AttachmentDescriptor {
+  if (!fetched?.remote) return existing;
+  const remote = {
+    ...(existing.remote || {}),
+    ...(fetched.remote.fileId ? { fileId: fetched.remote.fileId } : {}),
+    ...(fetched.remote.busid !== undefined ? { busid: fetched.remote.busid } : {}),
+    ...(fetched.remote.url ? { url: fetched.remote.url } : {}),
+    ...(fetched.remote.forwardId ? { forwardId: fetched.remote.forwardId } : {}),
+  };
+  return { ...existing, remote };
+}
+
 /**
- * 异步回查 get_msg 补全出站媒体元数据（file_id / busid / raw）。
+ * 异步回查 get_msg 补全出站媒体元数据（file_id / busid / raw / attachments.remote）。
  *
- * 发送 Action 只返回 message_id，SnowLuma/NapCat 的 get_msg 会返回完整消息对象
- * （含图片/文件的 NapCat 侧标识与媒体信息）。本函数尽力而为：
  * - 仅对含媒体段的消息触发；
- * - 5s 超时，任何失败只记 debug，绝不覆盖 payload 版本已落库的 local_path；
- * - 只在拿到新值时更新，绝不把已有值清空。
+ * - 5s 超时，任何失败只记 debug；
+ * - 只补 remote；local_path 仅在 payload 版本缺失时兜底；
+ * - 绝不覆盖发送方旁路携带的 local / face / kind。
  */
 export async function enrichOutboundMediaRecord(
   gateway: Pick<NapCatGatewayServer, 'getMsg'>,
@@ -258,8 +251,7 @@ export async function enrichOutboundMediaRecord(
   } catch {
     payloadSegments = [];
   }
-  const hasMedia = hasOutboundMedia(payloadSegments);
-  if (!hasMedia) return;
+  if (!hasOutboundMedia(payloadSegments)) return;
 
   try {
     const res = await gateway.getMsg(record.msg_id, 5000);
@@ -271,18 +263,35 @@ export async function enrichOutboundMediaRecord(
       : [];
     if (segments.length === 0) return;
 
-    const media = extractOutboundMediaMeta(segments);
+    const isGroup = record.peer.startsWith('group_') || record.peer.startsWith('qq-group-');
+    const fetchedDescription = describeMessage(segments, { origin: 'outbound', isGroup });
+    const media = toMessageMediaFields(fetchedDescription);
+
     const patch: {
       file_id?: string | null;
       busid?: number | null;
       local_path?: string | null;
       raw?: string;
+      attachments?: string | null;
     } = { raw: JSON.stringify(segments) };
 
     if (media.file_id && media.file_id !== record.file_id) patch.file_id = media.file_id;
     if (media.busid !== null && media.busid !== record.busid) patch.busid = media.busid;
     // payload 解析出的本地路径最可靠（就是发送源文件），仅在缺失时用回查结果兜底
     if (!record.local_path && media.local_path) patch.local_path = media.local_path;
+
+    const existingAttachments = deserializeAttachments(record.attachments);
+    const baseAttachments =
+      existingAttachments.length > 0
+        ? existingAttachments
+        : describeMessage(payloadSegments, { origin: 'outbound', isGroup }).attachments;
+
+    if (baseAttachments.length > 0) {
+      const merged = baseAttachments.map((descriptor, index) =>
+        mergeRemote(descriptor, fetchedDescription.attachments[index])
+      );
+      patch.attachments = serializeAttachments(merged);
+    }
 
     db.updateMessageMedia(record.msg_id, patch);
   } catch (err: any) {

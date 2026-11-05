@@ -45,6 +45,10 @@ export type { ManageFacesParams, ManageFacesResult, SendQqMessageParams, SendQqM
 import { EMOJI_MAP } from '../types/index.js';
 export { EMOJI_MAP };
 import { stripMarkdown } from '../outbound/render.js';
+import {
+  buildOutboundAttachments,
+  buildOutboundFaceAttachment,
+} from '../attachment/outbound.js';
 import { manageFaces } from './manage-faces.js';
 export { manageFaces };
 import type { MessageDatabase } from '../storage/database.js';
@@ -636,7 +640,8 @@ export async function sendFile(
     }
 
     // 经共享 per-peer 串行队列下发，与正文/提问/审批保持同 peer 内顺序 (Spec §7.3)
-    const sendTask = () => ctx.gateway!.sendMsg(ctx.peer!, msgPayload);
+    const attachments = buildOutboundAttachments(msgPayload, { peer: ctx.peer });
+    const sendTask = () => ctx.gateway!.sendMsg(ctx.peer!, msgPayload, attachments);
     const res = ctx.sender
       ? await ctx.sender.enqueue(ctx.peer, sendTask)
       : await sendTask();
@@ -1127,16 +1132,17 @@ export async function sendFace(
       },
     },
   ];
+  const attachments = [buildOutboundFaceAttachment(face, localPath, subType)];
 
   const doSend = async (): Promise<SendFaceResult> => {
     try {
       let res: any;
       if (inGroup) {
         const groupId = String(ctx.groupId || sessionPeer.replace(/^(qq-group-|group_)/, '').split('-')[0]);
-        res = await ctx.gateway!.sendGroupMsg(groupId, segments as any);
+        res = await ctx.gateway!.sendGroupMsg(groupId, segments as any, attachments);
       } else {
         const userId = sessionPeer.replace(/^(qq-user-|user_)/, '').split('-')[0];
-        res = await ctx.gateway!.sendPrivateMsg(userId, segments as any);
+        res = await ctx.gateway!.sendPrivateMsg(userId, segments as any, attachments);
       }
 
       if (res && (res.status === 'failed' || (typeof res.retcode === 'number' && res.retcode !== 0))) {

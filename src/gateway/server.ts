@@ -12,6 +12,7 @@ import type {
   OneBotNoticeEvent,
   OneBotRequestEvent,
 } from '../types/index.js';
+import type { AttachmentDescriptor } from '../attachment/types.js';
 
 /** 出站消息成功发送后的事件（供插件自记录落库，不依赖 reportSelfMessage） */
 export interface OutboundSentEvent {
@@ -24,6 +25,11 @@ export interface OutboundSentEvent {
   message: unknown;
   /** 发送完成时间（毫秒时间戳） */
   time: number;
+  /**
+   * 发送方旁路携带的附件描述符（不进入发给 NapCat 的消息段）。
+   * 适合携带仅本地可知的事实：face_id / 情绪 / 本地真实格式等。
+   */
+  attachments?: AttachmentDescriptor[];
 }
 
 export interface GatewayServerOptions {
@@ -287,7 +293,8 @@ export class NapCatGatewayServer {
   async sendAction<T = any>(
     action: string,
     params: Record<string, any> = {},
-    timeoutMs = 15000
+    timeoutMs = 15000,
+    attachments?: AttachmentDescriptor[]
   ): Promise<OneBotActionResponse<T>> {
     if (!this.activeSocket || this.activeSocket.readyState !== WebSocket.OPEN) {
       throw new Error(`NapCat WebSocket 客户端未连接或连接已断开 (action: ${action})`);
@@ -324,7 +331,7 @@ export class NapCatGatewayServer {
     });
 
     // 出站消息成功发送后立即回调，供插件主动落库（不依赖 OneBot 自身消息上报）
-    this.notifyOutboundSent(action, params, response as OneBotActionResponse);
+    this.notifyOutboundSent(action, params, response as OneBotActionResponse, attachments);
     return response;
   }
 
@@ -335,7 +342,8 @@ export class NapCatGatewayServer {
   private notifyOutboundSent(
     action: string,
     params: Record<string, any>,
-    response: OneBotActionResponse
+    response: OneBotActionResponse,
+    attachments?: AttachmentDescriptor[]
   ): void {
     if (!OUTBOUND_SEND_ACTIONS.has(action)) return;
 
@@ -370,42 +378,65 @@ export class NapCatGatewayServer {
         msgId,
         message: params.message,
         time: Date.now(),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
       });
     } catch (err) {
       this.options.logger?.warn?.('[GatewayServer] onMessageSent 回调异常:', err);
     }
   }
 
-  async sendGroupMsg(groupId: number | string, message: any): Promise<OneBotActionResponse> {
-    return this.sendAction('send_group_msg', {
-      group_id: Number(groupId),
-      message,
-    });
+  async sendGroupMsg(
+    groupId: number | string,
+    message: any,
+    attachments?: AttachmentDescriptor[]
+  ): Promise<OneBotActionResponse> {
+    return this.sendAction(
+      'send_group_msg',
+      {
+        group_id: Number(groupId),
+        message,
+      },
+      15000,
+      attachments
+    );
   }
 
-  async sendPrivateMsg(userId: number | string, message: any): Promise<OneBotActionResponse> {
-    return this.sendAction('send_private_msg', {
-      user_id: Number(userId),
-      message,
-    });
+  async sendPrivateMsg(
+    userId: number | string,
+    message: any,
+    attachments?: AttachmentDescriptor[]
+  ): Promise<OneBotActionResponse> {
+    return this.sendAction(
+      'send_private_msg',
+      {
+        user_id: Number(userId),
+        message,
+      },
+      15000,
+      attachments
+    );
   }
 
-  async sendMsg(peer: string, message: any): Promise<OneBotActionResponse> {
+  async sendMsg(
+    peer: string,
+    message: any,
+    attachments?: AttachmentDescriptor[]
+  ): Promise<OneBotActionResponse> {
     if (peer.startsWith('group_')) {
       const groupId = peer.slice(6).split('-')[0];
-      return this.sendGroupMsg(groupId, message);
+      return this.sendGroupMsg(groupId, message, attachments);
     }
     if (peer.startsWith('user_')) {
       const userId = peer.slice(5).split('-')[0];
-      return this.sendPrivateMsg(userId, message);
+      return this.sendPrivateMsg(userId, message, attachments);
     }
     if (peer.startsWith('qq-group-')) {
       const groupId = peer.slice(9).split('-')[0];
-      return this.sendGroupMsg(groupId, message);
+      return this.sendGroupMsg(groupId, message, attachments);
     }
     if (peer.startsWith('qq-user-')) {
       const userId = peer.slice(8).split('-')[0];
-      return this.sendPrivateMsg(userId, message);
+      return this.sendPrivateMsg(userId, message, attachments);
     }
     throw new Error(`未知的 peer 格式: ${peer}`);
   }

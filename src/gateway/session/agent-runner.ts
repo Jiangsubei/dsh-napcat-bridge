@@ -83,6 +83,8 @@ import {
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { QQ_PRESET_ID } from '../../constants/preset.js';
 import { DEFAULT_NEW_MESSAGE_BEHAVIOR } from '../../constants/index.js';
+import { resolveLocalMediaPath } from '../../attachment/classify.js';
+import { detectBufferExt } from '../../storage/media.js';
 import type { WakeupPayload } from '../../types/index.js';
 import {
   RemoteError,
@@ -110,6 +112,14 @@ export interface AgentRunnerDelegate {
   onClearPendingCleared?(peer: string, sessionId: string): void;
   isSessionDeleted?(sessionId: string): boolean;
 }
+
+const IMAGE_MEDIA_TYPES: Record<string, 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
 
 export class SessionAgentRunner {
   /** 会话/群昵称持久化键（跨重启保留，避免标题退化为纯号码） */
@@ -799,6 +809,43 @@ export class SessionAgentRunner {
     return handle.agent;
   }
 
+  /**
+   * 把 payload.images 中真实存在、魔数可识别的本地图片转成 DSH ImageBlock。
+   * 单张失败只记 debug，绝不阻断文本消息；attachments 服务缺失时静默降级纯文本。
+   */
+  private async buildImageBlocks(images: string[]): Promise<any[]> {
+    if (!Array.isArray(images) || images.length === 0) return [];
+
+    const store = safeGetService(this.ctx, 'attachments') || (this.ctx as any).attachments;
+    if (!store || typeof store.saveImage !== 'function') return [];
+
+    const blocks: any[] = [];
+    for (const image of images) {
+      try {
+        const localPath = resolveLocalMediaPath(image);
+        if (!localPath) continue;
+
+        const data = await fsp.readFile(localPath);
+        const mediaType = IMAGE_MEDIA_TYPES[String(detectBufferExt(data) || '').toLowerCase()];
+        if (!mediaType) continue;
+
+        const name = localPath.split(/[\\/]/).filter(Boolean).pop();
+        const ref = await store.saveImage({
+          data,
+          mediaType,
+          ...(name ? { name } : {}),
+        });
+        blocks.push({ type: 'image', attachment: ref });
+      } catch (err: any) {
+        this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+          `[SessionAgentRunner] 入站图片转 DSH 附件失败 (${image}):`,
+          err?.message || err
+        );
+      }
+    }
+    return blocks;
+  }
+
   public async dispatchWakeup(
     payload: WakeupPayload,
     options?: {
@@ -837,9 +884,10 @@ export class SessionAgentRunner {
     }
 
     const promptText = formatWakeupPrompt(payload);
+    const imageBlocks = await this.buildImageBlocks(payload.images || []);
 
     const userMsg = createUserMessage({
-      content: [{ type: 'text', text: promptText }],
+      content: [{ type: 'text', text: promptText }, ...imageBlocks],
       source: { kind: 'user' },
     });
 

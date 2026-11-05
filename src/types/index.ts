@@ -227,6 +227,8 @@ export interface MessageRecord {
   reply_to: number | null;
   /** 消息来源，缺省视为 'qq'（存量数据同值） */
   source?: MessageSource;
+  /** 统一附件描述符 JSON（精简数组，不含原始段；raw 已保存原始段） */
+  attachments?: string | null;
 }
 
 // ==================== 4. 工具入参/出参 Schema ====================
@@ -283,6 +285,8 @@ export interface ChatMessageSummary {
   reply_to?: number | null;
   local_path?: string | null;
   file_id?: string | null;
+  /** 统一附件描述符 JSON（与 MessageRecord.attachments 同源） */
+  attachments?: string | null;
   /** 消息来源: 'qq' | 'agent' */
   source?: MessageSource;
 }

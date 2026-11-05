@@ -35,6 +35,8 @@ import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './
 import { createMemoryToolDefinitions } from './memory/tools.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound/self-record.js';
+import { describeMessage, toMessageMediaFields } from './attachment/classify.js';
+import { serializeAttachments } from './attachment/store.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
 import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
@@ -592,9 +594,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
     let primaryLocalPath: string | null = null;
     let primaryFingerprint: string | null = null;
-    let dominantType = 'text';
-    let fileId: string | null = null;
-    let busid: number | null = null;
 
     const imageSegs: Array<{
       seg: any;
@@ -610,17 +609,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
         if (seg.type === 'image') {
           const isSticker = data.sub_type === 1 || Boolean(data.emoji_package_id);
-          if (dominantType === 'text') {
-            dominantType = isSticker ? 'sticker' : 'image';
-          }
-          if (!fileId) {
-            fileId = data.file || data.file_id || null;
-          }
           imageSegs.push({ seg, data, isSticker });
         } else if (seg.type === 'file') {
-          dominantType = isGroup ? 'group_file' : 'file';
-          fileId = data.file_id || data.file || null;
-          busid = data.busid ?? null;
+          const fileId = data.file_id || data.file || null;
+          const busid = data.busid ?? null;
           // PF-001: 私聊文件入站即时落盘（同步 await 落盘完成后再构建唤醒包/入库，任务包 §3.3）。
           //   - 群聊 file 段保持现状（group_upload notice 懒载），静默跳过；
           //   - 机器人自己发出的文件（message_sent）不入站回拉：段内即本机来源路径，无需 NapCat 中转。
@@ -638,10 +630,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             });
             if (pf.ok && pf.localPath) {
               data.local_path = pf.localPath;
-              if (!primaryLocalPath) {
-                primaryLocalPath = pf.localPath;
-                primaryFingerprint = pf.fingerprint ?? null;
-              }
+              if (pf.fingerprint) data.fingerprint = pf.fingerprint;
               logger.info?.(`[Plugin] 私聊文件已即时落盘 (peer: ${peer}, file_id: ${fileId}) -> ${pf.localPath}`);
             } else {
               data.dl_failed = true;
@@ -650,25 +639,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
               );
             }
           }
-        } else if (seg.type === 'forward') {
-          dominantType = 'forward';
-          fileId = data.id || data.forward_id || null;
-        } else if (seg.type === 'record') {
-          dominantType = 'record';
-          fileId = data.file || data.file_id || null;
-        } else if (seg.type === 'video') {
-          dominantType = 'video';
-          fileId = data.file || data.file_id || null;
-        } else if (seg.type === 'poke') {
-          dominantType = 'poke';
-        } else if (seg.type === 'shake') {
-          dominantType = 'shake';
-        } else if (seg.type === 'json' || seg.type === 'xml') {
-          dominantType = seg.type;
-        } else if (seg.type === 'reply' && dominantType === 'text') {
-          dominantType = 'reply';
-        } else if (seg.type === 'at' && dominantType === 'text') {
-          dominantType = 'at';
         }
       }
 
@@ -700,10 +670,8 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           const { data } = imageSegs[i];
           if (resolved.ok && resolved.localPath) {
             data.local_path = resolved.localPath;
-            if (!primaryLocalPath) {
-              primaryLocalPath = resolved.localPath;
-              primaryFingerprint = resolved.fingerprint ?? null;
-            }
+            if (resolved.fingerprint) data.fingerprint = resolved.fingerprint;
+            if (resolved.md5) data.md5 = resolved.md5;
 
             // 识别入站图片/表情包是否命中本地已收藏表情库
             const md5 = resolved.md5 || (resolved.localPath ? computeFileMd5(resolved.localPath) : undefined);
@@ -712,8 +680,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
               if (matchedFace && matchedFace.enabled && !matchedFace.deleted_at) {
                 data.face = {
                   id: matchedFace.id,
-                  mood: matchedFace.mood,
-                  tags: matchedFace.tags,
+                  ...(matchedFace.mood ? { mood: matchedFace.mood } : {}),
+                  ...(matchedFace.tags && matchedFace.tags.length > 0
+                    ? { tags: matchedFace.tags }
+                    : {}),
                 };
               }
             }
@@ -730,11 +700,20 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       getFaceByMd5: (hash) => db.getFaceByMd5(hash),
     });
 
+    // 统一附件描述符：入站落盘 / 表情库匹配完成后一次性提取全部事实
+    const description = describeMessage(
+      Array.isArray(event.message) ? event.message : [],
+      { origin: 'inbound', isGroup }
+    );
+    const mediaFields = toMessageMediaFields(description);
+    primaryLocalPath = mediaFields.local_path;
+    primaryFingerprint = mediaFields.fingerprint;
+
     // 过滤完全为空的消息事件 (无字符、无媒体、无文件、无引用，如 NapCat 上报的文件下载回执/系统灰条)
     const hasMedia = Boolean(
-      primaryLocalPath ||
-      fileId ||
-      (dominantType !== 'text' && dominantType !== 'reply')
+      mediaFields.local_path ||
+      mediaFields.file_id ||
+      description.attachments.length > 0
     );
     const isCompletelyEmpty =
       rawContent.length === 0 &&
@@ -810,16 +789,17 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
       user_id: fromUser,
       sender_name: senderName,
       time: timestamp,
-      type: dominantType,
+      type: mediaFields.type,
       content,
       raw: JSON.stringify(event.message || event.raw_message),
-      file_id: fileId,
-      busid,
+      file_id: mediaFields.file_id,
+      busid: mediaFields.busid,
       local_path: primaryLocalPath,
       fingerprint: primaryFingerprint,
       recalled: 0,
       self: isSelf,
       reply_to: replyId ?? null,
+      attachments: serializeAttachments(description.attachments),
     };
 
     try {

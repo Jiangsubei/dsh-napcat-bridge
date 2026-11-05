@@ -15,6 +15,11 @@ import type {
 import type { ProactiveManager } from './proactive.js';
 import type { FriendNoticeTracker } from './friend-tracker.js';
 import { computeFileMd5 } from '../storage/media.js';
+import { describeSegment, resolveLocalMediaPath } from '../attachment/classify.js';
+import {
+  formatFacePlaceholder as renderFacePlaceholder,
+  renderAttachment,
+} from '../attachment/render.js';
 
 export interface MatchedFaceInfo {
   id: string;
@@ -28,10 +33,7 @@ export interface MatchedFaceInfo {
  * 说明：SystemPrompt 中已全量注入表情库各 ID 对应的详细标签，入站仅需保留 face_id 与情绪意图，避免重复注入标签。
  */
 export function formatFacePlaceholder(face: MatchedFaceInfo): string {
-  if (face.mood && typeof face.mood === 'string' && face.mood.trim()) {
-    return `[表情包: ${face.id} (情绪: ${face.mood.trim()})]`;
-  }
-  return `[表情包: ${face.id}]`;
+  return renderFacePlaceholder(face);
 }
 
 export interface ParseNormalizedContentOptions {
@@ -377,6 +379,33 @@ export function extractCardContent(
   return cardInfo;
 }
 
+/**
+ * 推导图片段可用于表情库查询的 MD5：
+ * 1. 段内显式 md5；
+ * 2. 本地路径（含 file:/// URI）的字节 MD5；
+ * 3. 纯 MD5 文件名（可带扩展名）。
+ */
+function resolveImageMd5(data: any): string | undefined {
+  if (typeof data?.md5 === 'string' && data.md5.trim()) {
+    return data.md5.trim().toLowerCase();
+  }
+
+  const localPath =
+    resolveLocalMediaPath(data?.local_path) || resolveLocalMediaPath(data?.file);
+  if (localPath) {
+    const md5 = computeFileMd5(localPath);
+    if (md5) return md5.toLowerCase();
+  }
+
+  if (typeof data?.file === 'string') {
+    const base = data.file.split(/[\\/]/).pop() || '';
+    const match = base.match(/^([a-fA-F0-9]{32})(?:\.[a-zA-Z0-9]+)?$/);
+    if (match) return match[1].toLowerCase();
+  }
+
+  return undefined;
+}
+
 export function parseNormalizedContent(
   event: OneBotMessageEvent,
   options?: ParseNormalizedContentOptions
@@ -392,6 +421,7 @@ export function parseNormalizedContent(
 
   if (Array.isArray(event.message) && event.message.length > 0) {
     const textParts: string[] = [];
+    const isGroup = (event as any).message_type === 'group' || Boolean((event as any).group_id);
 
     for (const seg of event.message) {
       if (!seg || typeof seg !== 'object') continue;
@@ -430,61 +460,30 @@ export function parseNormalizedContent(
           const imgPath = data.local_path || data.file || data.url || '';
           if (imgPath) images.push(imgPath);
 
-          let matchedFace: MatchedFaceInfo | null = null;
-          if (data.face && data.face.id) {
-            matchedFace = data.face;
-          } else if (options?.getFaceByMd5) {
-            let md5 = data.md5;
-            if (!md5 && data.local_path) {
-              md5 = computeFileMd5(data.local_path);
-            }
-            if (!md5 && typeof data.file === 'string') {
-              const m = data.file.match(/^[a-fA-F0-9]{32}(?:\.[a-zA-Z0-9]+)?$/);
-              if (m) {
-                md5 = data.file.split('.')[0].toLowerCase();
-              }
-            }
+          const descriptor = describeSegment(seg, { origin: 'inbound', isGroup })!;
+          if (!descriptor.face && options?.getFaceByMd5) {
+            const md5 = resolveImageMd5(data);
             if (md5) {
-              const f = options.getFaceByMd5(md5);
-              if (f && f.enabled && !f.deleted_at) {
-                matchedFace = {
-                  id: f.id,
-                  mood: f.mood,
-                  tags: f.tags,
+              const matched = options.getFaceByMd5(md5);
+              if (matched && matched.enabled && !matched.deleted_at) {
+                const face = {
+                  id: matched.id,
+                  ...(matched.mood ? { mood: matched.mood } : {}),
+                  ...(matched.tags && matched.tags.length > 0 ? { tags: matched.tags } : {}),
                 };
-                data.face = matchedFace;
+                descriptor.face = face;
+                data.face = face;
               }
             }
           }
 
-          if (matchedFace) {
-            textParts.push(formatFacePlaceholder(matchedFace));
-          } else if (data.sub_type === 1 || data.emoji_package_id) {
-            if (data.local_path) {
-              textParts.push(`[表情包:${data.summary || '表情'} 已保存: ${data.local_path}]`);
-            } else {
-              textParts.push(data.summary ? `[表情包:${data.summary}]` : `[表情包:${imgPath}]`);
-            }
-          } else {
-            textParts.push(`[图片:${imgPath}]`);
-          }
+          textParts.push(renderAttachment(descriptor) ?? '[表情包]');
           break;
         }
 
         case 'file': {
-          const fileName = data.file || data.file_name || data.file_id || '未知文件';
-          const fileId = data.file_id ? ` (ID:${data.file_id})` : '';
-          if ((event as any).message_type === 'group') {
-            textParts.push(`[群文件:${fileName}${fileId}]`);
-          } else if (data.local_path) {
-            // PF-001: 私聊文件落盘成功 → 占位替换为真实路径（与图片 atomic 约定统一，任务包 §3.3）
-            textParts.push(`[文件:${fileName} 已保存: ${data.local_path}]`);
-          } else if (data.dl_failed) {
-            // PF-001: 双失败 → 如实标注入站落盘失败（绝不返回占位假路径，任务包 §3.1）
-            textParts.push(`[文件:${fileName} (入站落盘失败)]`);
-          } else {
-            textParts.push(`[文件:${fileName}]`);
-          }
+          const descriptor = describeSegment(seg, { origin: 'inbound', isGroup })!;
+          textParts.push(renderAttachment(descriptor) ?? '[文件]');
           break;
         }
 

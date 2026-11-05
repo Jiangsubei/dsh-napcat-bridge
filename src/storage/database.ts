@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DEFAULT_FACE_STORE_MAX } from '../constants/index.js';
+import { backfillAttachmentJson } from '../attachment/store.js';
 import type {
   SlangEntry,
   ChatMessageSummary,
@@ -37,6 +38,9 @@ export interface SessionStateRecord {
 }
 
 type DatabaseType = any;
+
+/** 存量附件描述符一次性回填标记（完成后不再扫描全表） */
+const ATTACHMENTS_BACKFILL_KEY = 'messages_attachments_backfill_v1';
 
 /**
  * 格式化时间戳为本地时间字符串 YYYY-MM-DD HH:mm:ss
@@ -211,7 +215,8 @@ export class MessageDatabase {
         recalled INTEGER NOT NULL DEFAULT 0,
         self INTEGER NOT NULL DEFAULT 0,
         reply_to INTEGER,
-        source TEXT NOT NULL DEFAULT 'qq'
+        source TEXT NOT NULL DEFAULT 'qq',
+        attachments TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_messages_peer_user_time ON messages (peer, user_id, time);
@@ -306,9 +311,54 @@ export class MessageDatabase {
     try {
       this.db.prepare("ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT 'qq'").run();
     } catch {}
+    // 统一附件描述符列（存量记录保持 NULL，读取时从 raw 回退解析，不回填）
+    try {
+      this.db.prepare('ALTER TABLE messages ADD COLUMN attachments TEXT').run();
+    } catch {}
     try {
       this.db.prepare('CREATE INDEX IF NOT EXISTS idx_messages_peer_source_time ON messages (peer, source, time)').run();
     } catch {}
+
+    this.backfillAttachmentsOnce();
+  }
+
+  /**
+   * 存量消息附件描述符一次性回填。
+   *
+   * - 能回填就回填：优先解析 raw 消息段；raw 不可用时用结构化列保守合成；
+   * - 无法确认任何附件事实的记录保持 NULL；
+   * - 完成后写入 plugin_kv 标记，后续启动不再扫描全表；
+   * - 任何异常都不阻断启动（失败时不写标记，下次启动重试）。
+   */
+  private backfillAttachmentsOnce(): void {
+    const db = this.ensureDb();
+    try {
+      if (this.getPluginConfig(ATTACHMENTS_BACKFILL_KEY) === '1') return;
+
+      const rows = db
+        .prepare(
+          `SELECT msg_id, peer, self, type, content, raw, file_id, busid, local_path
+           FROM messages WHERE attachments IS NULL`
+        )
+        .all() as any[];
+
+      if (rows.length > 0) {
+        const update = db.prepare(
+          'UPDATE messages SET attachments = ? WHERE msg_id = ? AND attachments IS NULL'
+        );
+        const run = db.transaction((items: any[]) => {
+          for (const row of items) {
+            const json = backfillAttachmentJson(row);
+            if (json) update.run(json, row.msg_id);
+          }
+        });
+        run(rows);
+      }
+
+      this.setPluginConfig(ATTACHMENTS_BACKFILL_KEY, '1');
+    } catch {
+      // 静默降级：不阻断启动，下次启动重试
+    }
   }
 
   private ensureDb(): DatabaseType {
@@ -323,10 +373,10 @@ export class MessageDatabase {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO messages (
         msg_id, peer, user_id, sender_name, time, type, content, raw,
-        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source
+        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source, attachments
       ) VALUES (
         @msg_id, @peer, @user_id, @sender_name, @time, @type, @content, @raw,
-        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source
+        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source, @attachments
       )
     `);
 
@@ -347,6 +397,7 @@ export class MessageDatabase {
       self: record.self ? 1 : 0,
       reply_to: record.reply_to ?? null,
       source: record.source ?? 'qq',
+      attachments: record.attachments ?? null,
     });
   }
 
@@ -380,10 +431,10 @@ export class MessageDatabase {
     const stmt = db.prepare(`
       INSERT OR IGNORE INTO messages (
         msg_id, peer, user_id, sender_name, time, type, content, raw,
-        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source
+        file_id, busid, local_path, fingerprint, recalled, self, reply_to, source, attachments
       ) VALUES (
         @msg_id, @peer, @user_id, @sender_name, @time, @type, @content, @raw,
-        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source
+        @file_id, @busid, @local_path, @fingerprint, @recalled, @self, @reply_to, @source, @attachments
       )
     `);
 
@@ -404,6 +455,7 @@ export class MessageDatabase {
       self: record.self ? 1 : 0,
       reply_to: record.reply_to ?? null,
       source: record.source ?? 'qq',
+      attachments: record.attachments ?? null,
     });
 
     return result.changes > 0;
@@ -545,6 +597,7 @@ export class MessageDatabase {
       reply_to: row.reply_to !== null && row.reply_to !== undefined ? Number(row.reply_to) : null,
       local_path: row.local_path ?? null,
       file_id: row.file_id ?? null,
+      attachments: row.attachments ?? null,
       source: row.source === 'agent' ? 'agent' : 'qq',
     }));
 
@@ -743,6 +796,7 @@ export class MessageDatabase {
       recalled: Number(row.recalled),
       self: Number(row.self),
       reply_to: row.reply_to !== null && row.reply_to !== undefined ? Number(row.reply_to) : null,
+      attachments: row.attachments ?? null,
     };
   }
 
@@ -770,7 +824,7 @@ export class MessageDatabase {
   }
 
   /**
-   * 出站媒体元数据补全：仅更新传入的字段（file_id / busid / local_path / raw），
+   * 出站媒体元数据补全：仅更新传入的字段（file_id / busid / local_path / raw / attachments），
    * 绝不覆盖未传入的已有值，保证 get_msg 回填失败时 payload 版本仍然可用。
    */
   updateMessageMedia(
@@ -780,6 +834,7 @@ export class MessageDatabase {
       busid?: number | null;
       local_path?: string | null;
       raw?: string;
+      attachments?: string | null;
     }
   ): void {
     const db = this.ensureDb();
@@ -801,6 +856,10 @@ export class MessageDatabase {
     if (patch.raw !== undefined) {
       sets.push('raw = ?');
       values.push(patch.raw);
+    }
+    if (patch.attachments !== undefined) {
+      sets.push('attachments = ?');
+      values.push(patch.attachments ?? null);
     }
     if (sets.length === 0) return;
 

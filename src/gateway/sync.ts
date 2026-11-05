@@ -8,6 +8,8 @@ import type { NapCatGatewayServer } from './server.js';
 import type { MessageDatabase } from '../storage/database.js';
 import type { MessageRecord } from '../types/index.js';
 import { parseNormalizedContent } from './wakeup.js';
+import { describeMessage, toMessageMediaFields } from '../attachment/classify.js';
+import { serializeAttachments } from '../attachment/store.js';
 
 export interface OfflineSyncerOptions {
   gateway: NapCatGatewayServer;
@@ -71,34 +73,18 @@ export function convertOneBotToRecord(
   // NapCat 的 time 字段为秒级时间戳，转为本地毫秒级
   const timestamp = event.time ? Number(event.time) * 1000 : Date.now();
 
-  let dominantType = 'text';
-  let fileId: string | null = null;
-  let busid: number | null = null;
   let replyId: number | null = null;
+
+  const description = describeMessage(
+    Array.isArray(event.message) ? event.message : [],
+    { origin: 'inbound', isGroup }
+  );
+  const mediaFields = toMessageMediaFields(description);
 
   if (Array.isArray(event.message)) {
     for (const seg of event.message) {
-      if (!seg || typeof seg !== 'object') continue;
-      const type = seg.type;
-      const data = seg.data || {};
-      if (type === 'image') {
-        const isSticker = data.sub_type === 1 || Boolean(data.emoji_package_id);
-        dominantType = isSticker ? 'sticker' : 'image';
-        fileId = data.file_id || data.file || null;
-      } else if (type === 'file') {
-        dominantType = isGroup ? 'group_file' : 'file';
-        fileId = data.file_id || data.file || null;
-        busid = data.busid !== undefined && data.busid !== null ? Number(data.busid) : null;
-      } else if (type === 'forward') {
-        dominantType = 'forward';
-        fileId = data.id || data.forward_id || null;
-      } else if (type === 'record') {
-        dominantType = 'record';
-      } else if (type === 'video') {
-        dominantType = 'video';
-      } else if (type === 'reply' && data.id !== undefined) {
-        replyId = Number(data.id);
-        if (dominantType === 'text') dominantType = 'reply';
+      if (seg && seg.type === 'reply' && seg.data?.id !== undefined) {
+        replyId = Number(seg.data.id);
       }
     }
   }
@@ -109,7 +95,10 @@ export function convertOneBotToRecord(
   }
 
   // 纯空过滤 (无正文、无文件、无富媒体)
-  const hasContent = rawContent.trim().length > 0 || fileId !== null || (dominantType !== 'text' && dominantType !== 'reply');
+  const hasContent =
+    rawContent.trim().length > 0 ||
+    description.attachments.length > 0 ||
+    mediaFields.file_id !== null;
   if (!hasContent) {
     return null;
   }
@@ -120,16 +109,17 @@ export function convertOneBotToRecord(
     user_id: fromUser,
     sender_name: senderName,
     time: timestamp,
-    type: dominantType,
+    type: mediaFields.type,
     content: rawContent,
     raw: JSON.stringify(event.message || event.raw_message || {}),
-    file_id: fileId,
-    busid,
-    local_path: null,
-    fingerprint: null,
+    file_id: mediaFields.file_id,
+    busid: mediaFields.busid,
+    local_path: mediaFields.local_path,
+    fingerprint: mediaFields.fingerprint,
     recalled: 0,
     self: isSelf,
     reply_to: replyId ?? null,
+    attachments: serializeAttachments(description.attachments),
   };
 }
 
