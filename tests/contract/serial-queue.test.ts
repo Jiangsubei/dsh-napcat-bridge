@@ -98,7 +98,7 @@ describe('契约测试: 共享 per-peer 串行发送器保序 (Spec §7.3 / P-02
       peer: PEER,
       toolName: 'execute_bash',
       reason: '清理缓存',
-      targetUserId: '10001',
+      applicantId: '10001',
       signal: new AbortController().signal,
     });
 

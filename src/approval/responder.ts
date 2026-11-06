@@ -383,12 +383,37 @@ export function registerNapCatQuestionChannel(
 
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
 
+/**
+ * 「真实 QQ 发送者」触发的唤醒类型：只有这些唤醒才能成为审批申请人锚点。
+ * 系统触发（proactive/scheduled/internal_agent）不在此列，会清除锚点并让审批 Fail-Closed。
+ */
+const REAL_SENDER_WAKEUP_TRIGGERS = new Set(['at', 'mention', 'quote', 'poke', 'direct']);
+
+/**
+ * 计算某 peer 的审批申请人锚点更新值（最近唤醒者）：
+ * - 真实 QQ 发送者唤醒 → 返回其 QQ 号（调用方应覆盖该 peer 的锚点）；
+ * - 系统触发 / 非数字身份（内部 SessionId、'agent'、'system' 等）→ 返回 null
+ *   （调用方应清除锚点，使后续审批直接 Fail-Closed）。
+ */
+export function resolveWakeupInitiator(
+  trigger: string | undefined | null,
+  fromUser: string | number | undefined | null
+): string | null {
+  const normalizedTrigger = String(trigger || '').trim();
+  if (!REAL_SENDER_WAKEUP_TRIGGERS.has(normalizedTrigger)) {
+    return null;
+  }
+  const uid = fromUser === undefined || fromUser === null ? '' : String(fromUser).trim();
+  return /^[0-9]+$/.test(uid) ? uid : null;
+}
+
 export interface ApprovalRequestPayload {
   peer: string;
   toolName: string;
   callId?: string;
   reason?: string;
-  targetUserId?: string;
+  /** 本轮/最近一次唤醒发起人 QQ 号（群聊必填；私聊以 peer 中的 QQ 为准） */
+  applicantId?: string;
   signal?: AbortSignal;
 }
 
@@ -553,19 +578,20 @@ export class NapCatApprovalResponder {
   /**
    * 解析本次审批申请的发起人 QQ 号：
    * - 私聊 peer 形如 user_<QQ>，直接以 peer 为准（最可靠）；
-   * - 群聊 peer 形如 group_<群号>，取本轮当前发言人 targetUserId（由 index.ts 注入）；
-   * - 无法解析时返回 null，由调用方按 Fail-Closed 直接拒绝。
+   * - 群聊 peer 形如 group_<群号>，取最近一次真实唤醒的发起人 applicantId（由 index.ts 注入）；
+   * - 系统触发（定时任务 / 主动冒泡 / 内部 Agent）不携带真实唤醒者，一律返回 null，
+   *   由调用方按 Fail-Closed 直接拒绝。
    */
   private resolveApplicantId(req: ApprovalRequestPayload): string | null {
     const privateMatch = /^user_([0-9]+)$/.exec(req.peer.trim());
     if (privateMatch) {
       return privateMatch[1];
     }
-    if (req.targetUserId === undefined || req.targetUserId === null) {
+    if (req.applicantId === undefined || req.applicantId === null) {
       return null;
     }
-    const target = String(req.targetUserId).trim();
-    return target || null;
+    const applicant = String(req.applicantId).trim();
+    return applicant || null;
   }
 
   /**
@@ -596,21 +622,21 @@ export class NapCatApprovalResponder {
     if (peer.startsWith('group_') && options?.userId !== undefined) {
       const uid = String(options.userId).trim();
       const admins = (this.options?.admins || []).map((a) => String(a).trim()).filter(Boolean);
-      const isTargetUser = Boolean(pending.req.targetUserId && String(pending.req.targetUserId).trim() === uid);
+      const isApplicant = Boolean(pending.req.applicantId && String(pending.req.applicantId).trim() === uid);
       const isAdmin = admins.includes(uid);
 
       if (admins.length > 0) {
-        if (!isAdmin && !isTargetUser) {
+        if (!isAdmin && !isApplicant) {
           this.options?.logger?.warn?.(
             `[NapCatApprovalResponder] 群聊非授权用户 ${uid} 尝试审批决策，已被忽略`
           );
           return false;
         }
       } else {
-        // 未配置管理员白名单时，群聊采取 Fail-Closed 策略：严禁任意群员冒充审批，仅允许发起人批准
-        if (!isTargetUser) {
+        // 未配置管理员白名单时，群聊采取 Fail-Closed 策略：严禁任意群员冒充审批，仅允许申请人批准
+        if (!isApplicant) {
           this.options?.logger?.warn?.(
-            `[NapCatApprovalResponder] 群聊未配置 admins 白名单，非发起人 ${uid} 尝试审批决策已被拒绝 (Fail-Closed)`
+            `[NapCatApprovalResponder] 群聊未配置 admins 白名单，非申请人 ${uid} 尝试审批决策已被拒绝 (Fail-Closed)`
           );
           return false;
         }

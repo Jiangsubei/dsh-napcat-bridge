@@ -38,7 +38,7 @@ import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound
 import { describeMessage, toMessageMediaFields } from './attachment/classify.js';
 import { serializeAttachments } from './attachment/store.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
-import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
+import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel, resolveWakeupInitiator } from './approval/responder.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
 import { setupSnapshotHub, type SnapshotManager } from './prompt/snapshot.js';
@@ -379,6 +379,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
   const currentSpeakers = new Map<string, string>();
+  // 最近一次「真实唤醒」的发起人 QQ（按 peer 记录）：
+  // 仅供审批申请人判定使用，普通插话/闲聊不覆盖，避免群友刷屏顶掉管理员的审批资格。
+  // 系统触发（定时任务 / 主动冒泡 / 内部 Agent）会清除对应记录，使审批直接 Fail-Closed。
+  const currentWakeupInitiators = new Map<string, string>();
   const rawMemoryDir = currentConfig().memory_storage_dir;
   const normalizedMemoryDir = resolveDshPath(dshHome, rawMemoryDir, DEFAULT_MEMORY_DIR);
 
@@ -549,12 +553,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         return next ? next() : 'unavailable';
       }
       const peer = sessionManager.sessionIdToPeer(sessionId);
+      const applicantId = currentWakeupInitiators.get(peer);
       return await approvalResponder.handleApprovalRequest({
         peer,
         toolName: req.toolName,
         callId: req.callId,
         reason: req.reason,
-        targetUserId: req.targetUserId || req.userId || (currentSpeakers.get(peer) ? String(currentSpeakers.get(peer)) : undefined),
+        // 群聊只认「最近一次真实唤醒者」；系统触发无唤醒者，responder 将直接拒绝 (Fail-Closed)
+        ...(applicantId ? { applicantId } : {}),
         signal: req.signal,
       });
     },
@@ -1119,6 +1125,16 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
         // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供入站唤醒与上下文跟踪 (Spec §7.1 决策 A)
         const payloadPeer = decision.payload.peer;
+        // 审批申请人锚定：仅真实发送者触发（at/mention/quote/poke/direct）记录最近唤醒者；
+        // 系统触发（proactive/scheduled/internal_agent）清除记录 → 审批直接 Fail-Closed。
+        const initiator = resolveWakeupInitiator(decision.trigger, decision.payload.from_user);
+        if (payloadPeer) {
+          if (initiator) {
+            currentWakeupInitiators.set(payloadPeer, initiator);
+          } else {
+            currentWakeupInitiators.delete(payloadPeer);
+          }
+        }
         const msgIdFromEvent = Number(event.message_id);
         if (msgIdFromEvent) {
           (decision.payload as any).msg_id = msgIdFromEvent;

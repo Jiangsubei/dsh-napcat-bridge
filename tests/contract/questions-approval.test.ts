@@ -147,7 +147,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '清理构建缓存',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -172,7 +172,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '已取消任务',
-      targetUserId: '10001',
+      applicantId: '10001',
       signal: ac.signal,
     });
 
@@ -196,7 +196,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '超时测试',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     const decision = await approvalPromise;
@@ -215,7 +215,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_first',
       reason: '首次操作',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -224,7 +224,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_second',
       reason: '顶替操作',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     const firstDecision = await firstPromise;
@@ -247,7 +247,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_bash',
       reason: '权限测试',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -281,7 +281,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_sensitive_tool',
       reason: '敏感操作',
-      targetUserId: '1000000001',
+      applicantId: '1000000001',
     });
     expect(groupDecision).toBe('rejected');
 
@@ -297,7 +297,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(sendCount).toBe(0);
   });
 
-  it('契约 12: 群聊申请审批的当前发言人非管理员时直接拒绝，且不下发审批消息', async () => {
+  it('契约 12: 群聊最近唤醒者非管理员时直接拒绝，且不下发审批消息', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {
@@ -313,14 +313,14 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_bash',
       reason: '普通群友申请',
-      targetUserId: '99999',
+      applicantId: '99999',
     });
 
     expect(decision).toBe('rejected');
     expect(sent).toHaveLength(0);
   });
 
-  it('契约 13: 群聊申请审批的当前发言人为管理员时正常下发并可放行', async () => {
+  it('契约 13: 群聊最近唤醒者为管理员时正常下发并可放行', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {
@@ -336,7 +336,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_bash',
       reason: '管理员申请',
-      targetUserId: '10001',
+      applicantId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -382,7 +382,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(await adminPromise).toBe('allowed-once');
   });
 
-  it('契约 15: 群聊无法解析发言人身份时采取 Fail-Closed，直接拒绝且不下发', async () => {
+  it('契约 15: 群聊无最近唤醒者（系统触发）时采取 Fail-Closed，直接拒绝且不下发', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {
