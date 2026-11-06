@@ -67,7 +67,7 @@ dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ
      - 工具不再全局暴露到根 `ctx.tools`，杜绝向 Web UI 常规会话泄露；
      - 通过单一真相源 (`src/constants/preset.ts`) 与 `agentPresets` 服务，动态注册 `qq-session` 专属预设，自动为 QQ 会话配置工具集、Shell（pwsh/bash）、工作区与技能系统。
   7. **出站桥接与串行下发**：启动出方向事件流桥接器 (`OutboundStreamBridge`) 与单对端串行发送器 (`PerPeerSerialSender`)。
-  8. **审批与交互响应**：初始化审批瀑布流响应器 (`NapCatApprovalResponder`)。
+  8. **审批与交互响应**：初始化审批瀑布流响应器 (`NapCatApprovalResponder`)。审批请求在下发前先做管理员门控：仅当申请人（私聊取其 QQ 号，群聊取当前发言人）位于 `admins` 白名单时才下发审批消息，否则直接返回 `rejected`；未配置 `admins` 时严格 Fail-Closed 一律拒绝。
   9. **WebUI 设置卡片与 REST 路由**：挂载插件设置路由（`/plugins/dsh-napcat-bridge/config`）与表情包管理端点。配置 REST 路由全面接入宿主 `connection` 服务鉴权（严格遵循 Fail-Closed 策略，无合法身份或宿主鉴权不可用即返回 403 Forbidden 彻底阻断，防御 CSRF 与 DNS Rebinding 风险），并在保存端执行 `ws_token` 必填强校验与过时配置项自愈清理。
 
 ---

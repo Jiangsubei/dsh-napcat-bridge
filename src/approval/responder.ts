@@ -438,6 +438,29 @@ export class NapCatApprovalResponder {
       return 'rejected';
     }
 
+    // 管理员门控（用户拍板）：只有管理员发起的审批才下发弹窗。
+    // 未配置 admins / 无法解析申请人 / 申请人不在白名单 → 直接拒绝，绝不下发任何审批消息。
+    const admins = (this.options?.admins || []).map((a) => String(a).trim()).filter(Boolean);
+    if (admins.length === 0) {
+      this.options?.logger?.warn?.(
+        `[NapCatApprovalResponder] 未配置 admins 管理员白名单，审批请求 ${req.toolName} 已直接拒绝 (Fail-Closed)`
+      );
+      return 'rejected';
+    }
+    const applicantId = this.resolveApplicantId(req);
+    if (!applicantId) {
+      this.options?.logger?.warn?.(
+        `[NapCatApprovalResponder] 无法解析审批申请人身份 (peer: ${req.peer})，审批请求 ${req.toolName} 已直接拒绝 (Fail-Closed)`
+      );
+      return 'rejected';
+    }
+    if (!admins.includes(applicantId)) {
+      this.options?.logger?.warn?.(
+        `[NapCatApprovalResponder] 非管理员 ${applicantId} 发起审批请求 ${req.toolName}，已直接拒绝且不下发`
+      );
+      return 'rejected';
+    }
+
     // 顶替机制 (A4)：同一 peer 发起新审批请求时，前序挂起请求被顶替收敛为 cancelled
     if (this.pendingByPeer.has(req.peer)) {
       const prev = this.pendingByPeer.get(req.peer)!;
@@ -528,6 +551,24 @@ export class NapCatApprovalResponder {
   }
 
   /**
+   * 解析本次审批申请的发起人 QQ 号：
+   * - 私聊 peer 形如 user_<QQ>，直接以 peer 为准（最可靠）；
+   * - 群聊 peer 形如 group_<群号>，取本轮当前发言人 targetUserId（由 index.ts 注入）；
+   * - 无法解析时返回 null，由调用方按 Fail-Closed 直接拒绝。
+   */
+  private resolveApplicantId(req: ApprovalRequestPayload): string | null {
+    const privateMatch = /^user_([0-9]+)$/.exec(req.peer.trim());
+    if (privateMatch) {
+      return privateMatch[1];
+    }
+    if (req.targetUserId === undefined || req.targetUserId === null) {
+      return null;
+    }
+    const target = String(req.targetUserId).trim();
+    return target || null;
+  }
+
+  /**
    * 处理 QQ 端用户的审批决策 (y/n)
    */
   handleInboundReply(
@@ -549,7 +590,9 @@ export class NapCatApprovalResponder {
       return false;
     }
 
-    // 群聊鉴权 (B4/B11)：当配置了管理员列表时，仅允许管理员或指定发起人批准；未配置管理员时，严格仅允许指定发起人批准 (Fail-Closed)
+    // 群聊鉴权 (B4/B11)：审批请求阶段已做管理员门控（申请人与可批者均在 admins 内），
+    // 此处再兜底限制只有管理员（或发起人）可回复 y/n，防止群内其他成员冒充审批。
+    // 注：未配置 admins 时请求阶段已一律拒绝，下方 else 分支仅为防御性兜底。
     if (peer.startsWith('group_') && options?.userId !== undefined) {
       const uid = String(options.userId).trim();
       const admins = (this.options?.admins || []).map((a) => String(a).trim()).filter(Boolean);

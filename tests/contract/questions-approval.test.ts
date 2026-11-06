@@ -141,11 +141,13 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       gateway: {
         sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
       } as any,
+      admins: ['10001'],
     });
     const approvalPromise2 = responder2.handleApprovalRequest({
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '清理构建缓存',
+      targetUserId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -163,12 +165,14 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       gateway: {
         sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
       } as any,
+      admins: ['10001'],
     });
 
     const approvalPromise = responder.handleApprovalRequest({
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '已取消任务',
+      targetUserId: '10001',
       signal: ac.signal,
     });
 
@@ -185,12 +189,14 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
         sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
       } as any,
       timeoutMs: 50,
+      admins: ['10001'],
     });
 
     const approvalPromise = responder.handleApprovalRequest({
       peer: 'group_3000000001',
       toolName: 'execute_dangerous_bash',
       reason: '超时测试',
+      targetUserId: '10001',
     });
 
     const decision = await approvalPromise;
@@ -202,12 +208,14 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       gateway: {
         sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
       } as any,
+      admins: ['10001'],
     });
 
     const firstPromise = responder.handleApprovalRequest({
       peer: 'group_3000000001',
       toolName: 'execute_first',
       reason: '首次操作',
+      targetUserId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -216,6 +224,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_second',
       reason: '顶替操作',
+      targetUserId: '10001',
     });
 
     const firstDecision = await firstPromise;
@@ -238,6 +247,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
       peer: 'group_3000000001',
       toolName: 'execute_bash',
       reason: '权限测试',
+      targetUserId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -254,32 +264,143 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(decision).toBe('allowed-once');
   });
 
-  it('契约 11: 群聊审批未配置管理员白名单时，采取 Fail-Closed 防护，普通群友无法冒充放行，仅允许发起人批准', async () => {
+  it('契约 11: 未配置管理员白名单时一律直接拒绝（严格 Fail-Closed），不下发审批消息', async () => {
+    let sendCount = 0;
     const responder = new NapCatApprovalResponder({
       gateway: {
-        sendMsg: async () => ({ status: 'ok', retcode: 0, data: {} }),
+        sendMsg: async () => {
+          sendCount += 1;
+          return { status: 'ok', retcode: 0, data: {} };
+        },
       } as any,
       admins: [], // 未配置任何管理员
     });
 
-    const approvalPromise = responder.handleApprovalRequest({
+    // 群聊：即便指定了发起人也不放行（无管理员即无人有资格审批）
+    const groupDecision = await responder.handleApprovalRequest({
       peer: 'group_3000000001',
       toolName: 'execute_sensitive_tool',
       reason: '敏感操作',
-      targetUserId: '1000000001', // 指定发起人
+      targetUserId: '1000000001',
+    });
+    expect(groupDecision).toBe('rejected');
+
+    // 私聊：同样一律拒绝
+    const privateDecision = await responder.handleApprovalRequest({
+      peer: 'user_1000000001',
+      toolName: 'execute_sensitive_tool',
+      reason: '敏感操作',
+    });
+    expect(privateDecision).toBe('rejected');
+
+    // 全程未下发任何审批消息
+    expect(sendCount).toBe(0);
+  });
+
+  it('契约 12: 群聊申请审批的当前发言人非管理员时直接拒绝，且不下发审批消息', async () => {
+    const sent: Array<{ peer: string; msg: any }> = [];
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async (peer: string, msg: any) => {
+          sent.push({ peer, msg });
+          return { status: 'ok', retcode: 0, data: {} };
+        },
+      } as any,
+      admins: ['10001'],
+    });
+
+    const decision = await responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_bash',
+      reason: '普通群友申请',
+      targetUserId: '99999',
+    });
+
+    expect(decision).toBe('rejected');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('契约 13: 群聊申请审批的当前发言人为管理员时正常下发并可放行', async () => {
+    const sent: Array<{ peer: string; msg: any }> = [];
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async (peer: string, msg: any) => {
+          sent.push({ peer, msg });
+          return { status: 'ok', retcode: 0, data: {} };
+        },
+      } as any,
+      admins: ['10001'],
+    });
+
+    const approvalPromise = responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_bash',
+      reason: '管理员申请',
+      targetUserId: '10001',
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].peer).toBe('group_3000000001');
 
-    // 普通群友（QQ: 2000000002）回复 y 坚决拒绝放行 (Fail-Closed)
-    const handledStranger = responder.handleInboundReply('group_3000000001', 'y', { userId: '2000000002' });
-    expect(handledStranger).toBe(false);
+    expect(responder.handleInboundReply('group_3000000001', 'y', { userId: '10001' })).toBe(true);
+    expect(await approvalPromise).toBe('allowed-once');
+  });
 
-    // 发起人本尊（QQ: 1000000001）回复 y 正常放行
-    const handledTarget = responder.handleInboundReply('group_3000000001', 'y', { userId: '1000000001' });
-    expect(handledTarget).toBe(true);
+  it('契约 14: 私聊审批按 peer 中的 QQ 号判定管理员，非管理员直接拒绝且不下发', async () => {
+    const sent: Array<{ peer: string; msg: any }> = [];
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async (peer: string, msg: any) => {
+          sent.push({ peer, msg });
+          return { status: 'ok', retcode: 0, data: {} };
+        },
+      } as any,
+      admins: ['10001'],
+    });
 
-    const decision = await approvalPromise;
-    expect(decision).toBe('allowed-once');
+    // 非管理员私聊：直接拒绝，消息不下发
+    const strangerDecision = await responder.handleApprovalRequest({
+      peer: 'user_99999',
+      toolName: 'execute_bash',
+      reason: '普通用户私聊申请',
+    });
+    expect(strangerDecision).toBe('rejected');
+    expect(sent).toHaveLength(0);
+
+    // 管理员私聊：正常下发并等待决策
+    const adminPromise = responder.handleApprovalRequest({
+      peer: 'user_10001',
+      toolName: 'execute_bash',
+      reason: '管理员私聊申请',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].peer).toBe('user_10001');
+
+    expect(responder.handleInboundReply('user_10001', 'y')).toBe(true);
+    expect(await adminPromise).toBe('allowed-once');
+  });
+
+  it('契约 15: 群聊无法解析发言人身份时采取 Fail-Closed，直接拒绝且不下发', async () => {
+    const sent: Array<{ peer: string; msg: any }> = [];
+    const responder = new NapCatApprovalResponder({
+      gateway: {
+        sendMsg: async (peer: string, msg: any) => {
+          sent.push({ peer, msg });
+          return { status: 'ok', retcode: 0, data: {} };
+        },
+      } as any,
+      admins: ['10001'],
+    });
+
+    const decision = await responder.handleApprovalRequest({
+      peer: 'group_3000000001',
+      toolName: 'execute_bash',
+      reason: '主动触发且无发言人',
+    });
+
+    expect(decision).toBe('rejected');
+    expect(sent).toHaveLength(0);
   });
 });

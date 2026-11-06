@@ -77,6 +77,7 @@ describe('契约测试: 共享 per-peer 串行发送器保序 (Spec §7.3 / P-02
       gateway: gateway as any,
       sessionManager,
       sender,
+      admins: ['10001'],
     });
 
     // 1. 正文回复（出站桥接器使用同一 sender 契约）——首任务带 30ms 延迟，验证队列强制等待
@@ -97,6 +98,7 @@ describe('契约测试: 共享 per-peer 串行发送器保序 (Spec §7.3 / P-02
       peer: PEER,
       toolName: 'execute_bash',
       reason: '清理缓存',
+      targetUserId: '10001',
       signal: new AbortController().signal,
     });
 
