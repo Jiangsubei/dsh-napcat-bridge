@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import WebSocket from 'ws';
+import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import { PLUGIN_NAME } from '../../src/constants/index.js';
 import * as NapCatBridgePlugin from '../../src/index.js';
@@ -202,5 +203,34 @@ describe('契约测试: DSH 真实服务装配与插件挂载 (Assembly Contract
     const asmQq = await booted.ctx.systemPrompt.assemble({ scope: qqAgent, agent: qqAgent } as any);
     const qqNapcat = (asmQq.tools as any[]).filter((t) => NAPCAT_TOOLS.has(t.name));
     expect(qqNapcat.map((t) => t.name).sort()).toEqual([...NAPCAT_TOOLS].sort());
+  });
+
+  it('断言 7: 审批本轮唤醒者追踪器真实装配，并经 session/event 严格绑定与清理', async () => {
+    const sessionManager: any = (booted.ctx as any)['napcat-session'];
+    expect(sessionManager).toBeDefined();
+
+    const tracker = sessionManager.getTurnInitiatorTracker?.();
+    expect(tracker).toBeDefined();
+
+    const handle = await booted.ctx.agents.create({
+      sessionId: 'qq-group-1003',
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      meta: { cwd: path.join(tmpHome, 'qq-ws-3') },
+    });
+    const agent = handle.agent || handle;
+    const session = agent.session;
+
+    const userMsg = createUserMessage({
+      content: [{ type: 'text', text: '审批装配探针' }],
+      source: { kind: 'user' },
+    });
+
+    expect(tracker.expect(userMsg.id, session.id, '1000000002')).toBe(true);
+    session.append('turn/start', { turn: 1 });
+    session.append('user/message', userMsg, { surfaceOp: 'append' });
+    expect(tracker.getInitiator(session.id)).toBe('1000000002');
+
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    expect(tracker.getInitiator(session.id)).toBeUndefined();
   });
 });

@@ -86,6 +86,7 @@ import { DEFAULT_NEW_MESSAGE_BEHAVIOR } from '../../constants/index.js';
 import { resolveLocalMediaPath } from '../../attachment/classify.js';
 import { detectBufferExt } from '../../storage/media.js';
 import type { WakeupPayload } from '../../types/index.js';
+import { TurnInitiatorTracker, resolveWakeupInitiator } from '../../approval/turn-initiator.js';
 import {
   RemoteError,
   SessionAlreadyOwnedError,
@@ -131,6 +132,8 @@ export class SessionAgentRunner {
   private persistedSessions = new Set<string>();
   private pendingFirstTurnSessions = new Set<string>();
   private outboundBridge?: OutboundBridgeLike;
+  /** 审批「本轮唤醒者」追踪器（由插件根 Context 注入并订阅 session/event） */
+  private turnInitiatorTracker?: TurnInitiatorTracker;
 
   constructor(
     private readonly ctx: Context,
@@ -201,6 +204,14 @@ export class SessionAgentRunner {
 
   public getOutboundBridge(): OutboundBridgeLike | undefined {
     return this.outboundBridge;
+  }
+
+  public setTurnInitiatorTracker(tracker: TurnInitiatorTracker | undefined): void {
+    this.turnInitiatorTracker = tracker;
+  }
+
+  public getTurnInitiatorTracker(): TurnInitiatorTracker | undefined {
+    return this.turnInitiatorTracker;
   }
 
   public getActiveTurn(peer: string): number | undefined {
@@ -890,6 +901,13 @@ export class SessionAgentRunner {
       content: [{ type: 'text', text: promptText }, ...imageBlocks],
       source: { kind: 'user' },
     });
+
+    // 审批「本轮唤醒者」登记：只登记真实 QQ 发送者唤醒（系统触发返回 null）。
+    // 必须在 followup/steer 之前登记——followup 可能同步 append turn/start。
+    const wakeupInitiator = resolveWakeupInitiator(payload.trigger, payload.from_user);
+    if (wakeupInitiator) {
+      this.turnInitiatorTracker?.expect(userMsg?.id, sessionId, wakeupInitiator);
+    }
 
     if (isNoMessageWakeup && this.outboundBridge && userMsg?.id) {
       const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');

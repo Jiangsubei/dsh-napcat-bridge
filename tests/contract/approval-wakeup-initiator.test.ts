@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveWakeupInitiator } from '../../src/approval/responder.js';
 
-describe('契约测试: 审批申请人锚定「最近唤醒者」 (Approval Wakeup Initiator)', () => {
+describe('契约测试: 审批唤醒发起人判定（本轮登记口径） (Approval Wakeup Initiator)', () => {
   it('契约 1: 真实 QQ 发送者唤醒（at/mention/quote/poke/direct）记录其 QQ 号', () => {
     for (const trigger of ['at', 'mention', 'quote', 'poke', 'direct']) {
       expect(resolveWakeupInitiator(trigger, '10001')).toBe('10001');

@@ -297,7 +297,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(sendCount).toBe(0);
   });
 
-  it('契约 12: 群聊最近唤醒者非管理员时直接拒绝，且不下发审批消息', async () => {
+  it('契约 12: 群聊本轮唤醒者非管理员时直接拒绝，且不下发审批消息', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {
@@ -320,7 +320,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(sent).toHaveLength(0);
   });
 
-  it('契约 13: 群聊最近唤醒者为管理员时正常下发并可放行', async () => {
+  it('契约 13: 群聊本轮唤醒者为管理员时正常下发并可放行', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {
@@ -382,7 +382,7 @@ describe('契约测试: 提问与审批官方 Provider 状态机协同 (Question
     expect(await adminPromise).toBe('allowed-once');
   });
 
-  it('契约 15: 群聊无最近唤醒者（系统触发）时采取 Fail-Closed，直接拒绝且不下发', async () => {
+  it('契约 15: 群聊无本轮唤醒者（系统触发 / 轮次外）时采取 Fail-Closed，直接拒绝且不下发', async () => {
     const sent: Array<{ peer: string; msg: any }> = [];
     const responder = new NapCatApprovalResponder({
       gateway: {

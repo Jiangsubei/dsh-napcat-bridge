@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
 import type { MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
+import type { TurnInitiatorTracker } from '../approval/turn-initiator.js';
 import { buildInternalMessageRecords } from '../storage/internal-message.js';
 import { encodeSegment } from '../utils/path.js';
 
@@ -177,6 +178,14 @@ export class SessionManager {
 
   public getOutboundBridge(): OutboundBridgeLike | undefined {
     return this.agentRunner.getOutboundBridge();
+  }
+
+  public setTurnInitiatorTracker(tracker: TurnInitiatorTracker | undefined): void {
+    this.agentRunner.setTurnInitiatorTracker(tracker);
+  }
+
+  public getTurnInitiatorTracker(): TurnInitiatorTracker | undefined {
+    return this.agentRunner.getTurnInitiatorTracker();
   }
 
   public getActiveTurn(peer: string): number | undefined {

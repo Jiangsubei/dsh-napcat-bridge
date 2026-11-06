@@ -38,7 +38,8 @@ import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound
 import { describeMessage, toMessageMediaFields } from './attachment/classify.js';
 import { serializeAttachments } from './attachment/store.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
-import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel, resolveWakeupInitiator } from './approval/responder.js';
+import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
+import { TurnInitiatorTracker } from './approval/turn-initiator.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
 import { setupSnapshotHub, type SnapshotManager } from './prompt/snapshot.js';
@@ -332,6 +333,20 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   });
 
   const sessionManager = new SessionManager(ctx, dshHome, db, { configGetter: currentConfig });
+
+  // 审批「本轮唤醒者」追踪：由 dispatchWakeup 登记唤醒消息，根 Context 订阅官方
+  // session/event（turn/start / user/message / turn/end）维护严格本轮归属。
+  // 普通插话、群友刷屏与排队轮次互不覆盖；系统触发不登记 → 审批 Fail-Closed。
+  const turnInitiatorTracker = new TurnInitiatorTracker({ maxExpectations: 256 });
+  sessionManager.setTurnInitiatorTracker(turnInitiatorTracker);
+  const unregisterTurnInitiator = (ctx as any).on?.('session/event', (session: any, event: any) => {
+    try {
+      turnInitiatorTracker.observe(session, event);
+    } catch (err) {
+      logger.warn?.('[Plugin] 本轮唤醒者追踪器处理 session/event 失败:', err);
+    }
+  });
+
   sessionManager.registerWorkspace(sessionManager.resolveCwd()).catch((wsErr) => {
     logger.warn?.('[Plugin] 初始化注册 NapCat 顶级工作区失败:', wsErr);
   });
@@ -379,10 +394,6 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
 
   // 5. 初始化并挂载 Memory 两层记忆体系插件服务 (storageDir 严格绝对路径锚定到 dshHome)
   const currentSpeakers = new Map<string, string>();
-  // 最近一次「真实唤醒」的发起人 QQ（按 peer 记录）：
-  // 仅供审批申请人判定使用，普通插话/闲聊不覆盖，避免群友刷屏顶掉管理员的审批资格。
-  // 系统触发（定时任务 / 主动冒泡 / 内部 Agent）会清除对应记录，使审批直接 Fail-Closed。
-  const currentWakeupInitiators = new Map<string, string>();
   const rawMemoryDir = currentConfig().memory_storage_dir;
   const normalizedMemoryDir = resolveDshPath(dshHome, rawMemoryDir, DEFAULT_MEMORY_DIR);
 
@@ -553,13 +564,14 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         return next ? next() : 'unavailable';
       }
       const peer = sessionManager.sessionIdToPeer(sessionId);
-      const applicantId = currentWakeupInitiators.get(peer);
+      // 群聊只认「开启当前轮次的那条真实唤醒消息的发送者」；系统触发 / 轮次外无归属时
+      // responder 直接拒绝 (Fail-Closed)，普通群友刷屏与 steer 插话不会覆盖。
+      const applicantId = turnInitiatorTracker.getInitiator(sessionId);
       return await approvalResponder.handleApprovalRequest({
         peer,
         toolName: req.toolName,
         callId: req.callId,
         reason: req.reason,
-        // 群聊只认「最近一次真实唤醒者」；系统触发无唤醒者，responder 将直接拒绝 (Fail-Closed)
         ...(applicantId ? { applicantId } : {}),
         signal: req.signal,
       });
@@ -1124,17 +1136,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         }
 
         // A1: 记录唤醒源消息上下文 (msg_id + 提问者 QQ)，供入站唤醒与上下文跟踪 (Spec §7.1 决策 A)
+        // 审批申请人由 turnInitiatorTracker 在 dispatchWakeup 登记、按 session/event 严格绑定本轮，
+        // 此处不再维护 peer 维度的「最近唤醒者」锚点。
         const payloadPeer = decision.payload.peer;
-        // 审批申请人锚定：仅真实发送者触发（at/mention/quote/poke/direct）记录最近唤醒者；
-        // 系统触发（proactive/scheduled/internal_agent）清除记录 → 审批直接 Fail-Closed。
-        const initiator = resolveWakeupInitiator(decision.trigger, decision.payload.from_user);
-        if (payloadPeer) {
-          if (initiator) {
-            currentWakeupInitiators.set(payloadPeer, initiator);
-          } else {
-            currentWakeupInitiators.delete(payloadPeer);
-          }
-        }
         const msgIdFromEvent = Number(event.message_id);
         if (msgIdFromEvent) {
           (decision.payload as any).msg_id = msgIdFromEvent;
@@ -1524,6 +1528,10 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     if (typeof unregisterQuestionChannel === 'function') {
       unregisterQuestionChannel();
     }
+    if (typeof unregisterTurnInitiator === 'function') {
+      unregisterTurnInitiator();
+    }
+    turnInitiatorTracker.clear();
     if (snapshotManager) {
       snapshotManager.dispose();
       snapshotManager = null;

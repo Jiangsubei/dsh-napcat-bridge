@@ -383,36 +383,16 @@ export function registerNapCatQuestionChannel(
 
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
 
-/**
- * 「真实 QQ 发送者」触发的唤醒类型：只有这些唤醒才能成为审批申请人锚点。
- * 系统触发（proactive/scheduled/internal_agent）不在此列，会清除锚点并让审批 Fail-Closed。
- */
-const REAL_SENDER_WAKEUP_TRIGGERS = new Set(['at', 'mention', 'quote', 'poke', 'direct']);
-
-/**
- * 计算某 peer 的审批申请人锚点更新值（最近唤醒者）：
- * - 真实 QQ 发送者唤醒 → 返回其 QQ 号（调用方应覆盖该 peer 的锚点）；
- * - 系统触发 / 非数字身份（内部 SessionId、'agent'、'system' 等）→ 返回 null
- *   （调用方应清除锚点，使后续审批直接 Fail-Closed）。
- */
-export function resolveWakeupInitiator(
-  trigger: string | undefined | null,
-  fromUser: string | number | undefined | null
-): string | null {
-  const normalizedTrigger = String(trigger || '').trim();
-  if (!REAL_SENDER_WAKEUP_TRIGGERS.has(normalizedTrigger)) {
-    return null;
-  }
-  const uid = fromUser === undefined || fromUser === null ? '' : String(fromUser).trim();
-  return /^[0-9]+$/.test(uid) ? uid : null;
-}
+// 唤醒发起人的统一判定口径由 turn-initiator 模块提供；
+// 这里保留 re-export 以兼容既有调用方与契约测试的导入路径。
+export { resolveWakeupInitiator } from './turn-initiator.js';
 
 export interface ApprovalRequestPayload {
   peer: string;
   toolName: string;
   callId?: string;
   reason?: string;
-  /** 本轮/最近一次唤醒发起人 QQ 号（群聊必填；私聊以 peer 中的 QQ 为准） */
+  /** 本轮唤醒者 QQ 号（群聊必填；私聊以 peer 中的 QQ 为准） */
   applicantId?: string;
   signal?: AbortSignal;
 }
