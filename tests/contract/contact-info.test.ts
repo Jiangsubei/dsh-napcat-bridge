@@ -234,12 +234,10 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
         user_id: '1000000001',
         nickname: 'Alice',
         remark: '小爱(助理)',
-        long_nick: '随时在线',
-        sex: 'female',
-        age: 24,
-        level: 30,
       });
       // 确认无冗余字段
+      expect((res.friends[0] as any).long_nick).toBeUndefined();
+      expect((res.friends[0] as any).sex).toBeUndefined();
       expect((res.friends[0] as any).phone_num).toBeUndefined();
       expect((res.friends[0] as any).is_qq_vip).toBeUndefined();
       // Lossless JSON 检验
@@ -257,7 +255,7 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       assertNoUndefinedFields(res2);
     });
 
-    it('分页逻辑契约: 支持 offset 与 limit 分页并生成可直接回填的 next_offset', async () => {
+    it('分页逻辑契约: 支持 offset 与 limit 分页并给出翻页提示', async () => {
       const res = await queryFriendList({ offset: 0, limit: 2 }, { gateway: mockGateway });
       expect(res.friends).toHaveLength(2);
       expect(res.total).toBe(2);
@@ -265,7 +263,7 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(res.offset).toBe(0);
       expect(res.limit).toBe(2);
       expect(res.has_more).toBe(true);
-      expect(res.next_offset).toBe(2);
+      expect((res as any).next_offset).toBeUndefined();
       expect(res.message).toContain('本次展示序号 1~2');
       expect(res.message).toContain('继续浏览请传入 offset: 2');
       expect((res as any).page).toBeUndefined();
@@ -279,7 +277,7 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(resSecond.friends[0].user_id).toBe('1000000003');
       expect(resSecond.offset).toBe(2);
       expect(resSecond.has_more).toBe(false);
-      expect(resSecond.next_offset).toBeUndefined();
+      expect((resSecond as any).next_offset).toBeUndefined();
       expect(resSecond.message).toContain('已展示至最后一页');
 
       const resOut = await queryFriendList({ offset: 99, limit: 20 }, { gateway: mockGateway });
@@ -396,11 +394,9 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
         group_id: '8000000001',
         group_name: '核心技术交流群',
         group_remark: '技术1群',
-        member_count: 88,
-        max_member_count: 200,
-        group_memo: '提问前看置顶',
-        group_create_time: 1585055594,
       });
+      expect((res.groups[0] as any).member_count).toBeUndefined();
+      expect((res.groups[0] as any).group_memo).toBeUndefined();
       assertNoUndefinedFields(res);
     });
 
@@ -413,20 +409,21 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       assertNoUndefinedFields(res);
     });
 
-    it('Render 契约: output.render 必须格式化输出群明细 (含 group_id、群名与人数)，绝不可仅返回数量汇总', async () => {
+    it('Render 契约: output.render 必须格式化输出群明细 (含 group_id、群名与备注)，绝不可仅返回数量汇总', async () => {
       const tool = createGetGroupListTool(() => ({ gateway: mockGateway }));
       const res = await queryGroupList({}, { gateway: mockGateway });
       const rendered = (tool as any).output.render({}, res);
       expect(rendered).toHaveLength(1);
       const text = rendered[0].text;
-      // 必须包含具体群号、群名与人数明细
+      // 必须包含具体群号、群名与备注明细
       expect(text).toContain('8000000001');
       expect(text).toContain('核心技术交流群');
-      expect(text).toContain('88/200');
+      expect(text).toContain('技术1群');
       expect(text).toContain('1. **核心技术交流群**');
+      expect(text).not.toContain('88/200');
     });
 
-    it('分页与确定性排序契约: offset/limit 切片按 group_id 升序并返回 next_offset', async () => {
+    it('分页与确定性排序契约: offset/limit 切片按 group_id 升序并给出翻页提示', async () => {
       const shuffledGateway = {
         getGroupList: async () => ({
           status: 'ok',
@@ -444,7 +441,7 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(first.offset).toBe(0);
       expect(first.total_matched).toBe(3);
       expect(first.has_more).toBe(true);
-      expect(first.next_offset).toBe(2);
+      expect((first as any).next_offset).toBeUndefined();
 
       const second = await queryGroupList({ offset: 2, limit: 2 }, { gateway: shuffledGateway });
       expect(second.groups.map((g) => g.group_id)).toEqual(['8000000003']);

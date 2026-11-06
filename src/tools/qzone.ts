@@ -142,7 +142,6 @@ export async function readQzoneFeeds(
   try {
     const feedItems: QzoneFeedItem[] = [];
     let hasMore = false;
-    let nextOffset: number | undefined = undefined;
     let nextCursor: string | undefined = undefined;
 
     if (scope === 'friends') {
@@ -244,11 +243,6 @@ export async function readQzoneFeeds(
       // 2. 协议端在最后一轮仍然明确还有更多且提供了 next_cursor。
       const hasRemainingInPool = validFeeds.length > startIndex + sliced.length;
       hasMore = hasRemainingInPool || (protoHasMore && Boolean(latestNextCursor));
-
-      if (hasMore) {
-        // 自适应严谨计算：严格按照实际交付条目数累加，严禁直接 + limit 跳号
-        nextOffset = startIndex + sliced.length;
-      }
 
       if (latestNextCursor) {
         nextCursor = latestNextCursor;
@@ -369,9 +363,6 @@ export async function readQzoneFeeds(
       const sliced = validFeeds.slice(startIndex, startIndex + limit);
       const total = Number(res?.data?.total) || validFeeds.length;
       hasMore = total > offset + startIndex + sliced.length;
-      if (hasMore) {
-        nextOffset = offset + startIndex + sliced.length;
-      }
 
       for (const item of sliced) {
         const feedId = item.tid || '';
@@ -418,7 +409,6 @@ export async function readQzoneFeeds(
       scope,
       feeds: feedItems,
       has_more: hasMore,
-      ...(nextOffset !== undefined ? { next_offset: nextOffset } : {}),
       ...(nextCursor ? { next_cursor: nextCursor } : {}),
       message: `成功拉取到 ${feedItems.length} 条空间动态`,
     });

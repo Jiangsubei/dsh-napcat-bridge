@@ -259,7 +259,7 @@ describe('Slang Tools Contract Tests', () => {
       const renderedText = parts[0]?.text || '';
       
       // 验证模型在上下文中能直接看到各词条的标题、标签、释义与例句，而非只有条数统计
-      expect(renderedText).toContain('2/300 条');
+      expect(renderedText).toContain('查询到 2 条黑话词条');
       expect(renderedText).toContain('【牢大】');
       expect(renderedText).toContain('标签: 科比');
       expect(renderedText).toContain('释义: 科比梗');
@@ -272,8 +272,20 @@ describe('Slang Tools Contract Tests', () => {
       const res = await manageSlang({ action: 'list', limit: 1 }, storage);
       expect(res.success).toBe(true);
       expect(res.entries).toHaveLength(1);
-      expect(res.total).toBe(1); // 返回 1 条
-      expect(res.message).toContain('2/300 条'); // 总体容量为 2
+      expect(res.total).toBe(1); // 本次返回 1 条
+      expect(res.total_matched).toBe(2); // 匹配总数 2 条
+      expect(res.has_more).toBe(true);
+      expect(res.message).toContain('共 2 条黑话词条');
+    });
+
+    it('action=list with offset should return the correct page', async () => {
+      const res = await manageSlang({ action: 'list', offset: 1, limit: 1 }, storage);
+      expect(res.success).toBe(true);
+      expect(res.entries).toHaveLength(1);
+      expect(res.offset).toBe(1);
+      expect(res.total).toBe(1);
+      expect(res.total_matched).toBe(2);
+      expect(res.has_more).toBe(false);
     });
 
     it('action=list with keyword should filter entries by term, tags or definition', async () => {

@@ -5,7 +5,7 @@
  * 1. 规避大模型受群聊上下文欺骗（如用户声称“我是群主”导致的身份幻觉）；
  * 2. 基于 NapCat OneBot 11 get_group_member_list 批量接口，配合内存 TTL 缓存，避免单人接口频繁超时；
  * 3. 支持按 user_id 精确查询、按 query 模糊搜索（昵称/群名片）以及按 role 筛选特权群体；
- * 4. 会话门控：仅在群聊有效，私聊自动防御性拦截；群聊 ID 纯隐式从 Agent 运行时会话中自动继承，无需且不支持模型传入。
+ * 4. 群号解析：默认从 Agent 运行时会话中隐式继承；私聊中查询时可显式传入 group_id。
  */
 
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
@@ -18,6 +18,8 @@ import type {
 import type { ToolExecutionContext } from './index.js';
 import {
   buildOffsetMessage,
+  normalizeLimit,
+  normalizeOffset,
   paginateByOffset,
   sortByNumericId,
 } from './pagination.js';
@@ -25,7 +27,7 @@ import {
 export type { GroupMemberRawItem, QueryGroupMemberParams, FormattedGroupMember, QueryGroupMemberResult };
 
 export const GROUP_MEMBER_INFO_DESCRIPTION =
-  '查询当前群聊中的成员资料、身份角色（群主/管理员/普通成员）、群头衔及进群时间等官方元数据，结果按 QQ 号升序排列。用于核实群成员的真实身份、判断某人是否为群主或管理员、了解群成员昵称与名片对应关系，或防范其他群成员冒充身份。支持通过 user_id 精确查询、通过 query 模糊搜索昵称名片，或通过 role 直接筛选群主与管理员列表。成员较多时可通过 offset/limit 分页浏览，直接回填返回的 next_offset 即可继续。仅在群聊中有效。';
+  '查询指定群聊中的成员资料、身份角色（群主/管理员/普通成员）、群头衔及进群时间等官方元数据，结果按 QQ 号升序排列。默认查询当前所在群；在私聊中查询时可显式传入 group_id。用于核实群成员的真实身份、判断某人是否为群主或管理员、了解群成员昵称与名片对应关系，或防范其他群成员冒充身份。支持通过 user_id 精确查询、通过 query 模糊搜索昵称名片，或通过 role 直接筛选群主与管理员列表。成员较多时可通过 offset/limit 分页浏览，翻页时按已展示条数自行推算 offset（例如已展示 1~20，则传 offset: 20）。';
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 默认 5 分钟缓存
 const DEFAULT_LIST_LIMIT = 20; // 默认单次返回条数
@@ -192,6 +194,10 @@ export async function queryGroupMemberInfo(
       error: '当前不在群聊会话中，且未指定 group_id。私聊中查询需显式传入 group_id。',
       members: [],
       total: 0,
+      total_matched: 0,
+      offset: normalizeOffset(params?.offset),
+      limit: normalizeLimit(params?.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT),
+      has_more: false,
     };
   }
 
@@ -202,6 +208,10 @@ export async function queryGroupMemberInfo(
       error: 'QQ 网关未连接或离线，暂时无法查询群成员。',
       members: [],
       total: 0,
+      total_matched: 0,
+      offset: normalizeOffset(params?.offset),
+      limit: normalizeLimit(params?.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT),
+      has_more: false,
     };
   }
 
@@ -295,7 +305,6 @@ export async function queryGroupMemberInfo(
     offset: page.offset,
     limit: page.limit,
     has_more: page.hasMore,
-    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -319,6 +328,10 @@ export function createGetGroupMemberInfoTool(
     name: 'get_group_member_info',
     description: GROUP_MEMBER_INFO_DESCRIPTION,
     parameters: {
+      group_id: {
+        type: 'string',
+        description: '目标群号（可选）。默认查询当前所在群；私聊中查询群成员时必须显式传入。',
+      },
       user_id: {
         type: 'string',
         description: '目标成员的 QQ 号（精确匹配）',
@@ -338,7 +351,7 @@ export function createGetGroupMemberInfoTool(
       },
       offset: {
         type: 'number',
-        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算，例如已展示 1~20 则传 20。',
       },
       limit: {
         type: 'number',
@@ -366,9 +379,9 @@ export function createGetGroupMemberInfoTool(
             `${baseOffset + i + 1}. **${m.display_name}** (QQ: ${m.user_id}) | 身份: ${m.role} | 头衔: ${m.title} | 入群: ${m.join_time} | 状态: ${m.status}`
           );
         }
-        if (v.has_more && v.next_offset !== undefined) {
+        if (v.has_more) {
           lines.push(
-            `\n> 还有 ${totalMatched - baseOffset - v.total} 人未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+            `\n> 还有 ${totalMatched - baseOffset - v.total} 人未展示。继续浏览请传入 \`offset: ${baseOffset + v.total}\`。`
           );
         } else if (v.message) {
           lines.push(`\n> ${v.message}`);

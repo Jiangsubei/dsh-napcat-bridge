@@ -397,7 +397,7 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     assertNoUndefinedDeep(res);
   });
 
-  it('2.6 自动多页聚合补齐 (Fill-to-Limit) 与自适应严谨 next_offset 计算契约', async () => {
+  it('2.6 自动多页聚合补齐 (Fill-to-Limit) 与游标分页契约', async () => {
     // 场景 A: 请求 limit=5，第一页过滤后只有 2 条有效说说，底层自动沿 cursor 补拉第二页凑齐 5 条
     const mockGatewayA: any = {
       sendAction: vi.fn().mockImplementation((action: string, params: any) => {
@@ -452,13 +452,13 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     expect(resA.feeds.map(f => f.feed_id)).toEqual(['real_1', 'real_2', 'real_3', 'real_4', 'real_5']);
     // 验证：has_more 为 true
     expect(resA.has_more).toBe(true);
-    // 验证：自适应严格计算 next_offset = startIndex + sliced.length = 0 + 5 = 5 (绝不直接加 limit 跳号)
-    expect(resA.next_offset).toBe(5);
+    // 验证：游标分页不再暴露 next_offset，仅保留 next_cursor
+    expect((resA as any).next_offset).toBeUndefined();
     // 验证：next_cursor 精确为第二轮的最新游标
     expect(resA.next_cursor).toBe('cursor_round_2');
     assertNoUndefinedDeep(resA);
 
-    // 场景 B: 数据未满额终结场景，验证自适应严谨 next_offset 计算
+    // 场景 B: 数据未满额终结场景，验证游标分页不返回 next_offset
     // 用户请求 limit=10, offset=2，但整个空间过滤后共 5 条真实动态，切片交付 3 条（索引 2~4），且无更多
     const mockGatewayB: any = {
       sendAction: vi.fn().mockResolvedValue({
@@ -487,7 +487,7 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     expect(resB.feeds).toHaveLength(3);
     expect(resB.feeds.map(f => f.feed_id)).toEqual(['f_3', 'f_4', 'f_5']);
     expect(resB.has_more).toBe(false);
-    expect(resB.next_offset).toBeUndefined(); // 无更多时不应返回 next_offset
+    expect((resB as any).next_offset).toBeUndefined();
     assertNoUndefinedDeep(resB);
   });
 

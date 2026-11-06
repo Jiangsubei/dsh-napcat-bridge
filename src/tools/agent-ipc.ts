@@ -26,6 +26,12 @@ import type {
 } from '../types/index.js';
 import type { ToolExecutionContext } from './index.js';
 import { toLosslessJson } from './member-info.js';
+import {
+  buildOffsetMessage,
+  normalizeLimit,
+  normalizeOffset,
+  paginateByOffset,
+} from './pagination.js';
 import { parsePeerTarget } from '../gateway/session/agent-runner.js';
 import { parseSessionId } from '../gateway/session/id-resolver.js';
 
@@ -49,18 +55,28 @@ function withInvocationSession(ctx: ToolExecutionContext, exec: any): ToolExecut
 // ==================== 1. list_active_agents (查询活跃 Agent 列表) ====================
 
 export const LIST_ACTIVE_AGENTS_DESCRIPTION =
-  '查询当前系统内处于活跃或已实例化的 Agent 会话列表。返回会话的 Session ID、绑定的目标 Peer、目标类型 (user/group)、目标 QQ 号或群号，以及当前是否正处于繁忙思考状态。用于在发起跨会话协同前探查寻址。';
+  '按 offset 分页查询当前系统内处于活跃或已实例化的 Agent 会话列表。每条结果返回连续行号、会话的 Session ID、绑定的目标 Peer、目标类型 (user/group)、目标 QQ 号或群号，以及当前是否正处于繁忙思考状态。用于在发起跨会话协同前探查寻址；翻页时按已展示条数自行推算 offset（例如已展示 1~20，则传 offset: 20）。';
+
+const DEFAULT_ACTIVE_AGENTS_LIMIT = 20;
+const MAX_ACTIVE_AGENTS_LIMIT = 50;
 
 export async function queryActiveAgents(
   params: ListActiveAgentsParams,
   ctx: ToolExecutionContext
 ): Promise<ListActiveAgentsResult> {
+  const offset = normalizeOffset(params?.offset);
+  const limit = normalizeLimit(params?.limit, DEFAULT_ACTIVE_AGENTS_LIMIT, MAX_ACTIVE_AGENTS_LIMIT);
   const sessionManager = ctx.sessionManager;
   if (!sessionManager) {
     return toLosslessJson({
       success: true,
       agents: [],
       total: 0,
+      total_matched: 0,
+      offset,
+      limit,
+      has_more: false,
+      message: '当前暂无活跃的 QQ Agent 会话。',
     });
   }
 
@@ -127,10 +143,32 @@ export async function queryActiveAgents(
     });
   }
 
+  const page = paginateByOffset(agents, { offset, limit }, {
+    defaultLimit: DEFAULT_ACTIVE_AGENTS_LIMIT,
+    maxLimit: MAX_ACTIVE_AGENTS_LIMIT,
+  });
+
+  const message =
+    page.totalMatched === 0
+      ? '当前暂无活跃的 QQ Agent 会话。'
+      : buildOffsetMessage({
+          offset: page.offset,
+          returned: page.returned,
+          totalMatched: page.totalMatched,
+          hasMore: page.hasMore,
+          ...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+          unit: '个 Agent',
+        });
+
   return toLosslessJson({
     success: true,
-    agents,
-    total: agents.length,
+    agents: page.items,
+    total: page.returned,
+    total_matched: page.totalMatched,
+    offset: page.offset,
+    limit: page.limit,
+    has_more: page.hasMore,
+    ...(message ? { message } : {}),
   });
 }
 
@@ -146,6 +184,14 @@ export function createListActiveAgentsTool(
         enum: ['user', 'group'],
         description: '可选的目标类型筛选: "user" 仅查看私聊用户 Agent, "group" 仅查看群聊 Agent',
       },
+      offset: {
+        type: 'number',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算。',
+      },
+      limit: {
+        type: 'number',
+        description: '单次返回数量 (默认 20，上限 50)',
+      },
     },
     output: {
       schema: { type: 'json' },
@@ -160,13 +206,19 @@ export function createListActiveAgentsTool(
             },
           ];
         }
-        const lines: string[] = [`### 当前活跃 QQ Agent 列表 (共 ${v.total} 个)`];
-        for (const a of v.agents) {
+        const lines: string[] = [`### 当前活跃 QQ Agent 列表 (序号 ${v.offset + 1}~${v.offset + v.total} / 共 ${v.total_matched} 个)`];
+        for (let i = 0; i < v.agents.length; i++) {
+          const a = v.agents[i];
           const typeLabel = a.target_type === 'user' ? '私聊好友' : '群聊';
           const namePart = a.name ? `【${a.name}】` : '';
           const busyTag = a.is_busy ? ' (正在思考处理中)' : ' (空闲)';
           lines.push(
-            `- **${typeLabel} Agent**${namePart} (ID: \`${a.target_id}\`)${busyTag}\n  - Session ID: \`${a.session_id}\``
+            `${v.offset + i + 1}. **${typeLabel} Agent**${namePart} (ID: \`${a.target_id}\`)${busyTag}\n  - Session ID: \`${a.session_id}\``
+          );
+        }
+        if (v.has_more) {
+          lines.push(
+            `\n> 还有 ${v.total_matched - v.offset - v.total} 个未展示。继续浏览请传入 \`offset: ${v.offset + v.total}\`。`
           );
         }
         lines.push(

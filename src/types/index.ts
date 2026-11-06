@@ -266,6 +266,8 @@ export interface ReadChatHistoryParams {
    * 'all' = 不过滤（两者都返回）。缺省按 'qq' 处理（历史查询默认不展示内部通讯）。
    */
   source?: MessageSource | 'all' | Array<MessageSource | 'all'>;
+  /** 起始序号偏移，从 0 开始 (默认 0) */
+  offset?: number;
   /** 返回最大条数 (默认 20，上限 100) */
   limit?: number;
   /** 时间排序 (默认 'desc' 倒序，取最新消息) */
@@ -293,7 +295,14 @@ export interface ChatMessageSummary {
 
 export interface ReadChatHistoryResult {
   messages: ChatMessageSummary[];
+  /** 本次实际返回条数 */
   total: number;
+  /** 过滤后匹配的总条数 */
+  total_matched: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  message?: string;
 }
 
 export interface ListGroupFilesParams {
@@ -307,6 +316,8 @@ export interface ListGroupFilesParams {
   since?: number | string;
   /** 截止时间: 支持毫秒数字、秒级数字、相对时间或日期时间字符串 */
   until?: number | string;
+  /** 起始序号偏移，从 0 开始 (默认 0) */
+  offset?: number;
   /** 返回最大条数 (默认 20，上限 100) */
   limit?: number;
   /** 时间排序 (默认 'desc' 倒序，取最新上传的文件) */
@@ -328,7 +339,14 @@ export interface GroupFileInfo {
 export interface ListGroupFilesResult {
   success?: boolean;
   files: GroupFileInfo[];
+  /** 本次实际返回条数 */
   total: number;
+  /** 过滤后匹配的总条数 */
+  total_matched: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  message?: string;
   error?: string;
 }
 
@@ -394,7 +412,6 @@ export interface QueryGroupMemberResult {
   offset?: number;
   limit?: number;
   has_more?: boolean;
-  next_offset?: number;
   error?: string;
   message?: string;
 }
@@ -595,7 +612,6 @@ export interface ListFacesResult {
   offset: number;
   limit: number;
   has_more: boolean;
-  next_offset?: number;
   message?: string;
 }
 
@@ -771,6 +787,7 @@ export interface ManageSlangParams {
   definition?: string;
   example?: string;
   keyword?: string;
+  offset?: number;
   limit?: number;
 }
 
@@ -781,6 +798,10 @@ export interface ManageSlangResult {
   entries?: SlangEntry[];
   entry?: SlangEntry;
   total?: number;
+  total_matched?: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
   max_entries?: number;
   message?: string;
   error?: string;
@@ -833,7 +854,6 @@ export interface ReadQzoneFeedsResult {
   scope: 'friends' | 'self' | 'user';
   feeds: QzoneFeedItem[];
   has_more: boolean;
-  next_offset?: number;
   next_cursor?: string;
   message?: string;
 }
@@ -1002,10 +1022,6 @@ export interface FriendItem {
   user_id: string;
   nickname: string;
   remark: string;
-  long_nick: string;
-  sex: string;
-  age: number;
-  level: number;
 }
 
 export interface GetFriendListParams {
@@ -1023,7 +1039,6 @@ export interface GetFriendListResult {
   offset: number;
   limit: number;
   has_more: boolean;
-  next_offset?: number;
   message?: string;
   error?: string;
 }
@@ -1032,10 +1047,6 @@ export interface GroupItem {
   group_id: string;
   group_name: string;
   group_remark: string;
-  member_count: number;
-  max_member_count: number;
-  group_memo: string;
-  group_create_time: number;
 }
 
 export interface GetGroupListParams {
@@ -1053,7 +1064,6 @@ export interface GetGroupListResult {
   offset: number;
   limit: number;
   has_more: boolean;
-  next_offset?: number;
   message?: string;
   error?: string;
 }
@@ -1103,18 +1113,33 @@ export interface GroupNoticeItem {
 
 export interface GetGroupNoticeParams {
   group_id: string | number;
+  /** 起始序号偏移，从 0 开始 (默认 0) */
+  offset?: number;
+  /** 单次返回数量 (默认 20，范围 1~50) */
+  limit?: number;
 }
 
 export interface GetGroupNoticeResult {
   success: boolean;
   group_id?: string;
   notices: GroupNoticeItem[];
+  /** 本次实际返回条数 */
   total: number;
+  /** 过滤后匹配的总条数 */
+  total_matched: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  message?: string;
   error?: string;
 }
 
 export interface ListActiveAgentsParams {
   target_type?: 'user' | 'group';
+  /** 起始序号偏移，从 0 开始 (默认 0) */
+  offset?: number;
+  /** 单次返回数量 (默认 20，范围 1~50) */
+  limit?: number;
 }
 
 export interface ActiveAgentInfo {
@@ -1129,7 +1154,14 @@ export interface ActiveAgentInfo {
 export interface ListActiveAgentsResult {
   success: boolean;
   agents: ActiveAgentInfo[];
+  /** 本次实际返回条数 */
   total: number;
+  /** 过滤后匹配的总条数 */
+  total_matched: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  message?: string;
   error?: string;
 }
 

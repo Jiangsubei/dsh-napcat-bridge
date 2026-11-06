@@ -6,8 +6,8 @@
  * 约定:
  * - offset 从 0 开始，表示过滤后结果集的起始序号偏移；
  * - limit 为正整数，超出上限时收敛到上限；
- * - 返回 total（本次条数）、total_matched、offset、limit、has_more、next_offset；
- * - next_offset 仅在 has_more 时返回，可直接回填下一次调用。
+ * - 返回 total（本次条数）、total_matched、offset、limit、has_more、message；
+ * - next_offset 仅作为内部计算字段，不再作为工具返回值暴露给模型。
  */
 
 export interface OffsetPaginationParams {

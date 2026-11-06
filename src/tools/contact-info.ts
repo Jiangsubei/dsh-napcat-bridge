@@ -84,7 +84,7 @@ export const groupListCache = new MemoryCachePool<any[]>();
 // ==================== 1. 好友列表查询 (get_friend_list) ====================
 
 export const GET_FRIEND_LIST_DESCRIPTION =
-  '按 offset 分页查询当前机器人的 QQ 好友列表，结果按 QQ 号升序排列。支持通过 query 关键词模糊搜索好友的昵称或备注名。结果包含 QQ 号、昵称、备注、个性签名、性别、年龄及 QQ 等级等核心字段。用于查找好友 QQ、核对备注或寻找特定联系人。翻页时直接回填返回的 next_offset 即可。';
+  '按 offset 分页查询当前机器人的 QQ 好友列表，结果按 QQ 号升序排列。支持通过 query 关键词模糊搜索好友的昵称或备注名。每条结果返回连续行号、QQ 号、昵称与备注（如有）；个性签名、性别、年龄、QQ 等级等详细资料请使用 get_user_profile 查询。用于查找好友 QQ、核对备注或寻找特定联系人。翻页时按已展示条数自行传入 offset（例如已展示 1~20，则传 offset: 20）。';
 
 export async function queryFriendList(
   params: GetFriendListParams,
@@ -151,10 +151,6 @@ export async function queryFriendList(
     user_id: String(raw.user_id),
     nickname: String(raw.nickname || ''),
     remark: String(raw.remark || ''),
-    long_nick: String(raw.long_nick || ''),
-    sex: String(raw.sex || 'unknown'),
-    age: Number(raw.age) || 0,
-    level: Number(raw.level) || 0,
   }));
 
   // 2. 模糊匹配 query (匹配 nickname 或 remark)
@@ -197,7 +193,6 @@ export async function queryFriendList(
     offset: page.offset,
     limit: page.limit,
     has_more: page.hasMore,
-    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -215,7 +210,7 @@ export function createGetFriendListTool(
       },
       offset: {
         type: 'number',
-        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算，例如已展示 1~20 则传 20。',
       },
       limit: {
         type: 'number',
@@ -240,9 +235,9 @@ export function createGetFriendListTool(
           const remarkPart = f.remark ? ` (备注: ${f.remark})` : '';
           lines.push(`${v.offset + i + 1}. **${f.nickname}**${remarkPart} | QQ: \`${f.user_id}\``);
         }
-        if (v.has_more && v.next_offset !== undefined) {
+        if (v.has_more) {
           lines.push(
-            `\n> 还有 ${v.total_matched - v.offset - v.total} 人未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+            `\n> 还有 ${v.total_matched - v.offset - v.total} 人未展示。继续浏览请传入 \`offset: ${v.offset + v.total}\`。`
           );
         } else if (v.message) {
           lines.push(`\n> ${v.message}`);
@@ -260,7 +255,7 @@ export function createGetFriendListTool(
 // ==================== 2. 群聊列表查询 (get_group_list) ====================
 
 export const GET_GROUP_LIST_DESCRIPTION =
-  '按 offset 分页查询当前机器人加入的 QQ 群聊列表，结果按群号升序排列。支持通过 query 关键词模糊搜索群名称或群备注。结果包含群号、群名称、群备注、群人数、人数上限、群公告摘要及建群时间等元数据。用于定位特定群聊、核对群号。翻页时直接回填返回的 next_offset 即可。';
+  '按 offset 分页查询当前机器人加入的 QQ 群聊列表，结果按群号升序排列。支持通过 query 关键词模糊搜索群名称或群备注。每条结果返回连续行号、群号、群名称与群备注（如有）；群人数、人数上限、群介绍、建群时间等详细信息请使用 get_group_info 查询。用于定位特定群聊、核对群号。翻页时按已展示条数自行传入 offset（例如已展示 1~20，则传 offset: 20）。';
 
 export async function queryGroupList(
   params: GetGroupListParams,
@@ -327,10 +322,6 @@ export async function queryGroupList(
     group_id: String(raw.group_id),
     group_name: String(raw.group_name || ''),
     group_remark: String(raw.group_remark || ''),
-    member_count: Number(raw.member_count) || 0,
-    max_member_count: Number(raw.max_member_count) || 0,
-    group_memo: String(raw.group_memo || ''),
-    group_create_time: Number(raw.group_create_time) || 0,
   }));
 
   // 2. 模糊匹配 query (匹配 group_name 或 group_remark)
@@ -373,7 +364,6 @@ export async function queryGroupList(
     offset: page.offset,
     limit: page.limit,
     has_more: page.hasMore,
-    ...(page.nextOffset !== undefined ? { next_offset: page.nextOffset } : {}),
     ...(message ? { message } : {}),
   });
 }
@@ -391,7 +381,7 @@ export function createGetGroupListTool(
       },
       offset: {
         type: 'number',
-        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时建议直接传入上次结果的 next_offset。',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算，例如已展示 1~20 则传 20。',
       },
       limit: {
         type: 'number',
@@ -414,14 +404,13 @@ export function createGetGroupListTool(
         for (let i = 0; i < v.groups.length; i++) {
           const g = v.groups[i];
           const remarkPart = g.group_remark ? ` (备注: ${g.group_remark})` : '';
-          const memoPart = g.group_memo ? `\n  - 群介绍: ${g.group_memo}` : '';
           lines.push(
-            `${v.offset + i + 1}. **${g.group_name}**${remarkPart} | 群号: \`${g.group_id}\` | 人数: ${g.member_count}/${g.max_member_count}${memoPart}`
+            `${v.offset + i + 1}. **${g.group_name}**${remarkPart} | 群号: \`${g.group_id}\``
           );
         }
-        if (v.has_more && v.next_offset !== undefined) {
+        if (v.has_more) {
           lines.push(
-            `\n> 还有 ${v.total_matched - v.offset - v.total} 个群未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+            `\n> 还有 ${v.total_matched - v.offset - v.total} 个群未展示。继续浏览请传入 \`offset: ${v.offset + v.total}\`。`
           );
         } else if (v.message) {
           lines.push(`\n> ${v.message}`);
@@ -625,17 +614,21 @@ export function createGetGroupInfoTool(
 // ==================== 5. 群公告列表查询 (get_group_notice) ====================
 
 export const GET_GROUP_NOTICE_DESCRIPTION =
-  '查询指定 QQ 群的历史公告列表。返回公告 ID、发布者 QQ、发布时间戳、纯文本公告内容、已阅人数及是否置顶。用于了解群内规约或最新群务动态。';
+  '按 offset 分页查询指定 QQ 群的历史公告列表。每条结果返回连续行号、公告 ID、发布者 QQ、发布时间戳、纯文本公告内容、已阅人数及是否置顶。用于了解群内规约或最新群务动态。翻页时按已展示条数自行传入 offset。';
 
 export async function queryGroupNotice(
   params: GetGroupNoticeParams,
   ctx: ToolExecutionContext
 ): Promise<GetGroupNoticeResult> {
+  const offset = normalizeOffset(params?.offset);
+  const limit = normalizeLimit(params?.limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+  const baseResult = { total: 0, total_matched: 0, offset, limit, has_more: false };
+
   if (!params || !params.group_id || String(params.group_id).trim() === '') {
     return toLosslessJson({
       success: false,
       notices: [],
-      total: 0,
+      ...baseResult,
       error: '目标群号不能为空。请传入 group_id。',
     });
   }
@@ -645,7 +638,7 @@ export async function queryGroupNotice(
     return toLosslessJson({
       success: false,
       notices: [],
-      total: 0,
+      ...baseResult,
       error: 'QQ 网关未连接或离线，暂时无法查询群公告。',
     });
   }
@@ -655,7 +648,7 @@ export async function queryGroupNotice(
   try {
     const res = await gateway.getGroupNotice(groupIdStr);
     if (res && res.status === 'ok' && Array.isArray(res.data)) {
-      const notices: GroupNoticeItem[] = res.data.map((raw: any) => {
+      const allNotices: GroupNoticeItem[] = res.data.map((raw: any) => {
         const textContent =
           typeof raw.message === 'string'
             ? raw.message
@@ -673,25 +666,47 @@ export async function queryGroupNotice(
         };
       });
 
+      const page = paginateByOffset(allNotices, { offset, limit }, {
+        defaultLimit: DEFAULT_LIST_LIMIT,
+        maxLimit: MAX_LIST_LIMIT,
+      });
+
+      const message =
+        page.totalMatched === 0
+          ? '该群当前暂无群公告。'
+          : buildOffsetMessage({
+              offset: page.offset,
+              returned: page.returned,
+              totalMatched: page.totalMatched,
+              hasMore: page.hasMore,
+              ...(page.nextOffset !== undefined ? { nextOffset: page.nextOffset } : {}),
+              unit: '条公告',
+            });
+
       return toLosslessJson({
         success: true,
         group_id: groupIdStr,
-        notices,
-        total: notices.length,
+        notices: page.items,
+        total: page.returned,
+        total_matched: page.totalMatched,
+        offset: page.offset,
+        limit: page.limit,
+        has_more: page.hasMore,
+        ...(message ? { message } : {}),
       });
     }
 
     return toLosslessJson({
       success: false,
       notices: [],
-      total: 0,
+      ...baseResult,
       error: `获取群公告失败: ${res?.message || '目标群不存在或无权访问公告'}`,
     });
   } catch (err: any) {
     return toLosslessJson({
       success: false,
       notices: [],
-      total: 0,
+      ...baseResult,
       error: `调用群公告接口发生异常: ${err?.message || String(err)}`,
     });
   }
@@ -708,21 +723,39 @@ export function createGetGroupNoticeTool(
         type: 'string',
         description: '目标 QQ 群号 (必填)',
       },
+      offset: {
+        type: 'number',
+        description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算。',
+      },
+      limit: {
+        type: 'number',
+        description: '单次返回条数 (默认 20，单次上限 50)。',
+      },
     },
     output: {
       schema: { type: 'json' },
       render: (_args, value) => {
         const v = value as unknown as GetGroupNoticeResult;
         if (!v || !v.success) return [{ type: 'text', text: `查询失败: ${v?.error || '未知错误'}` }];
-        if (v.total === 0) return [{ type: 'text', text: `群 [${v.group_id}] 当前暂无群公告。` }];
+        if (v.total === 0) {
+          return [{ type: 'text', text: v.message || `群 [${v.group_id}] 当前暂无群公告。` }];
+        }
         const lines: string[] = [
-          `### 群公告列表 (群号: \`${v.group_id}\`，共 ${v.total} 条)`,
+          `### 群公告列表 (群号: \`${v.group_id}\`，序号 ${v.offset + 1}~${v.offset + v.total} / 共 ${v.total_matched} 条)`,
         ];
-        for (const n of v.notices) {
+        for (let i = 0; i < v.notices.length; i++) {
+          const n = v.notices[i];
           const timeStr = n.publish_time ? new Date(n.publish_time * 1000).toLocaleString('zh-CN') : '未知时间';
-          lines.push(`#### [公告] ${timeStr} (发布者 QQ: \`${n.sender_id}\`)`);
+          lines.push(`${v.offset + i + 1}. [公告] ${timeStr} (发布者 QQ: \`${n.sender_id}\`)`);
           lines.push(n.content || '（纯图片或空内容）');
           lines.push('');
+        }
+        if (v.has_more) {
+          lines.push(
+            `> 还有 ${v.total_matched - v.offset - v.total} 条未展示。继续浏览请传入 \`offset: ${v.offset + v.total}\`。`
+          );
+        } else if (v.message) {
+          lines.push(`> ${v.message}`);
         }
         return [{ type: 'text', text: lines.join('\n') }];
       },

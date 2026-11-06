@@ -279,7 +279,7 @@ describe('契约测试: EN-001 list_group_files 群文件列表工具', () => {
       const toolDef = tools.get('list_group_files');
       expect(toolDef).toBeDefined();
       expect(toolDef.name).toBe('list_group_files');
-      expect(toolDef.description).toContain('获取当前群聊已上传的文件列表');
+      expect(toolDef.description).toContain('已记录到本地数据库的群文件索引');
     } finally {
       await booted.dispose();
     }

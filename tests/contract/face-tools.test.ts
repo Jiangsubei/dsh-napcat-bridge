@@ -130,7 +130,7 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(JSON.parse(serialized)).toEqual(resQuery);
   });
 
-  it('契约 1.2: list_faces 支持 offset 分页并返回 next_offset', async () => {
+  it('契约 1.2: list_faces 支持 offset 分页并给出翻页提示', async () => {
     for (let i = 1; i <= 5; i++) {
       db.insertFace({
         id: `face_page_0${i}`,
@@ -151,19 +151,19 @@ describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {
     expect(first.offset).toBe(0);
     expect(first.limit).toBe(2);
     expect(first.has_more).toBe(true);
-    expect(first.next_offset).toBe(2);
+    expect((first as any).next_offset).toBeUndefined();
 
     const second = await listFaces({ offset: 2, limit: 2 }, { db });
     expect(second.faces).toHaveLength(2);
     expect(second.offset).toBe(2);
     expect(second.has_more).toBe(true);
-    expect(second.next_offset).toBe(4);
+    expect((second as any).next_offset).toBeUndefined();
     expect(second.faces.map((f) => f.id)).not.toEqual(first.faces.map((f) => f.id));
 
     const last = await listFaces({ offset: 4, limit: 2 }, { db });
     expect(last.faces).toHaveLength(1);
     expect(last.has_more).toBe(false);
-    expect(last.next_offset).toBeUndefined();
+    expect((last as any).next_offset).toBeUndefined();
 
     // 负 offset / 超限 limit 安全收敛
     const clamped = await listFaces({ offset: -3, limit: 999 }, { db });

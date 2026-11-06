@@ -231,6 +231,17 @@ export class SlangStorage {
   }
 
   /**
+   * 分页检索/列出词条（同时返回过滤后的匹配总数，供 offset 分页使用）
+   */
+  public async listEntriesPage(
+    keyword?: string,
+    offset?: number,
+    limit?: number
+  ): Promise<{ entries: SlangEntry[]; total: number }> {
+    return this.db.querySlangEntries({ keyword, offset, limit });
+  }
+
+  /**
    * 检索/列出词条（支持按标题、标签、释义、例句模糊反查，支持可选 limit）
    */
   public async listEntries(keyword?: string, limit?: number): Promise<SlangEntry[]> {

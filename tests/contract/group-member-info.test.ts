@@ -313,7 +313,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(result.hasOwnProperty('error')).toBe(false);
     });
 
-    it('契约 2.9: offset 分页与默认值，切片、next_offset 与序号提示完备', async () => {
+    it('契约 2.9: offset 分页与默认值，切片、翻页提示与序号完备', async () => {
       // mockMembers 共有 4 位成员，若指定 limit: 2, offset: 0
       const res = await queryGroupMemberInfo(
         { offset: 0, limit: 2 },
@@ -326,7 +326,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(res.offset).toBe(0);
       expect(res.limit).toBe(2);
       expect(res.has_more).toBe(true);
-      expect(res.next_offset).toBe(2);
+      expect((res as any).next_offset).toBeUndefined();
       expect(res.members[0].user_id).toBe('10001');
       expect(res.members[1].user_id).toBe('10002');
       expect(res.message).toContain('本次展示序号 1~2');
@@ -345,7 +345,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(res.total).toBe(2);
       expect(res.offset).toBe(2);
       expect(res.has_more).toBe(false);
-      expect(res.next_offset).toBeUndefined();
+      expect((res as any).next_offset).toBeUndefined();
       expect(res.members[0].user_id).toBe('10003');
       expect(res.members[1].user_id).toBe('10004');
     });
@@ -428,11 +428,11 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         const toolDef = tools.get('get_group_member_info');
         expect(toolDef).toBeDefined();
         expect(toolDef.name).toBe('get_group_member_info');
-        expect(toolDef.description).toContain('查询当前群聊中的成员资料');
+        expect(toolDef.description).toContain('查询指定群聊中的成员资料');
         expect(toolDef.description).toContain('身份角色（群主/管理员/普通成员）');
         const props = (toolDef.parameters as any).properties || toolDef.parameters;
-        // 参数列表中严禁暴露 group_id，模型无需指定
-        expect(props.group_id).toBeUndefined();
+        // 私聊中查询群成员需显式传 group_id，因此 schema 必须暴露该参数
+        expect(props.group_id).toBeDefined();
         // 声明参数中必须包含 offset 与 limit，且不得再暴露 page
         expect(props.offset).toBeDefined();
         expect(props.limit).toBeDefined();

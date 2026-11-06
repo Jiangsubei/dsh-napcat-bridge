@@ -6,6 +6,11 @@
 
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { SlangStorage } from './storage.js';
+import {
+  buildOffsetMessage,
+  normalizeLimit,
+  normalizeOffset,
+} from '../tools/pagination.js';
 import type {
   QuerySlangParams,
   QuerySlangResult,
@@ -108,14 +113,40 @@ export async function manageSlang(
   const stats = storage.getStats();
 
   if (action === 'list') {
-    const entries = await storage.listEntries(params.keyword || params.term, params.limit);
+    const keyword = params.keyword || params.term;
+    const offset = normalizeOffset(params.offset);
+    const limit = normalizeLimit(params.limit, 20, 100);
+    const { entries: allEntries, total: totalMatched } = await storage.listEntriesPage(
+      keyword,
+      offset,
+      limit
+    );
+
+    const message =
+      totalMatched === 0
+        ? '未查询到任何匹配的黑话词条。'
+        : buildOffsetMessage({
+            offset,
+            returned: allEntries.length,
+            totalMatched,
+            hasMore: offset + allEntries.length < totalMatched,
+            ...(offset + allEntries.length < totalMatched
+              ? { nextOffset: offset + allEntries.length }
+              : {}),
+            unit: '条黑话词条',
+          });
+
     return {
       success: true,
       action: 'list',
-      entries,
-      total: entries.length,
+      entries: allEntries,
+      total: allEntries.length,
+      total_matched: totalMatched,
+      offset,
+      limit,
+      has_more: offset + allEntries.length < totalMatched,
       max_entries: stats.maxEntries,
-      message: `查询到 ${entries.length} 条黑话词条 (当前总容量 ${stats.total}/${stats.maxEntries} 条)`,
+      ...(message ? { message } : {}),
     };
   }
 
@@ -306,9 +337,13 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
           type: 'string',
           description: '模糊搜索关键词（仅当 action 为 list 时生效，支持按标题、标签特征词或释义/例句关键词全文反查）',
         },
+        offset: {
+          type: 'number',
+          description: '起始序号偏移，从 0 开始（仅当 action 为 list 时生效）。翻页时按已展示条数自行推算。',
+        },
         limit: {
           type: 'number',
-          description: '本次检索返回的最大条目数量限制（可选，默认不限全部列出）',
+          description: '本次检索返回的最大条目数量（仅当 action 为 list 时生效，默认 20，上限 100）',
         },
       },
       output: {
@@ -327,11 +362,18 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
               value?.message || `查询到 ${value.entries.length} 条黑话词条：`,
               '',
             ];
+            const baseOffset = typeof value.offset === 'number' ? value.offset : 0;
             for (let i = 0; i < value.entries.length; i++) {
               const item = value.entries[i];
               const tagStr = item.tags ? ` [标签: ${item.tags}]` : '';
               const exStr = item.example ? `\n   - 例句: ${item.example}` : '';
-              lines.push(`${i + 1}. 【${item.term}】${tagStr}\n   - 释义: ${item.definition}${exStr}`);
+              lines.push(`${baseOffset + i + 1}. 【${item.term}】${tagStr}\n   - 释义: ${item.definition}${exStr}`);
+            }
+            if (value.has_more) {
+              const totalMatched = typeof value.total_matched === 'number' ? value.total_matched : value.entries.length;
+              lines.push(
+                `\n> 还有 ${totalMatched - baseOffset - value.entries.length} 条未展示。继续浏览请传入 \`offset: ${baseOffset + value.entries.length}\`。`
+              );
             }
             return [{ type: 'text', text: lines.join('\n') }];
           }
@@ -349,6 +391,7 @@ export function createSlangToolDefinitions(storage: SlangStorage): ToolDefinitio
             definition: args.definition ? String(args.definition) : undefined,
             example: args.example ? String(args.example) : undefined,
             keyword: args.keyword ? String(args.keyword) : undefined,
+            offset: typeof args.offset === 'number' ? args.offset : undefined,
             limit: typeof args.limit === 'number' ? args.limit : undefined,
           },
           storage

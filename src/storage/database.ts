@@ -575,14 +575,17 @@ export class MessageDatabase {
     const total = countRow ? countRow.count : 0;
 
     const order = params.order?.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const offset = Number.isFinite(Number(params.offset)) && Number(params.offset) > 0
+      ? Math.floor(Number(params.offset))
+      : 0;
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
 
     const rows = db.prepare(`
       SELECT * FROM messages
       WHERE ${whereClause}
       ORDER BY time ${order}
-      LIMIT ?
-    `).all(...sqlParams, limit) as any[];
+      LIMIT ? OFFSET ?
+    `).all(...sqlParams, limit, offset) as any[];
 
     const messages: ChatMessageSummary[] = rows.map((row) => ({
       msg_id: Number(row.msg_id),
@@ -603,7 +606,11 @@ export class MessageDatabase {
 
     return {
       messages,
-      total,
+      total: messages.length,
+      total_matched: total,
+      offset,
+      limit,
+      has_more: offset + messages.length < total,
     };
   }
 
@@ -648,14 +655,17 @@ export class MessageDatabase {
     const total = countRow ? countRow.count : 0;
 
     const order = params.order?.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const offset = Number.isFinite(Number(params.offset)) && Number(params.offset) > 0
+      ? Math.floor(Number(params.offset))
+      : 0;
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
 
     const rows = db.prepare(`
       SELECT * FROM messages
       WHERE ${whereClause}
       ORDER BY time ${order}
-      LIMIT ?
-    `).all(...sqlParams, limit) as any[];
+      LIMIT ? OFFSET ?
+    `).all(...sqlParams, limit, offset) as any[];
 
     const files: GroupFileInfo[] = rows.map((row) => {
       let fileName = '';
@@ -700,7 +710,11 @@ export class MessageDatabase {
     return {
       success: true,
       files,
-      total,
+      total: files.length,
+      total_matched: total,
+      offset,
+      limit,
+      has_more: offset + files.length < total,
     };
   }
 
@@ -1587,7 +1601,7 @@ export class MessageDatabase {
   /**
    * 查询黑话列表（支持按标题、标签、释义、例句关键词模糊反查，支持可选 limit）
    */
-  querySlangEntries(options: { keyword?: string; limit?: number } = {}): {
+  querySlangEntries(options: { keyword?: string; offset?: number; limit?: number } = {}): {
     entries: SlangEntry[];
     total: number;
   } {
@@ -1608,6 +1622,9 @@ export class MessageDatabase {
     let query = `SELECT * FROM slang_entries ${whereClause} ORDER BY updated_at DESC, id DESC`;
     if (options.limit !== undefined && options.limit > 0) {
       query += ` LIMIT ${Number(options.limit)}`;
+      if (options.offset !== undefined && options.offset > 0) {
+        query += ` OFFSET ${Math.floor(Number(options.offset))}`;
+      }
     }
 
     const rows = db.prepare(query).all(...params);

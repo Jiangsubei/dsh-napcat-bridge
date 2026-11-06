@@ -740,7 +740,15 @@ export async function readChatHistory(
   }
 
   if (!db) {
-    return { messages: [], total: 0 };
+    return {
+      messages: [],
+      total: 0,
+      total_matched: 0,
+      offset: normalizeOffset(params.offset),
+      limit: normalizeLimit(params.limit, 20, 100),
+      has_more: false,
+      message: '数据库不可用，暂时无法读取聊天记录。',
+    };
   }
 
   // 默认只查真实 QQ 消息：内部协同通讯需显式传 source='agent' 才展示；
@@ -756,6 +764,37 @@ export async function readChatHistory(
 }
 
 /**
+ * 格式化聊天记录为带跨页连续序号的 Markdown 文本
+ */
+export function renderChatHistoryText(result: ReadChatHistoryResult): string {
+  if (!result || !Array.isArray(result.messages) || result.messages.length === 0) {
+    return result?.message || '未查询到符合条件的聊天记录。';
+  }
+  const offset = result.offset ?? 0;
+  const totalMatched = result.total_matched ?? result.total;
+  const lines: string[] = [
+    `共匹配 ${totalMatched} 条消息（序号 ${offset + 1}~${offset + result.messages.length}，本次返回 ${result.messages.length} 条）:`,
+  ];
+  for (let i = 0; i < result.messages.length; i++) {
+    const m = result.messages[i];
+    const selfTag = m.self ? ' [机器人自身]' : '';
+    const recalledTag = m.recalled ? ' [已撤回]' : '';
+    lines.push(
+      `${offset + i + 1}. [${m.formatted_time}] ${m.sender_name || m.user_id} (${m.user_id})${selfTag}${recalledTag} | msg_id: ${m.msg_id} | ${m.type}`
+    );
+    if (m.content) lines.push(`   ${m.content}`);
+  }
+  if (result.has_more) {
+    lines.push(
+      `\n> 还有 ${totalMatched - offset - result.messages.length} 条未展示。继续浏览请传入 \`offset: ${offset + result.messages.length}\`。`
+    );
+  } else if (result.message) {
+    lines.push(`\n> ${result.message}`);
+  }
+  return lines.join('\n');
+}
+
+/**
  * 格式化群文件列表输出为清晰的 Markdown 文本
  */
 export function renderGroupFilesText(result: ListGroupFilesResult): string {
@@ -763,16 +802,28 @@ export function renderGroupFilesText(result: ListGroupFilesResult): string {
     return `群文件查询失败: ${result.error}`;
   }
   if (!result.files || result.files.length === 0) {
-    return '未查询到符合条件的群文件记录。';
+    return result.message || '未查询到符合条件的群文件记录。';
   }
-  const lines: string[] = [`共找到 ${result.total} 个群文件 (本次展示 ${result.files.length} 个):`];
-  for (const f of result.files) {
+  const offset = result.offset ?? 0;
+  const totalMatched = result.total_matched ?? result.total;
+  const lines: string[] = [
+    `共匹配 ${totalMatched} 个群文件（序号 ${offset + 1}~${offset + result.files.length}，本次返回 ${result.files.length} 个）:`,
+  ];
+  for (let i = 0; i < result.files.length; i++) {
+    const f = result.files[i];
     const sizeStr = f.size ? ` (${(f.size / 1024).toFixed(1)} KB)` : '';
-    lines.push(`- ${f.file_name}${sizeStr}`);
+    lines.push(`${offset + i + 1}. ${f.file_name}${sizeStr}`);
     lines.push(`  • file_id: ${f.file_id}`);
     lines.push(`  • busid: ${f.busid}`);
     lines.push(`  • 上传者: ${f.sender_name} (${f.user_id})`);
     lines.push(`  • 时间: ${f.formatted_time || f.time}`);
+  }
+  if (result.has_more) {
+    lines.push(
+      `\n> 还有 ${totalMatched - offset - result.files.length} 个未展示。继续浏览请传入 \`offset: ${offset + result.files.length}\`。`
+    );
+  } else if (result.message) {
+    lines.push(`\n> ${result.message}`);
   }
   lines.push('\n提示: 如需读取文件内容，请调用 fetch_chat_resource(file_id=..., busid=...) 下载。');
   return lines.join('\n');
@@ -795,6 +846,10 @@ export async function listGroupFiles(
       success: false,
       files: [],
       total: 0,
+      total_matched: 0,
+      offset: 0,
+      limit: params.limit ?? 20,
+      has_more: false,
       error: '当前会话不是群聊，无群文件记录 (私聊文件请使用 read_chat_history)',
     };
   }
@@ -805,16 +860,15 @@ export async function listGroupFiles(
       success: false,
       files: [],
       total: 0,
+      total_matched: 0,
+      offset: 0,
+      limit: params.limit ?? 20,
+      has_more: false,
       error: '数据库不可用，无法查询群文件列表',
     };
   }
 
-  const result = db.listGroupFiles(peer, params);
-  return {
-    success: true,
-    files: result.files,
-    total: result.total,
-  };
+  return db.listGroupFiles(peer, params);
 }
 
 /**
@@ -1052,7 +1106,6 @@ export async function listFaces(
   });
 
   const hasMore = offset + faces.length < queryRes.total;
-  const nextOffset = hasMore ? offset + faces.length : undefined;
   let message: string | undefined;
   if (queryRes.total === 0) {
     message = '未找到符合条件的表情包。';
@@ -1062,7 +1115,7 @@ export async function listFaces(
       returned: faces.length,
       totalMatched: queryRes.total,
       hasMore,
-      ...(nextOffset !== undefined ? { nextOffset } : {}),
+      ...(hasMore ? { nextOffset: offset + faces.length } : {}),
       unit: '个表情',
     });
   }
@@ -1074,7 +1127,6 @@ export async function listFaces(
     offset,
     limit,
     has_more: hasMore,
-    ...(nextOffset !== undefined ? { next_offset: nextOffset } : {}),
     ...(message ? { message } : {}),
   };
 
@@ -1685,11 +1737,17 @@ export function registerAgentTools(
                 "按消息来源筛选：默认（不传）仅返回真实 QQ 消息；'agent' 仅返回 Agent 内部协同通讯（sender_name 为「内部通讯」，user_id 形如 agent:<来源SessionID>）；'all' 返回两者。",
             },
             limit: { type: 'number', description: '返回最大条数 (默认 20，上限 100)' },
+            offset: {
+              type: 'number',
+              description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算。',
+            },
             order: { type: 'string', enum: ['asc', 'desc'], description: "时间排序 (默认 'desc' 倒序，取最新消息)" },
           },
           output: {
             schema: { type: 'json' },
-            render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+            render: (_args, value) => [
+              { type: 'text', text: renderChatHistoryText(value as unknown as ReadChatHistoryResult) },
+            ],
           },
           async execute(args, exec) {
             const session = (exec.agent as any)?.session;
@@ -1904,7 +1962,7 @@ export function registerAgentTools(
         defineTool({
           name: 'list_group_files',
           description:
-            '获取当前群聊已上传的文件列表与索引清单。用于用户查找群共享文件、查询资料是否已存在时；返回结果包含文件名、上传者、file_id 和 busid。如需读取文件内容，需将返回的 file_id 与 busid 传给 fetch_chat_resource 下载。切勿用于检索聊天文字。',
+            '按 offset 分页检索当前群聊中已记录到本地数据库的群文件索引（并非协议端全量群文件清单，仅覆盖机器人见过的群文件消息）。用于用户查找群共享文件、查询资料是否已存在；返回结果包含连续行号、文件名、上传者、file_id 和 busid。如需读取文件内容，需将返回的 file_id 与 busid 传给 fetch_chat_resource 下载。翻页时按已展示条数自行传入 offset。切勿用于检索聊天文字。',
           parameters: {
             file_name: { type: 'string', description: '按群文件名模糊搜索（如 ".pdf", "周报"）' },
             sender_name: { type: 'string', description: '按上传者昵称或群名片模糊搜索' },
@@ -1917,6 +1975,10 @@ export function registerAgentTools(
             until: {
               type: 'string',
               description: '截止时间：支持相对时间或自然日期时间字符串',
+            },
+            offset: {
+              type: 'number',
+              description: '起始序号偏移，从 0 开始（0 表示第 1 条）。翻页时按已展示条数自行推算。',
             },
             limit: { type: 'number', description: '返回最大数量 (默认 20，上限 100)' },
             order: {
@@ -2199,7 +2261,7 @@ export function registerAgentTools(
           defineTool({
             name: 'list_faces',
             description:
-              '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；结果按收录时间倒序排列，可通过 offset/limit 分页并直接回填 next_offset。返回合法 face_id、标签、情绪及本地路径。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
+              '在机器人本地表情库中检索可用的表情包。用于斗图或需要情绪表达前，按情绪（mood）或标签（tag）查验可用库存；结果按收录时间倒序排列，每条带连续行号，可通过 offset/limit 分页。返回合法 face_id、标签、情绪及本地路径。翻页时按已展示条数自行推算 offset（例如已展示 1~20，则传 offset: 20）。检索到心仪表情后，使用其 face_id 配合 send_face 发送。',
             parameters: {
               query: {
                 type: 'string',
@@ -2219,7 +2281,7 @@ export function registerAgentTools(
               },
               offset: {
                 type: 'number',
-                description: '起始序号偏移，从 0 开始（0 表示第 1 个）。翻页时建议直接传入上次结果的 next_offset。',
+                description: '起始序号偏移，从 0 开始（0 表示第 1 个）。翻页时按已展示条数自行推算，例如已展示 1~20 则传 20。',
               },
               limit: {
                 type: 'number',
@@ -2245,9 +2307,9 @@ export function registerAgentTools(
                   const pathStr = f.file_path ? ` | 路径: ${f.file_path}` : '';
                   lines.push(`${baseOffset + i + 1}. ID: ${f.id} (${f.format})${moodStr}${tagStr}${pathStr}`);
                 }
-                if (v.has_more && v.next_offset !== undefined) {
+                if (v.has_more) {
                   lines.push(
-                    `\n> 还有 ${totalMatched - baseOffset - v.faces.length} 个未展示。继续浏览请传入 \`offset: ${v.next_offset}\`。`
+                    `\n> 还有 ${totalMatched - baseOffset - v.faces.length} 个未展示。继续浏览请传入 \`offset: ${baseOffset + v.faces.length}\`。`
                   );
                 } else if (v.message) {
                   lines.push(`\n> ${v.message}`);
@@ -2480,7 +2542,7 @@ export function registerAgentTools(
         defineTool({
           name: 'read_qzone_feeds',
           description:
-            '浏览 QQ 空间动态（说说）。可查看好友动态流（scope="friends"，默认）、自己发表过的动态（scope="self"）或指定好友的动态（scope="user"）。支持分页与条数限制（默认 5 条，上限 10 条）；好友动态流翻页请优先使用 cursor/next_cursor，offset 仅在未传 cursor 时生效。返回内容包含发布者 QQ 与昵称、文字正文、图片（包含原 URL 与已自动下载落盘供多模态视觉模型消费的本地路径）以及评论区摘要（包含评论者信息、内容并标记是否为 AI 自身发表）。',
+            '浏览 QQ 空间动态（说说）。可查看好友动态流（scope="friends"，默认）、自己发表过的动态（scope="self"）或指定好友的动态（scope="user"）。支持分页与条数限制（默认 5 条，上限 10 条）；好友动态流翻页请优先使用 cursor/next_cursor，offset 仅在未传 cursor 时生效。返回内容包含发布者 QQ 与昵称、文字正文、图片（包含原 URL 与已自动下载落盘供多模态视觉模型消费的本地路径）；仅 scope="friends" 的好友动态流会附带评论区摘要（包含评论者信息、内容并标记是否为 AI 自身发表），self/user 模式不返回评论。',
           parameters: {
             scope: {
               type: 'string',
