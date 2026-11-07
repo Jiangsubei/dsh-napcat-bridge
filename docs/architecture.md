@@ -68,7 +68,7 @@ dsh-napcat-bridge 作为 DeepSeek Harness (DSH) 的 Cordis 插件运行，在 QQ
   6. **工具插件化与预设装配（SSOT）**：
      - 构建 `NapCatBridgeToolsProvider` 并挂载至 `dsh-napcat-bridge/tools`；
      - 工具不再全局暴露到根 `ctx.tools`，杜绝向 Web UI 常规会话泄露；
-     - 通过单一真相源 (`src/constants/preset.ts`) 与 `agentPresets` 服务，动态注册 `qq-session` 专属预设，自动为 QQ 会话配置工具集、Shell（pwsh/bash）、工作区与技能系统。
+     - 通过单一真相源 (`src/constants/preset.ts`) 与 `agentPresets` 服务，动态注册 `qq-session` 专属预设，自动为 QQ 会话配置工具集、历史压缩能力组（compaction-basic、command-compact、tool-result-pruner）、Shell（pwsh/bash）、工作区与技能系统。
   7. **出站桥接与串行下发**：启动出方向事件流桥接器 (`OutboundStreamBridge`) 与单对端串行发送器 (`PerPeerSerialSender`)。
   8. **审批与交互响应**：初始化审批瀑布流响应器 (`NapCatApprovalResponder`)。审批请求在下发前先做管理员门控：私聊以 peer 中的 QQ 号为准，群聊以「本轮唤醒者」为准——即开启当前 agent 轮次的那条真实唤醒消息（at / mention / quote / poke / direct）的发送者。`TurnInitiatorTracker` 通过官方 `session/event`（`turn/start` / `user/message` / `turn/end`）严格绑定：仅本轮首个真实用户输入可成为申请人，同轮 steer 插话与群友刷屏不会覆盖，排队轮次各自独立归属，`turn/end` 后立即清空。仅当申请位于 `admins` 白名单时才下发审批消息，否则直接返回 `rejected`。系统触发（定时任务 / 主动冒泡 / 内部 Agent）不登记唤醒者，同样一律拒绝；未配置 `admins` 时严格 Fail-Closed。
   9. **WebUI 设置卡片与 REST 路由**：挂载插件设置路由（`/plugins/dsh-napcat-bridge/config`）与表情包管理端点。配置 REST 路由全面接入宿主 `connection` 服务鉴权（严格遵循 Fail-Closed 策略，无合法身份或宿主鉴权不可用即返回 403 Forbidden 彻底阻断，防御 CSRF 与 DNS Rebinding 风险），并在保存端执行 `ws_token` 必填强校验与过时配置项自愈清理。

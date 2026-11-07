@@ -11,7 +11,7 @@ DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业
 ## ✨ 功能特性
 
 - **QQ 群聊 / 私聊全场景接入**：基于 OneBot 11 协议标准反向 WebSocket 连接，开箱支持 NapCat 与 SnowLuma 等协议端。
-- **QQ 会话专属预设（`qq-session`）**：构建期与运行时单一真相源（SSOT）自动同步，专属注入 QQ 工具集，彻底杜绝工具向 Web UI 常规会话泄露；深度补齐工作区、跨平台 Shell（Windows pwsh / Linux bash）、Web 搜索、交互提问与技能系统，并抑制多余快照。
+- **QQ 会话专属预设（`qq-session`）**：构建期与运行时单一真相源（SSOT）自动同步，专属注入 QQ 工具集，彻底杜绝工具向 Web UI 常规会话泄露；深度补齐会话历史压缩（Compaction）、工作区、跨平台 Shell（Windows pwsh / Linux bash）、Web 搜索、交互提问与技能系统，并抑制多余快照。
 - **用户侧静默出站体系**：遵循「用户侧静默原则」，废除纯文本直接推流；文本出站统一由 **`send_qq_message`** 工具驱动，由模型根据入站标头 `[消息ID: <id>]` 与上下文逻辑自主决定是否引用原消息（`reply_to`）或艾特用户（`at_user`）。
 - **工具与回合解耦（单 Agent 顺手维护）**：执行出站工具不强行终止回合，模型在回复用户后可在同一轮次中顺手调用记忆或表情管理工具，自然平稳终结。
 - **消息撤回机制**：支持大模型自主撤回指定消息（`recall_message`），当发错内容、产生严重幻觉、收到用户撤回要求或在群聊中处置违规内容时可安全自愈（受 QQ 平台 2 分钟时限与权限约束）。
@@ -26,7 +26,7 @@ DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业
 - **群成员感知与定时任务**：支持查询群成员名片与角色（`get_group_member_info`），支持单次与周期定时唤醒调度（`schedule_task`、`manage_scheduled_tasks`）。
 - **卡片消息通用提取器**：自动提取 QQ 卡片（小程序、分享、音乐等）的标题与链接。
 - **群聊主动回复策略**：普通消息窗口期聚合轮询 + 潜水超时破冰 + Agent 繁忙丢弃 + 夜间免打扰，支持运行中新消息行为模式（`steer` 及时插话 vs `queue` 加入队列），支持「仅回复文本内容」过滤并赋予 Agent [结束] 静默决策权。
-- **纯两字中文斜杠命令**：`/新建`、`/会话`、`/用量`、`/停止`、`/模型`、`/权限`、`/思考`、`/状态`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。
+- **纯两字中文斜杠命令**：`/状态`、`/模型`、`/权限`、`/思考`、`/会话`、`/新建`、`/用量`、`/压缩`、`/停止`、`/帮助`，内置严格的管理员白名单权限隔离与 per-session 状态管理。支持一键整理并压缩会话历史，即时释放上下文空间。
 - **发言黑名单与权限安全防线**：支持私聊与群聊发言黑名单（入库留存审计但永不唤醒与回复，管理员亦不豁免）；支持新建会话默认权限（私聊默认 `workspace-write`、群聊默认 `read-only`）及针对指定 QQ 号/群号的权限例外表；支持 Coding 工程工具组（bash/pwsh/read/write/edit）按私聊/群聊及例外表裁剪硬隔离（只读工具 `read_image` 与 `working_directory` 始终保留）。
 - **WebUI 设置面板**：通过 DSH Web UI 配置所有插件参数，7 大 Tab 分组（连接设置、人格与准则、回复配置、权限与安全、记忆、表情包、黑话学习），全部 40 项参数支持 volatile 动态热更新。
 
@@ -189,7 +189,7 @@ pnpm build         # 同步预设、类型编译与构建 WebUI 产物
 
 ## 🧪 测试
 
-本项目遵循严格的契约测试先行与真实装配验证规范，覆盖专属预设单一真相源同步、出站静默工具流、单 Agent 顺手提炼、表情包闭环、两层记忆体系与斜杠命令等场景（88 套件 720+ 测试用例）。
+本项目遵循严格的契约测试先行与真实装配验证规范，覆盖专属预设单一真相源同步、出站静默工具流、单 Agent 顺手提炼、表情包闭环、两层记忆体系与斜杠命令等场景（115 套件 1000 测试用例）。
 
 ```bash
 pnpm test          # 完整测试（先执行 pnpm build 再执行测试）
@@ -205,7 +205,7 @@ pnpm test:quick    # 快速执行测试（跳过 build）
 - [快速上手 (docs/getting-started.md)](docs/getting-started.md)：环境依赖、安装步骤、NapCat WS 配置与验证指南。
 - [系统架构 (docs/architecture.md)](docs/architecture.md)：模块总览、生命周期装配、用户侧静默出站体系、记忆与表情体系。
 - [配置说明 (docs/configuration.md)](docs/configuration.md)：WebUI 7 大 Tab 完整配置项、默认值与迁移说明。
-- [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 22 个 Agent 工具契约与 9 个纯两字中文斜杠命令。
+- [工具与命令 (docs/tools-and-commands.md)](docs/tools-and-commands.md)：`send_qq_message` 等 35 个 Agent 工具契约与 10 个纯两字中文斜杠命令。
 - [故障排查 (docs/troubleshooting.md)](docs/troubleshooting.md)：出站静默未调用工具、预设隔离、连接异常等问题排查指引。
 
 ---
