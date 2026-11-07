@@ -19,6 +19,7 @@ import { describeSegment, resolveLocalMediaPath } from '../attachment/classify.j
 import {
   formatFacePlaceholder as renderFacePlaceholder,
   renderAttachment,
+  cleanStickerSummary,
 } from '../attachment/render.js';
 
 export interface MatchedFaceInfo {
@@ -421,6 +422,7 @@ export function parseNormalizedContent(
 
   if (Array.isArray(event.message) && event.message.length > 0) {
     const textParts: string[] = [];
+    let pendingStickerSummary: string | null = null;
     const isGroup = (event as any).message_type === 'group' || Boolean((event as any).group_id);
 
     for (const seg of event.message) {
@@ -428,10 +430,29 @@ export function parseNormalizedContent(
       const type = seg.type;
       const data = seg.data || {};
 
+      if (type !== 'text') {
+        pendingStickerSummary = null;
+      }
+
       switch (type) {
-        case 'text':
-          if (data.text) textParts.push(data.text);
+        case 'text': {
+          const rawText = data.text ? String(data.text) : '';
+          if (rawText) {
+            const cleanText = cleanStickerSummary(rawText);
+            if (
+              pendingStickerSummary &&
+              pendingStickerSummary !== '表情' &&
+              cleanText === pendingStickerSummary
+            ) {
+              // 属于紧随前序表情包之后的 NapCat 纯降级冗余文本段（如 [拿捏] / 拿捏），予以跳过
+              pendingStickerSummary = null;
+              break;
+            }
+            textParts.push(rawText);
+          }
+          pendingStickerSummary = null;
           break;
+        }
 
         case 'at':
           if (data.qq !== undefined) {
@@ -475,6 +496,14 @@ export function parseNormalizedContent(
                 data.face = face;
               }
             }
+          }
+
+          if (descriptor.kind === 'sticker') {
+            const rawSummary = descriptor.summary || data.summary;
+            const clean = cleanStickerSummary(rawSummary);
+            pendingStickerSummary = clean !== '表情' ? clean : null;
+          } else {
+            pendingStickerSummary = null;
           }
 
           textParts.push(renderAttachment(descriptor) ?? '[表情包]');
@@ -641,19 +670,36 @@ export function isExcludedFromProactive(
     const emojiSegs: any[] = [];
     const otherMediaSegs: any[] = [];
 
+    let pendingStickerSummary: string | null = null;
     for (const seg of segments) {
       if (!seg) continue;
-      if (seg.type === 'text') {
-        totalText += seg.data?.text || '';
-      } else if (
+      const isSticker =
         seg.type === 'face' ||
         seg.type === 'mface' ||
         seg.type === 'marketface' ||
-        (seg.type === 'image' && (seg.data?.sub_type === 1 || seg.data?.emoji_package_id || seg.data?.emoji_id))
-      ) {
+        (seg.type === 'image' && (seg.data?.sub_type === 1 || seg.data?.emoji_package_id || seg.data?.emoji_id));
+
+      if (isSticker) {
         emojiSegs.push(seg);
+        const clean = cleanStickerSummary(seg.data?.summary);
+        pendingStickerSummary = clean !== '表情' ? clean : null;
+      } else if (seg.type === 'text') {
+        const text = seg.data?.text || '';
+        const cleanText = cleanStickerSummary(text);
+        if (
+          pendingStickerSummary &&
+          pendingStickerSummary !== '表情' &&
+          cleanText === pendingStickerSummary
+        ) {
+          // 紧随表情包之后的降级冗余文本，不计入 totalText
+          pendingStickerSummary = null;
+        } else {
+          totalText += text;
+          pendingStickerSummary = null;
+        }
       } else {
         otherMediaSegs.push(seg);
+        pendingStickerSummary = null;
       }
     }
 
