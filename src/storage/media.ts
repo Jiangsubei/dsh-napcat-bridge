@@ -60,6 +60,45 @@ export function computeFileMd5(filePath: string): string | null {
   }
 }
 
+/**
+ * 检测 Buffer 是否为 NTQQ 本地缓存的商城表情 (marketface) 混淆加密数据
+ *
+ * 机制：NTQQ 在本地 Emoji/marketface 目录下缓存的动图主文件，
+ * 会采用 50 字节周期异或混淆（每 50 字节前 20 字节异或 0xFF，后 30 字节明文不变）。
+ * 导致标准 GIF89a / GIF87a 头被混淆为：
+ *   'G'(0x47) ^ 0xFF = 0xB8
+ *   'I'(0x49) ^ 0xFF = 0xB6
+ *   'F'(0x46) ^ 0xFF = 0xB9
+ *   '8'(0x38) ^ 0xFF = 0xC7
+ *   '9'(0x39) ^ 0xFF = 0xC6  或  '7'(0x37) ^ 0xFF = 0xC8
+ *   'a'(0x61) ^ 0xFF = 0x9E
+ */
+export function isEncryptedNtqqMarketFace(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 6) return false;
+  return (
+    buffer[0] === 0xb8 &&
+    buffer[1] === 0xb6 &&
+    buffer[2] === 0xb9 &&
+    buffer[3] === 0xc7 &&
+    (buffer[4] === 0xc6 || buffer[4] === 0xc8) &&
+    buffer[5] === 0x9e
+  );
+}
+
+/**
+ * 解密 NTQQ 商城表情 (marketface) 混淆数据为标准 GIF89a/GIF87a
+ *
+ * 算法：(offset % 50 < 20) ? (byte ^ 0xFF) : byte
+ * 注：该变换为对合运算（Involution），解密与加密操作完全同构且对称。
+ */
+export function decryptNtqqMarketFace(buffer: Buffer): Buffer {
+  const decrypted = Buffer.allocUnsafe(buffer.length);
+  for (let i = 0; i < buffer.length; i++) {
+    decrypted[i] = i % 50 < 20 ? buffer[i] ^ 0xff : buffer[i];
+  }
+  return decrypted;
+}
+
 export function detectBufferExt(buffer: Buffer): string | undefined {
   if (!buffer || buffer.length < 2) return undefined;
 
@@ -141,6 +180,11 @@ export class MediaStorageManager {
    * 两级去重并落盘保存 Buffer 数据
    */
   async saveBuffer(buffer: Buffer, options: SaveResourceOptions = {}): Promise<SaveResourceResult> {
+    // 0. NTQQ 商城表情 (marketface) 混淆自愈解密：进入指纹计算与魔数推断前还原为明文 GIF
+    if (isEncryptedNtqqMarketFace(buffer)) {
+      buffer = decryptNtqqMarketFace(buffer);
+    }
+
     const sessionId = options.sessionId || 'common';
     const type = options.type === 'file' ? 'files' : options.type || 'image';
 
@@ -148,6 +192,16 @@ export class MediaStorageManager {
     if (options.fileId && this.db) {
       const record = this.db.getByFileId(options.fileId);
       if (record?.local_path && fs.existsSync(record.local_path)) {
+        // 自动自愈：若历史已落盘文件不幸为未解密的混淆格式，自动就地解密自愈
+        try {
+          const rawBytes = await fsp.readFile(record.local_path);
+          if (isEncryptedNtqqMarketFace(rawBytes)) {
+            const fixed = decryptNtqqMarketFace(rawBytes);
+            await fsp.writeFile(record.local_path, fixed);
+            const newFingerprint = this.computeHash(fixed);
+            this.db.updateLocalPathByFileId(options.fileId, record.local_path, newFingerprint);
+          }
+        } catch {}
         // 活跃引用刷新 mtime 续期 TTL
         const now = new Date();
         await fsp.utimes(record.local_path, now, now).catch(() => {});
@@ -255,6 +309,16 @@ export class MediaStorageManager {
     if (options.fileId && this.db) {
       const record = this.db.getByFileId(options.fileId);
       if (record?.local_path && fs.existsSync(record.local_path)) {
+        // 自动自愈：若历史已落盘文件不幸为未解密的混淆格式，自动就地解密自愈
+        try {
+          const rawBytes = await fsp.readFile(record.local_path);
+          if (isEncryptedNtqqMarketFace(rawBytes)) {
+            const fixed = decryptNtqqMarketFace(rawBytes);
+            await fsp.writeFile(record.local_path, fixed);
+            const newFingerprint = this.computeHash(fixed);
+            this.db.updateLocalPathByFileId(options.fileId, record.local_path, newFingerprint);
+          }
+        } catch {}
         return {
           localPath: record.local_path,
           fingerprint: record.fingerprint || '',
