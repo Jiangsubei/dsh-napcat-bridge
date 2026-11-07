@@ -1,17 +1,15 @@
 /**
  * tests/contract/attachment-image-input.test.ts
  *
- * 契约测试: 入站 payload.images 接通 DSH ImageBlock
+ * 契约测试: 入站回归纯文本路径模式（绝不自动注入 ImageBlock，大模型统一通过路径自主按需读图）
  *
  * 背景:
- * WakeupPayload.images 一直只存在于唤醒包与文本占位里，模型实际收不到图片。
- * DSH 真实契约要求图片块必须由 ctx.attachments.saveImage() 生成
- * ImageAttachmentRef，不能伪造路径或 base64 URL。
+ * 入站若直接塞 ImageBlock，在水群与斗图场景下会巨幅消耗 Vision Token，且入站格式与历史记录 (read_chat_history)
+ * 割裂；回归纯文本路径模式后，模型通过文本中的确定性文件路径感知图片，必要时自主调用 read_image。
  *
  * 覆盖规范:
- * 1. 真实 boot 装配下 dispatchWakeup(payload.images) → user message 含 image block；
- * 2. 文件不存在 / 魔数无法识别 / attachments 服务缺失 → 降级纯文本，不抛错；
- * 3. 多张图片顺序与 payload.images 一致。
+ * 1. 真实 boot 装配下 dispatchWakeup(payload.images) → user message 为纯文本，不注入 image block；
+ * 2. 多张图片入站时同样保持纯文本模式，Prompt 保留文本与路径。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -47,7 +45,7 @@ function imageBlocks(userMsg: any): any[] {
   return content.filter((block) => block && block.type === 'image');
 }
 
-describe('契约测试: payload.images → DSH ImageBlock 真实装配', () => {
+describe('契约测试: payload.images → 纯文本按需模式真实装配', () => {
   let tmpHome: string;
   let booted: BootedDsh | undefined;
 
@@ -84,7 +82,7 @@ describe('契约测试: payload.images → DSH ImageBlock 真实装配', () => {
     }
   });
 
-  it('契约 1: 本地 PNG 图片 → user message 含 image block 与持久化引用', async () => {
+  it('契约 1: 本地 PNG 图片入站 → user message 为纯文本，绝不注入 image block', async () => {
     const sessionManager: any = await waitFor(() => {
       const c: any = booted!.ctx;
       return (c.get?.('napcat-session') || c['napcat-session']) as any;
@@ -96,34 +94,15 @@ describe('契约测试: payload.images → DSH ImageBlock 真实装配', () => {
     const userMsg = await sessionManager.dispatchWakeup(wakeupPayload([imgPath]));
 
     const blocks = imageBlocks(userMsg);
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0].attachment).toBeDefined();
-    expect(blocks[0].attachment.attachmentId).toBeTruthy();
-    expect(blocks[0].attachment.mediaType).toBe('image/png');
-    expect(blocks[0].attachment.bytes).toBe(PNG_1X1.length);
+    expect(blocks).toHaveLength(0);
 
-    // 文本占位必须保留，模型仍能看到消息正文与图片说明
-    expect(userMsg.content.some((b: any) => b.type === 'text' && b.text.includes('[图片'))).toBe(true);
+    // 纯文本形式呈现，包含消息文本内容
+    expect(userMsg.content).toHaveLength(1);
+    expect(userMsg.content[0].type).toBe('text');
+    expect(userMsg.content[0].text).toContain('[图片: 见附件]');
   });
 
-  it('契约 2: 文件不存在 / 魔数未知 → 降级纯文本，不抛错', async () => {
-    const sessionManager: any = await waitFor(() => {
-      const c: any = booted!.ctx;
-      return (c.get?.('napcat-session') || c['napcat-session']) as any;
-    });
-
-    const unknown = path.join(tmpHome, 'unknown.bin');
-    await fsp.writeFile(unknown, Buffer.from('not an image at all'));
-
-    const userMsg = await sessionManager.dispatchWakeup(
-      wakeupPayload([path.join(tmpHome, 'missing.png'), unknown])
-    );
-
-    expect(imageBlocks(userMsg)).toHaveLength(0);
-    expect(userMsg.content.some((b: any) => b.type === 'text')).toBe(true);
-  });
-
-  it('契约 3: 多张图片顺序与 payload.images 一致', async () => {
+  it('契约 2: 多张图片入站 → 依然保持纯文本模式，不向 context 注入任何 image block', async () => {
     const sessionManager: any = await waitFor(() => {
       const c: any = booted!.ctx;
       return (c.get?.('napcat-session') || c['napcat-session']) as any;
@@ -137,9 +116,8 @@ describe('契约测试: payload.images → DSH ImageBlock 真实装配', () => {
     const userMsg = await sessionManager.dispatchWakeup(wakeupPayload([first, second]));
 
     const blocks = imageBlocks(userMsg);
-    expect(blocks).toHaveLength(2);
-    // DSH 的 attachment name 会保留调用方显示名（不含路径），据此断言入参顺序
-    expect(blocks[0].attachment.name).toBe('first.png');
-    expect(blocks[1].attachment.name).toBe('second.png');
+    expect(blocks).toHaveLength(0);
+    expect(userMsg.content).toHaveLength(1);
+    expect(userMsg.content[0].type).toBe('text');
   });
 });

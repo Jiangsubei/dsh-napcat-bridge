@@ -119,10 +119,8 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
         getFaceByMd5: (hash) => db.getFaceByMd5(hash),
       });
 
-      // 验证语义替换成功（仅拼入 face_id 与情绪，无需重复拼入标签）
-      expect(content).toBe('[表情包: face_cat_sigh (情绪: 嘲讽)]');
-      // 验证原绝对文件路径已被彻底替换，不再泄漏在 content 中
-      expect(content).not.toContain(filePath);
+      // 验证语义替换成功并携带规范本地路径
+      expect(content).toBe(`[表情包: face_cat_sigh (情绪: 嘲讽) 路径: ${filePath}]`);
       // 验证 images 数组仍保留该物理路径供多模态视觉消费
       expect(images).toEqual([filePath]);
     });
@@ -169,7 +167,7 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
         getFaceByMd5: (hash) => db.getFaceByMd5(hash),
       });
 
-      expect(content).toBe('[表情包: face_doge (情绪: 蔑视)]');
+      expect(content).toBe(`[表情包: face_doge (情绪: 蔑视) 路径: ${filePath}]`);
       expect(content).not.toContain('[图片:');
       expect(images).toEqual([filePath]);
     });
@@ -205,7 +203,7 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
         getFaceByMd5: (hash) => db.getFaceByMd5(hash),
       });
 
-      expect(content).toBe(`[表情包:滑稽 已保存: ${filePath}]`);
+      expect(content).toBe(`[表情包: 滑稽 路径: ${filePath}]`);
       expect(content).toContain(filePath);
     });
 
@@ -287,7 +285,7 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
       });
 
       // 软删除后不应匹配为 face_deleted
-      expect(content).toBe(`[表情包:已删表情 已保存: ${filePath}]`);
+      expect(content).toBe(`[表情包: 已删表情 路径: ${filePath}]`);
       expect(content).not.toContain('face_deleted');
     });
 
@@ -321,7 +319,7 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
       };
 
       const { content } = parseNormalizedContent(event);
-      expect(content).toBe('[表情包: face_pre_bound (情绪: 得意)]');
+      expect(content).toBe('[表情包: face_pre_bound (情绪: 得意) 路径: /tmp/test.png]');
     });
   });
 
@@ -371,8 +369,7 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
       });
 
       expect(decision.wakeup).toBe(true);
-      expect(decision.payload?.content).toContain('[表情包: face_happy_cat (情绪: 喜悦)]');
-      expect(decision.payload?.content).not.toContain(filePath);
+      expect(decision.payload?.content).toContain(`[表情包: face_happy_cat (情绪: 喜悦) 路径: ${filePath}]`);
       expect(decision.payload?.images).toContain(filePath);
     });
   });
@@ -489,18 +486,16 @@ describe('契约测试: 入站图片/表情包识别本地表情库并替换语�
       // 等待异步流转与入库唤醒
       await new Promise((r) => setTimeout(r, 400));
 
-      // 1. 验证 Agent 唤醒收到的 Prompt 包含表情包语义，且不含磁盘路径
+      // 1. 验证 Agent 唤醒收到的 Prompt 包含表情包语义与规范路径
       expect(capturedFollowups.length).toBe(1);
-      expect(capturedFollowups[0].content).toContain('[表情包: face_panda_roll (情绪: 卖萌)]');
-      expect(capturedFollowups[0].content).not.toContain(imgPath);
+      expect(capturedFollowups[0].content).toContain('[表情包: face_panda_roll (情绪: 卖萌) 路径:');
 
-      // 2. 验证 SQLite messages 表中落库的 content 也已清洗为语义占位符
+      // 2. 验证 SQLite messages 表中落库的 content 包含规范路径
       const queryDb = new Database(asmDbPath(), { readonly: true });
       try {
         const row: any = queryDb.prepare('SELECT * FROM messages WHERE msg_id = ?').get(msgId);
         expect(row).toBeDefined();
-        expect(row.content).toBe('[表情包: face_panda_roll (情绪: 卖萌)]');
-        expect(row.content).not.toContain(imgPath);
+        expect(row.content).toContain('[表情包: face_panda_roll (情绪: 卖萌) 路径:');
       } finally {
         queryDb.close();
       }

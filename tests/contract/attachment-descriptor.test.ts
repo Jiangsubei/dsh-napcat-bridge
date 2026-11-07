@@ -103,7 +103,7 @@ describe('契约测试: 唯一渲染入口', () => {
     return text as string;
   }
 
-  it('契约 5: 命中表情库时入站/出站文案完全一致（face_id + 情绪）', () => {
+  it('契约 5: 命中表情库时入站/出站文案完全一致（face_id + 情绪 + 路径）', () => {
     const base = {
       kind: 'sticker' as const,
       local: { path: '/faces/face_x.png', format: 'png' },
@@ -113,19 +113,28 @@ describe('契约测试: 唯一渲染入口', () => {
     const inbound = render({ ...base, origin: 'inbound' });
     const outbound = render({ ...base, origin: 'outbound' });
 
-    expect(inbound).toBe('[表情包: face_x (情绪: 嘲讽)]');
+    expect(inbound).toBe('[表情包: face_x (情绪: 嘲讽) 路径: /faces/face_x.png]');
     expect(outbound).toBe(inbound);
   });
 
-  it('契约 6: 未命中表情库但有本地路径 → 已保存路径，不展示 file:///', () => {
+  it('契约 6: 未命中表情库但有本地路径 → 规范路径展示且清洗方括号，不展示 file:///', () => {
     const text = render({
       kind: 'sticker',
       origin: 'outbound',
       summary: '滑稽',
       local: { path: '/faces/funny.png' },
     });
-    expect(text).toBe('[表情包:滑稽 已保存: /faces/funny.png]');
+    expect(text).toBe('[表情包: 滑稽 路径: /faces/funny.png]');
     expect(text).not.toContain('file:///');
+
+    // 嵌套方括号清洗验证：[动画表情] -> 动画表情
+    const textNested = render({
+      kind: 'sticker',
+      origin: 'inbound',
+      summary: '[动画表情]',
+      local: { path: '/faces/c393b.jpg' },
+    });
+    expect(textNested).toBe('[表情包: 动画表情 路径: /faces/c393b.jpg]');
   });
 
   it('契约 7: 普通图片本地路径优先，file:/// 转为 OS 路径', () => {

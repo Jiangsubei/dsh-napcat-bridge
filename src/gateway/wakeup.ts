@@ -32,8 +32,8 @@ export interface MatchedFaceInfo {
  * 格式示例：[表情包: face_12345678 (情绪: 嘲讽)] 或 [表情包: face_12345678]
  * 说明：SystemPrompt 中已全量注入表情库各 ID 对应的详细标签，入站仅需保留 face_id 与情绪意图，避免重复注入标签。
  */
-export function formatFacePlaceholder(face: MatchedFaceInfo): string {
-  return renderFacePlaceholder(face);
+export function formatFacePlaceholder(face: MatchedFaceInfo, localPath?: string | null): string {
+  return renderFacePlaceholder(face, localPath);
 }
 
 export interface ParseNormalizedContentOptions {

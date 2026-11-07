@@ -587,22 +587,61 @@ export class MessageDatabase {
       LIMIT ? OFFSET ?
     `).all(...sqlParams, limit, offset) as any[];
 
-    const messages: ChatMessageSummary[] = rows.map((row) => ({
-      msg_id: Number(row.msg_id),
-      user_id: String(row.user_id),
-      sender_name: row.sender_name,
-      time: Number(row.time),
-      formatted_time: formatDateTime(Number(row.time)),
-      type: row.type,
-      content: row.content,
-      recalled: row.recalled === 1,
-      self: row.self === 1,
-      reply_to: row.reply_to !== null && row.reply_to !== undefined ? Number(row.reply_to) : null,
-      local_path: row.local_path ?? null,
-      file_id: row.file_id ?? null,
-      attachments: row.attachments ?? null,
-      source: row.source === 'agent' ? 'agent' : 'qq',
-    }));
+    const messages: ChatMessageSummary[] = rows.map((row) => {
+      let localPath = row.local_path ?? null;
+      let content = row.content;
+
+      // 针对存量或未记录 local_path 的表情包记录进行兜底补全
+      if (!localPath && content) {
+        const faceMatch = content.match(/\[表情包:\s*([^ (\]]+)/);
+        if (faceMatch && faceMatch[1]) {
+          const face = this.getFaceById(faceMatch[1].trim());
+          if (face && face.file_path) {
+            localPath = face.file_path;
+          }
+        }
+      }
+
+      // 存量历史消息格式归一化与路径补齐：
+      // 1) 库内表情旧格式 [表情包: face_xxx (情绪: yyy)] -> 补齐 " 路径: <localPath>"
+      // 2) 普通表情旧格式 [表情包:[动画表情] 已保存: <path>] -> 清洗嵌套方括号与已保存 -> [表情包: 动画表情 路径: <path>]
+      // 3) 普通表情旧格式 [表情包:滑稽 已保存: <path>] -> [表情包: 滑稽 路径: <path>]
+      if (content && localPath && !content.includes(' 路径: ')) {
+        if (content.includes('已保存: ')) {
+          content = content.replace(
+            /\[表情包:(?:\[(.*?)\]|([^ \]]+))\s+已保存:\s*([^\]]+)\]/g,
+            (_m: string, p1?: string, p2?: string, p3?: string) => `[表情包: ${(p1 || p2 || '表情').trim()} 路径: ${(p3 || '').trim()}]`
+          );
+        } else {
+          content = content.replace(
+            /\[表情包:\s*([^\]]+?)\]/g,
+            (_m: string, inner: string) => `[表情包: ${inner.trim()} 路径: ${localPath}]`
+          );
+        }
+      } else if (content && content.includes('已保存: ')) {
+        content = content.replace(
+          /\[表情包:(?:\[(.*?)\]|([^ \]]+))\s+已保存:\s*([^\]]+)\]/g,
+          (_m: string, p1?: string, p2?: string, p3?: string) => `[表情包: ${(p1 || p2 || '表情').trim()} 路径: ${(p3 || '').trim()}]`
+        );
+      }
+
+      return {
+        msg_id: Number(row.msg_id),
+        user_id: String(row.user_id),
+        sender_name: row.sender_name,
+        time: Number(row.time),
+        formatted_time: formatDateTime(Number(row.time)),
+        type: row.type,
+        content,
+        recalled: row.recalled === 1,
+        self: row.self === 1,
+        reply_to: row.reply_to !== null && row.reply_to !== undefined ? Number(row.reply_to) : null,
+        local_path: localPath,
+        file_id: row.file_id ?? null,
+        attachments: row.attachments ?? null,
+        source: row.source === 'agent' ? 'agent' : 'qq',
+      };
+    });
 
     return {
       messages,

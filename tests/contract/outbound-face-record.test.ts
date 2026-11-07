@@ -155,7 +155,7 @@ describe('契约测试: 出站描述符构造与自记录', () => {
     )!;
 
     expect(record.type).toBe('sticker');
-    expect(record.content).toBe('[表情包: face_x (情绪: 开心)]');
+    expect(record.content).toBe('[表情包: face_x (情绪: 开心) 路径: /faces/face.png]');
     expect(record.local_path?.endsWith('face.png')).toBe(true);
     expect(deserializeAttachments(record.attachments)[0].face?.id).toBe('face_x');
   });
@@ -243,7 +243,7 @@ describe('契约测试: 出站表情真实 WS + SQLite 闭环', () => {
 
     const msg = db.getMessage(2026001)!;
     expect(msg.type).toBe('sticker');
-    expect(msg.content).toBe('[表情包: face_x (情绪: 嘲讽)]');
+    expect(msg.content).toContain('[表情包: face_x (情绪: 嘲讽) 路径:');
     expect(msg.local_path?.endsWith('face.png')).toBe(true);
 
     const stored = deserializeAttachments(msg.attachments);
@@ -290,7 +290,7 @@ describe('契约测试: 出站表情真实 WS + SQLite 闭环', () => {
     expect(after.file_id).toBe('9E64D1403F9FBA2D5F9CB90289AD23F4.jpg');
     expect(after.local_path?.endsWith('face.png')).toBe(true);
     expect(after.type).toBe('sticker');
-    expect(after.content).toBe('[表情包: face_x (情绪: 嘲讽)]');
+    expect(after.content).toContain('[表情包: face_x (情绪: 嘲讽) 路径:');
     const stored = deserializeAttachments(after.attachments);
     expect(stored[0].face?.id).toBe('face_x');
     expect(stored[0].local?.path?.endsWith('face.png')).toBe(true);

@@ -322,7 +322,7 @@ describe('契约测试: 唤醒门控与唤醒包构造 (Wakeup Gate Contract)', 
     ).toBe('x @123');
   });
 
-  it('契约 12: sticker + local_path + summary -> content 包含 local_path 且含「已保存:」，格式 [表情包:[动画表情] 已保存: /...]', () => {
+  it('契约 12: sticker + local_path + summary -> content 包含 local_path 且格式为 [表情包: 动画表情 路径: /...]', () => {
     const event: OneBotMessageEvent = {
       post_type: 'message',
       message_type: 'private',
@@ -347,13 +347,13 @@ describe('契约测试: 唤醒门控与唤醒包构造 (Wakeup Gate Contract)', 
     };
 
     const { content, images } = parseNormalizedContent(event);
-    expect(content).toBe('[表情包:[动画表情] 已保存: /dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif]');
-    expect(content).toContain('已保存:');
+    expect(content).toBe('[表情包: 动画表情 路径: /dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif]');
+    expect(content).toContain('路径:');
     expect(content).toContain('/dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif');
     expect(images).toEqual(['/dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif']);
   });
 
-  it('契约 13: sticker + local_path 无 summary -> 包含路径，格式 [表情包:表情 已保存: /...]', () => {
+  it('契约 13: sticker + local_path 无 summary -> 包含路径，格式 [表情包: 表情 路径: /...]', () => {
     const event: OneBotMessageEvent = {
       post_type: 'message',
       message_type: 'private',
@@ -377,13 +377,13 @@ describe('契约测试: 唤醒门控与唤醒包构造 (Wakeup Gate Contract)', 
     };
 
     const { content, images } = parseNormalizedContent(event);
-    expect(content).toBe('[表情包:表情 已保存: /dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif]');
-    expect(content).toContain('已保存:');
+    expect(content).toBe('[表情包: 表情 路径: /dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif]');
+    expect(content).toContain('路径:');
     expect(content).toContain('/dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif');
     expect(images).toEqual(['/dsh/workspace/napcat_download/sticker/user_2000000001/f36ee0e.gif']);
   });
 
-  it('契约 14: sticker 无 local_path 有 summary -> 保持 [表情包:[动画表情]] 不丢', () => {
+  it('契约 14: sticker 无 local_path 有 summary -> 清洗括号保持 [表情包: 动画表情] 不丢', () => {
     const event: OneBotMessageEvent = {
       post_type: 'message',
       message_type: 'private',
@@ -407,7 +407,7 @@ describe('契约测试: 唤醒门控与唤醒包构造 (Wakeup Gate Contract)', 
     };
 
     const { content, images } = parseNormalizedContent(event);
-    expect(content).toBe('[表情包:[动画表情]]');
+    expect(content).toBe('[表情包: 动画表情]');
     expect(images).toEqual(['http://example.com/sticker.png']);
   });
 
