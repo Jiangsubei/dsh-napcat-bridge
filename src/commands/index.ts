@@ -8,12 +8,15 @@ import type { Session } from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-permission-presets';
 import type { SessionManager } from '../gateway/session.js';
 import { formatSessionTitle, parseSessionId } from '../gateway/session.js';
+import { safeGetService } from '../gateway/session/agent-runner.js';
 
 export interface CommandContext {
   userId: string;
   admins: string[];
   session: Session;
   ctx: Context;
+  /** 可选：当前会话对应的活体 Agent 实例 */
+  agent?: any;
   /** 可选：per-session 模型选择落位 (Spec §8.1 /model 为 Per-Session 语义) */
   sessionManager?: SessionManager;
 }
@@ -23,6 +26,8 @@ export interface CommandResult {
   success?: boolean;
   reply?: string;
   error?: string;
+  /** 可选：两段式异步结果追加（用于长耗时异步操作，如 /压缩） */
+  followUp?: () => Promise<string | undefined>;
 }
 
 export interface DiscoveredModelInfo {
@@ -33,7 +38,7 @@ export interface DiscoveredModelInfo {
 }
 
 export async function getDiscoveredModels(ctx: Context): Promise<DiscoveredModelInfo[]> {
-  const llm = ctx.get('llm') || (ctx as any).llm;
+  const llm = safeGetService(ctx, 'llm');
   if (llm && typeof llm.listProviders === 'function') {
     try {
       const providers = llm.listProviders();
@@ -77,7 +82,7 @@ export async function safeSyncSessionModel(
   reasoningEffort?: string
 ): Promise<void> {
   const op = async () => {
-    const sessionController = ctx.get('sessionController') || (ctx as any).sessionController;
+    const sessionController = safeGetService(ctx, 'sessionController');
     if (!sessionController?.selectModel) return;
 
     await sessionController.selectModel({
@@ -110,7 +115,7 @@ export async function getModelReasoningInfo(
   model: string,
   explicitEffort?: string
 ): Promise<ModelReasoningMetadata> {
-  const llm = ctx.get('llm') || (ctx as any).llm;
+  const llm = safeGetService(ctx, 'llm');
   if (llm && typeof llm.resolveModelInfo === 'function') {
     try {
       const info = await llm.resolveModelInfo(provider, model);
@@ -173,6 +178,72 @@ export function formatTokens(value: number): string {
 }
 
 /**
+ * 获取当前会话上下文用量简报（方案 B：~3.2K / 128K (2%) 或 ~3.2K）
+ */
+export async function getContextUsageBrief(
+  ctx: Context,
+  session: Session,
+  sessionManager?: SessionManager
+): Promise<string> {
+  const tokenMeter = safeGetService(ctx, 'tokenMeter');
+  if (!tokenMeter?.measure) return '0';
+  let totalTokens = 0;
+  try {
+    const usage = tokenMeter.measure(session);
+    totalTokens = usage?.totalTokens ?? 0;
+  } catch {
+    return '0';
+  }
+
+  let contextWindow: number | undefined;
+  const sessionProjections = safeGetService(ctx, 'sessionProjections');
+  if (sessionProjections && typeof sessionProjections.snapshot === 'function') {
+    try {
+      const snap = sessionProjections.snapshot(session, ['contextPressure']);
+      if (snap?.values?.contextPressure?.contextWindow) {
+        contextWindow = snap.values.contextPressure.contextWindow;
+      }
+    } catch {}
+  }
+
+  if (contextWindow === undefined) {
+    try {
+      const curSel = sessionManager?.getModelSelection(session.id);
+      const provider = curSel?.provider || 'deepseek-official';
+      const model = curSel?.model || 'deepseek-v4-flash';
+      const llm = safeGetService(ctx, 'llm');
+      if (llm && typeof llm.resolveModel === 'function') {
+        const info = await llm.resolveModel(provider, model);
+        if (info?.context?.contextWindow) contextWindow = info.context.contextWindow;
+      }
+    } catch {}
+  }
+
+  const fmt = (v: number) => (v > 0 ? `~${formatTokens(v)}` : '0');
+  if (contextWindow && contextWindow > 0) {
+    const percent = Math.min(100, Math.round((totalTokens / contextWindow) * 100));
+    return `${fmt(totalTokens)} / ${formatTokens(contextWindow)} (${percent}%)`;
+  }
+  return fmt(totalTokens);
+}
+
+/**
+ * /压缩 失败文案映射表（对齐 DSH 官方 ManualCompactionErrorCode 语义）
+ */
+export const COMPACT_FAIL_TEXT: Record<string, string> = {
+  'no-target': '未选中控制目标。',
+  unavailable: '压缩服务不可用：当前会话未挂载压缩能力。',
+  agent: '无法接管该会话的 agent，压缩未执行。',
+  busy: '本进程已有压缩在进行，或该会话不空闲；请等当前回合结束后重试。',
+  cancelled: '压缩已取消。',
+  changed: '待压缩的历史在压缩前被改动，会话未变更。',
+  summary: '压缩未能产出有效摘要，会话未变更。',
+  commit: '压缩未正常收尾，部分历史可能已变更，请先检查会话状态再重试。',
+  persistence: '压缩已完成，但会话保存失败。',
+  error: '压缩失败（未分类错误）。',
+};
+
+/**
  * 判断输入文本是否为斜杠命令（兼容全半角斜杠）
  */
 export function isSlashCommand(text: string): boolean {
@@ -217,7 +288,7 @@ export async function handleSlashCommand(
   // 2. 命令分发处理（纯两字中文命令，不保留英文别名）
   switch (command) {
     case '权限': {
-      const permissionPresets = context.ctx.get('permissionPresets') || (context.ctx as any).permissionPresets;
+      const permissionPresets = safeGetService(context.ctx, 'permissionPresets');
       const toZhMode = (p?: string) => {
         if (!p) return '编辑';
         if (p === 'danger-full-access' || p === 'yolo') return '完全';
@@ -277,7 +348,7 @@ export async function handleSlashCommand(
 
     case '模型': {
       const discovered = await getDiscoveredModels(context.ctx);
-      const agents = context.ctx.get('agents') || (context.ctx as any).agents;
+      const agents = safeGetService(context.ctx, 'agents');
       const agent = agents?.get(context.session.id);
 
       const safeSyncApiProxy = (
@@ -581,7 +652,7 @@ export async function handleSlashCommand(
         thinkArg = zhEffortMap[thinkArg];
       }
 
-      const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
+      const agents = safeGetService(context.ctx, 'agents');
       const agent = agents?.get(context.session.id);
       const curSel =
         context.sessionManager?.getModelSelection(context.session.id) ||
@@ -726,8 +797,7 @@ export async function handleSlashCommand(
     }
 
     case '停止': {
-      const sessionController =
-        context.ctx.get('sessionController') || (context.ctx as any).sessionController;
+      const sessionController = safeGetService(context.ctx, 'sessionController');
       if (!sessionController?.cancel) {
         return {
           handled: true,
@@ -862,8 +932,7 @@ export async function handleSlashCommand(
     }
 
     case '用量': {
-      const tokenMeter =
-        context.ctx.get('tokenMeter') || (context.ctx as any).tokenMeter;
+      const tokenMeter = safeGetService(context.ctx, 'tokenMeter');
       if (!tokenMeter?.measure) {
         return {
           handled: true,
@@ -885,8 +954,7 @@ export async function handleSlashCommand(
 
       const totalTokens = usage?.totalTokens ?? 0;
       let contextWindow: number | undefined;
-      const sessionProjections =
-        context.ctx.get('sessionProjections') || (context.ctx as any).sessionProjections;
+      const sessionProjections = safeGetService(context.ctx, 'sessionProjections');
       let breakdown: any;
 
       if (sessionProjections && typeof sessionProjections.snapshot === 'function') {
@@ -910,7 +978,7 @@ export async function handleSlashCommand(
           const curSel = sm?.getModelSelection(context.session.id);
           const provider = curSel?.provider || 'deepseek-official';
           const model = curSel?.model || 'deepseek-v4-flash';
-          const llm = context.ctx.get('llm') || (context.ctx as any).llm;
+          const llm = safeGetService(context.ctx, 'llm');
           if (llm && typeof llm.resolveModel === 'function') {
             const info = await llm.resolveModel(provider, model);
             if (info?.context?.contextWindow) {
@@ -958,6 +1026,88 @@ export async function handleSlashCommand(
       };
     }
 
+    case '压缩': {
+      if (args) {
+        return {
+          handled: true,
+          success: false,
+          error: '『/压缩』不接受参数。',
+        };
+      }
+
+      const agents = safeGetService(context.ctx, 'agents');
+      let agent = context.agent || agents?.get?.(context.session.id);
+      if (!agent && context.sessionManager) {
+        try {
+          const peer = context.sessionManager.sessionIdToPeer(context.session.id);
+          agent = await context.sessionManager.getOrCreateAgent(peer);
+        } catch {}
+      }
+
+      if (!agent) {
+        return {
+          handled: true,
+          success: false,
+          error: COMPACT_FAIL_TEXT.agent,
+        };
+      }
+
+      // 官方 READ 寻址：优先从 agentPresets.serviceFor(agent, 'compaction') 读取，回退 host 平面
+      let scopedEngine: any;
+      const agentPresets = safeGetService(context.ctx, 'agentPresets');
+      if (agent?.ctx && agentPresets) {
+        try {
+          scopedEngine = agentPresets.serviceFor?.(agent, 'compaction');
+        } catch (presetErr: any) {
+          context.ctx.logger?.('dsh-napcat-bridge')?.warn?.(
+            '[Command] 读取 agentPresets.serviceFor(agent, "compaction") 失败:',
+            presetErr?.message || presetErr
+          );
+        }
+      }
+
+      const hostEngine = safeGetService(context.ctx, 'compaction');
+      const engine = scopedEngine ?? hostEngine;
+
+      if (!engine || typeof engine.compactNow !== 'function') {
+        return {
+          handled: true,
+          success: false,
+          error: COMPACT_FAIL_TEXT.unavailable,
+        };
+      }
+
+      const runCompact = async (): Promise<string> => {
+        try {
+          // 不可中断 signal 保证压缩过程原子收敛
+          const result = await engine.compactNow(agent, new AbortController().signal);
+          if (result === null) {
+            return '没有可压缩的历史（会话未变更）。';
+          }
+          const shadowedCount = Array.isArray(result.shadowedSeqs) ? result.shadowedSeqs.length : 0;
+          const shadowedTokens = typeof result.shadowedTokenCount === 'number' ? result.shadowedTokenCount : 0;
+          const usageBrief = await getContextUsageBrief(context.ctx, context.session, context.sessionManager);
+          return [
+            `已压缩 ${shadowedCount} 条历史（约 ${formatTokens(shadowedTokens)} tokens）。`,
+            `当前上下文：${usageBrief}`,
+          ].join('\n');
+        } catch (err: any) {
+          const code = err?.code;
+          if (code && typeof code === 'string' && COMPACT_FAIL_TEXT[code]) {
+            return `压缩失败：${COMPACT_FAIL_TEXT[code]}`;
+          }
+          return `压缩失败：${err?.message || String(err)}`;
+        }
+      };
+
+      return {
+        handled: true,
+        success: true,
+        reply: '正在压缩会话历史…',
+        followUp: runCompact,
+      };
+    }
+
     case '状态': {
       const sm = context.sessionManager;
       const peer = sm ? sm.sessionIdToPeer(context.session.id) : context.session.id;
@@ -971,7 +1121,7 @@ export async function handleSlashCommand(
         statusStr = '正在运行';
       }
 
-      const agents = context.ctx.get?.('agents') || (context.ctx as any).agents;
+      const agents = safeGetService(context.ctx, 'agents');
       const agent = agents?.get?.(context.session.id);
       const curSel = sm?.getModelSelection(context.session.id) || (agent as any)?.modelSelection?.current;
       const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
@@ -987,20 +1137,20 @@ export async function handleSlashCommand(
         effortStr = '当前模型不支持';
       }
 
-      const permissionPresets = context.ctx.get('permissionPresets') || (context.ctx as any).permissionPresets;
+      const permissionPresets = safeGetService(context.ctx, 'permissionPresets');
       const rawMode = permissionPresets?.current?.(context.session) || 'workspace-write';
       let zhMode = '编辑';
       if (rawMode === 'danger-full-access' || rawMode === 'yolo') zhMode = '完全';
       else if (rawMode === 'readonly' || rawMode === 'read-only') zhMode = '只读';
 
       let ctxUsageStr = '0';
-      const tokenMeter = context.ctx.get('tokenMeter') || (context.ctx as any).tokenMeter;
+      const tokenMeter = safeGetService(context.ctx, 'tokenMeter');
       if (tokenMeter?.measure) {
         try {
           const usage = tokenMeter.measure(context.session);
           const totalTokens = usage?.totalTokens ?? 0;
           let contextWindow: number | undefined;
-          const sessionProjections = context.ctx.get('sessionProjections') || (context.ctx as any).sessionProjections;
+          const sessionProjections = safeGetService(context.ctx, 'sessionProjections');
           if (sessionProjections && typeof sessionProjections.snapshot === 'function') {
             try {
               const snap = sessionProjections.snapshot(context.session, ['contextPressure']);
@@ -1010,7 +1160,7 @@ export async function handleSlashCommand(
             } catch {}
           }
           if (contextWindow === undefined) {
-            const llm = context.ctx.get('llm') || (context.ctx as any).llm;
+            const llm = safeGetService(context.ctx, 'llm');
             if (llm && typeof llm.resolveModel === 'function') {
               try {
                 const info = await llm.resolveModel(curProv, curMod);
@@ -1059,6 +1209,7 @@ export async function handleSlashCommand(
         '- /会话 [序号|标题] : 列出历史会话或进行切换',
         '- /新建 : 开启全新会话（保留历史）',
         '- /用量 : 查看会话上下文用量明细',
+        '- /压缩 : 整理并压缩会话历史，释放上下文空间',
         '- /停止 : 中断当前正在生成的回复',
         '- /帮助 : 查看本帮助说明',
       ].join('\n');

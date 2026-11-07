@@ -874,6 +874,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
           userId: fromUser,
           admins: currentConfig().admins || [],
           session,
+          agent,
           ctx,
           sessionManager,
         });
@@ -889,8 +890,35 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
             });
           }
         }
-      } catch (cmdErr) {
+        if (typeof result.followUp === 'function') {
+          // 异步等待 followUp 完成，不阻塞当前消息循环，完成后向对应会话追加发送
+          (async () => {
+            try {
+              const followUpText = await result.followUp!();
+              if (followUpText) {
+                if (isGroup && event.group_id) {
+                  await server.sendGroupMsg(event.group_id, followUpText).catch((err) => {
+                    logger.error?.('[Plugin] 下发斜杠命令 followUp 响应异常:', err);
+                  });
+                } else if (event.user_id) {
+                  await server.sendPrivateMsg(event.user_id, followUpText).catch((err) => {
+                    logger.error?.('[Plugin] 下发斜杠命令 followUp 响应异常:', err);
+                  });
+                }
+              }
+            } catch (followErr) {
+              logger.error?.('[Plugin] 执行斜杠命令 followUp 异常:', followErr);
+            }
+          })();
+        }
+      } catch (cmdErr: any) {
         logger.error?.('[Plugin] 执行斜杠命令异常:', cmdErr);
+        const errMsg = `执行指令失败：${cmdErr?.message || String(cmdErr)}`;
+        if (isGroup && event.group_id) {
+          server.sendGroupMsg(event.group_id, errMsg).catch(() => {});
+        } else if (event.user_id) {
+          server.sendPrivateMsg(event.user_id, errMsg).catch(() => {});
+        }
       }
       return;
     }

@@ -38,6 +38,17 @@ export function generateCordisPatch(): string {
     lines.push(`          - id: ${item.id}`);
     lines.push(`            name: '${item.name}'`);
 
+    if (item.group) {
+      lines.push('            group: true');
+    }
+
+    if (item.isolate) {
+      lines.push('            isolate:');
+      for (const [k, v] of Object.entries(item.isolate)) {
+        lines.push(`              ${k}: ${v}`);
+      }
+    }
+
     if (item.yamlDisabledExpr) {
       lines.push(`            disabled: !!js ${JSON.stringify(item.yamlDisabledExpr)}`);
     } else if (typeof item.disabled === 'boolean') {
@@ -46,7 +57,24 @@ export function generateCordisPatch(): string {
 
     if (item.config || item.yamlConfigExpr) {
       lines.push('            config:');
-      if (item.config) {
+      if (Array.isArray(item.config)) {
+        for (const child of item.config) {
+          lines.push(`              - id: ${child.id}`);
+          lines.push(`                name: '${child.name}'`);
+          if (child.config) {
+            lines.push('                config:');
+            for (const [ck, cv] of Object.entries(child.config)) {
+              if (typeof cv === 'string') {
+                lines.push(`                  ${ck}: ${JSON.stringify(cv)}`);
+              } else if (typeof cv === 'boolean' || typeof cv === 'number') {
+                lines.push(`                  ${ck}: ${cv}`);
+              } else {
+                lines.push(`                  ${ck}: ${JSON.stringify(cv)}`);
+              }
+            }
+          }
+        }
+      } else if (item.config) {
         for (const [k, v] of Object.entries(item.config)) {
           if (item.yamlConfigExpr && item.yamlConfigExpr[k]) {
             continue;

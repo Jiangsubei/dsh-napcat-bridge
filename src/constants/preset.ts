@@ -25,7 +25,9 @@ export interface PresetPluginItem {
   id: string;
   name: string;
   comment?: string;
-  config?: Record<string, any>;
+  group?: boolean;
+  isolate?: Record<string, boolean>;
+  config?: Record<string, any> | Array<PresetPluginItem>;
   disabled?: boolean;
   yamlDisabledExpr?: string;
   yamlConfigExpr?: Record<string, string>;
@@ -110,6 +112,28 @@ export const QQ_PRESET_PLUGINS: PresetPluginItem[] = [
     name: 'dsh-napcat-bridge/tools',
     comment: 'NapCat 专属工具组 (标准 Cordis 插件导出)',
   },
+  {
+    id: 'compaction',
+    name: 'cordis:group',
+    comment: '会话历史压缩能力组 (compaction-basic, command-compact, tool-result-pruner)',
+    group: true,
+    isolate: {
+      compaction: true,
+      toolResultPruner: true,
+    },
+    config: [
+      { id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic' },
+      { id: 'command-compact', name: '@deepseek-ai/dsh-command-compact' },
+      {
+        id: 'tool-result-pruner',
+        name: '@deepseek-ai/dsh-compaction-tool-result-pruner',
+        config: {
+          thresholdChars: 8192,
+          headChars: 4096,
+        },
+      },
+    ],
+  },
 ];
 
 /** 获取供运行时 agentPresetsSvc.register(...) 使用的纯运行时定义对象 */
@@ -124,11 +148,25 @@ export function getRuntimePresetDefinition() {
         id: item.id,
         name: item.name,
       };
+      if (item.group) {
+        plugin.group = item.group;
+      }
+      if (item.isolate) {
+        plugin.isolate = { ...item.isolate };
+      }
       if (typeof item.disabled === 'boolean') {
         plugin.disabled = item.disabled;
       }
       if (item.config) {
-        plugin.config = { ...item.config };
+        if (Array.isArray(item.config)) {
+          plugin.config = item.config.map((child) => {
+            const c: any = { id: child.id, name: child.name };
+            if (child.config) c.config = { ...child.config };
+            return c;
+          });
+        } else {
+          plugin.config = { ...item.config };
+        }
       }
       return plugin;
     }),
