@@ -13,7 +13,7 @@
 2. **EN-003 [高] Memory 插件 — Session 记忆 + User Profile（两层记忆体系）**：从 `nyagent` 记忆插件移植并适配 QQ 群聊/私聊多用户场景，实现轻量 Markdown 持久化、动态 System Prompt 注入、主动/被动记录以及后台自动回顾（Background Review）。
 3. **EN-002 [低] `send_file` 支持 URL 图片直接发送**：按用户指示，低优先级**暂缓实施**。
 
-经过深入查阅 `dsh-napcat-bridge` 本地源码、`nyagent` 记忆与自动回顾实现 (`/home/nyara/nyagent/src/plugins/memory`)、Hermes 后台回顾源码 (`~/.hermes/hermes-agent/agent/background_review.py`) 以及 OneBot v11 协议标准，现将两项任务的可行性、限制条件及详细设计方案汇报如下。
+经过深入查阅 `dsh-napcat-bridge` 本地源码、`nyagent` 记忆与自动回顾实现 (`/home/TestUser/nyagent/src/plugins/memory`)、Hermes 后台回顾源码 (`~/.hermes/hermes-agent/agent/background_review.py`) 以及 OneBot v11 协议标准，现将两项任务的可行性、限制条件及详细设计方案汇报如下。
 
 ---
 

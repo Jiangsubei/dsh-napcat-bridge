@@ -34,7 +34,7 @@ QQ 会话执行 `/model opencode-go deepseek-v4-flash -g`（以及任意带参 `
    `lib/index.js:5530` 证实），提供 `sessions.selectModel({ rpcId, payload: { sessionId, provider, model } })`
    —— 旧 wire 信封为 `{rpcId, payload}`。
 
-4. **新架构（0.1.2-rc.1，当前 `dsh web` 运行时 /home/nyara/.local/bin/dsh）**：
+4. **新架构（0.1.2-rc.1，当前 `dsh web` 运行时 /home/TestUser/.local/bin/dsh）**：
    `dsh-host-apiproxy` 整体移除，改为 Typert Remote 架构：
    - `@deepseek-ai/dsh-api-session-controller` 的 `SessionController` 以
      `super(ctx, 'sessionController', { namespace: 'session' })` 注册

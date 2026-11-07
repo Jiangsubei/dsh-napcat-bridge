@@ -7,7 +7,7 @@
 - **插件反馈**：提示 `✅ 当前会话模型已切换为: aliyun-token-plan / qwen3.8-flash`。
 - **实际表现**：
   1. 打开 DeepSeek Harness Web UI 查看当前会话，模型依然是之前的 `OpenCode Go MIMO2.5`（`opencode-go / mimo-v2.5`），没有变成 `3.8 Flash`。
-  2. 随后在 QQ 发送消息（如 `喵喵喵`）唤醒对话，通过解压审查 `~/.dsh/sessions/--home-nyara-.dsh-workspace-napcat--/qq-user-2000000001-2/session.jsonl.zstd` 最新事件流证实：
+  2. 随后在 QQ 发送消息（如 `喵喵喵`）唤醒对话，通过解压审查 `~/.dsh/sessions/--home-TestUser-.dsh-workspace-napcat--/qq-user-2000000001-2/session.jsonl.zstd` 最新事件流证实：
      ```json
      {"type":"request/header","seq":5149,"time":1788408689290,"data":{"header":{"config":{"provider":"opencode-go","model":"mimo-v2.5","maxTokens":128000}}}}
      ```

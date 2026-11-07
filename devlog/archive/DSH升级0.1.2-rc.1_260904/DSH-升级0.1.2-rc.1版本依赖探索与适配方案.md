@@ -9,7 +9,7 @@
 ## 1. 全局包版本核对
 
 通过对用户全局环境的查验，核对事实如下：
-- **全局 DSH 路径**：`/home/nyara/.local/bin/dsh -> ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js`
+- **全局 DSH 路径**：`/home/TestUser/.local/bin/dsh -> ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js`
 - **全局 DSH 版本**：`@deepseek-ai/dsh@0.1.2-rc.1`
 - **配套依赖基线**：
   - `@deepseek-ai/cordis`: `4.0.2`
