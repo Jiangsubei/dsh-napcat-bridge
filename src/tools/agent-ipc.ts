@@ -329,15 +329,26 @@ export async function createTargetAgent(
         ? sessionManager.peerToSessionId(ctx.peer)
         : undefined);
 
-    await sessionManager.dispatchWakeup({
-      peer,
-      trigger: 'internal_agent',
-      from_session: currentSessionId,
-      from_user: currentSessionId || 'system',
-      from_name: '系统协作总线',
-      content: String(params.initial_message).trim(),
-      timestamp: Date.now(),
-    });
+    const hub = sessionManager.getSystemEventHub?.();
+    if (hub) {
+      await hub.dispatchAgentIpc({
+        targetPeer: peer,
+        fromSessionId: currentSessionId || '其他工作区',
+        message: String(params.initial_message).trim(),
+        isInitialDirective: true,
+        timestamp: Date.now(),
+      });
+    } else {
+      await sessionManager.dispatchWakeup({
+        peer,
+        trigger: 'internal_agent',
+        from_session: currentSessionId,
+        from_user: currentSessionId || 'system',
+        from_name: '系统协作总线',
+        content: String(params.initial_message).trim(),
+        timestamp: Date.now(),
+      });
+    }
 
     return toLosslessJson({
       success: true,
@@ -509,15 +520,25 @@ export async function sendAgentMessage(
 
     await sessionManager.getOrCreateAgent(targetPeer);
 
-    await sessionManager.dispatchWakeup({
-      peer: targetPeer,
-      trigger: 'internal_agent',
-      from_session: fromSession,
-      from_user: fromSession || 'agent',
-      from_name: '协同 Agent',
-      content: String(params.message).trim(),
-      timestamp: Date.now(),
-    });
+    const hub = sessionManager.getSystemEventHub?.();
+    if (hub) {
+      await hub.dispatchAgentIpc({
+        targetPeer,
+        fromSessionId: fromSession || '其他工作区',
+        message: String(params.message).trim(),
+        timestamp: Date.now(),
+      });
+    } else {
+      await sessionManager.dispatchWakeup({
+        peer: targetPeer,
+        trigger: 'internal_agent',
+        from_session: fromSession,
+        from_user: fromSession || 'agent',
+        from_name: '协同 Agent',
+        content: String(params.message).trim(),
+        timestamp: Date.now(),
+      });
+    }
 
     return toLosslessJson({
       success: true,

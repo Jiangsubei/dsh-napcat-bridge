@@ -5,6 +5,9 @@
 
 // ==================== 1. OneBot 11 协议类型 ====================
 
+export * from './system-event.js';
+import type { SystemWakeupEvent } from './system-event.js';
+
 export type OneBotPostType = 'message' | 'message_sent' | 'notice' | 'request' | 'meta_event';
 
 export type OneBotMessageType = 'group' | 'private';
@@ -201,6 +204,10 @@ export interface WakeupPayload {
   from_session?: string;
   /** 内部 Agent 协作成果回传目标会话 ID (当 trigger === 'internal_agent' 时提供) */
   reply_to_session?: string;
+  /** 是否为系统内部生成的事件（定时任务/IPC/主动回复/协议通知等，非真实用户消息） */
+  is_system?: boolean;
+  /** 对应的强类型系统事件实体（由 SystemEventHub 统一注入） */
+  system_event?: SystemWakeupEvent;
   timestamp: number;
 }
 

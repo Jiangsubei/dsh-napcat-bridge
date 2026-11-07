@@ -52,6 +52,7 @@ import { migrateLegacyConfig, readLegacyConfig } from './config/migrate.js';
 import { healProfileConfigFile, sanitizeConfigPayload } from './config/heal.js';
 import { migrateFaceStoragePaths } from './storage/face-migration.js';
 import { TaskScheduler } from './scheduler/index.js';
+import { SystemEventHub } from './gateway/system-event-hub.js';
 
 export * from './memory/index.js';
 import { setupSlangService } from './slang/index.js';
@@ -351,8 +352,16 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     logger.warn?.('[Plugin] 初始化注册 NapCat 顶级工作区失败:', wsErr);
   });
 
+  // 3.0 初始化系统内部事件与统一唤醒中枢 (SystemEventHub)
+  const systemEventHub = new SystemEventHub({
+    sessionManager,
+    logger,
+  });
+  sessionManager.setSystemEventHub(systemEventHub);
+
   // 3.1 初始化定时任务与周期调度引擎
   const taskScheduler = new TaskScheduler({
+    systemEventHub,
     db,
     dispatchWakeup: async (payload) => {
       await sessionManager.dispatchWakeup(payload);
@@ -509,6 +518,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     if (typeof (ctx as any).provide === 'function') {
       (ctx as any).provide('napcat-proactive');
       (ctx as any).provide('napcat-session');
+      (ctx as any).provide('napcat-system-event-hub');
       (ctx as any).provide('napcat-bridge-config');
       // 网关实例暴露至 Cordis 上下文，供内部模块与装配契约测试访问（出站落库 onMessageSent 接线断言）
       (ctx as any).provide('napcat-gateway', server);
@@ -516,11 +526,13 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
   } catch {}
   (ctx as any)['napcat-proactive'] = proactiveManager;
   (ctx as any)['napcat-session'] = sessionManager;
+  (ctx as any)['napcat-system-event-hub'] = systemEventHub;
   (ctx as any)['napcat-bridge-config'] = currentConfig;
   (ctx as any)['napcat-gateway'] = server;
   if (typeof (ctx as any).set === 'function') {
     (ctx as any).set('napcat-proactive', proactiveManager);
     (ctx as any).set('napcat-session', sessionManager);
+    (ctx as any).set('napcat-system-event-hub', systemEventHub);
   }
 
   // 6. 审批 waterfall 响应器（独立于提问 provider，不注册 userQuestions 以避免与官方冲突）
@@ -1386,20 +1398,12 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         if (decision.wakeup && decision.payload) {
           const payloadPeer = decision.payload.peer;
           logger.info?.(`[Plugin] 戳一戳触发唤醒 (peer: ${payloadPeer})`);
-          const blankContext = {
-            msg_id: undefined as any,
-            from_user: '',
-            is_group: isGroup,
-            trigger: 'poke',
-            is_synthetic: true,
-          };
-          outboundBridge.trackInboundContext(payloadPeer, blankContext);
-          await sessionManager.dispatchWakeup(decision.payload, {
-            onMessageCreated: (userMsg) => {
-              if (userMsg?.id) {
-                outboundBridge.trackPendingMessage(userMsg.id, payloadPeer, blankContext);
-              }
-            },
+          await systemEventHub.dispatchSyntheticNotice({
+            peer: payloadPeer,
+            noticeType: "poke",
+            operatorUser: decision.payload.from_user,
+            operatorName: decision.payload.from_name,
+            timestamp: decision.payload.timestamp,
           });
         }
       } catch (err) {
@@ -1444,6 +1448,7 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     proactiveManager.startChecker(() => ({
       config: currentConfig(),
       isSessionBusy: (peer) => sessionManager.isBusy(peer),
+      systemEventHub,
       dispatchWakeup: async (payload) => {
         logger.info?.(`[Plugin] 主动回复触发唤醒 (trigger: ${payload.trigger}, sub_trigger: ${payload.sub_trigger}, peer: ${payload.peer})`);
         const isGroup = payload.peer.startsWith('group_') || payload.peer.startsWith('qq-group-');

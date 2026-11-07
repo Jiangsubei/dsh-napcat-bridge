@@ -4,6 +4,7 @@
  */
 
 import type { BridgePluginConfig, WakeupPayload } from '../types/index.js';
+import type { SystemEventHub } from './system-event-hub.js';
 
 export interface WindowGroupMessage {
   timestamp: number;
@@ -19,7 +20,8 @@ export type BufferedGroupMessage = WindowGroupMessage;
 
 export interface ProactiveCheckOptions {
   config: BridgePluginConfig;
-  dispatchWakeup: (payload: WakeupPayload) => Promise<void>;
+  dispatchWakeup?: (payload: WakeupPayload) => Promise<void>;
+  systemEventHub?: SystemEventHub;
   isSessionBusy?: (peer: string) => boolean;
   now?: number;
   knownPeers?: () => string[];
@@ -174,7 +176,7 @@ export class ProactiveManager {
    * 群聊主动回复与潜水超时集中巡检
    */
   async checkProactiveGroups(options: ProactiveCheckOptions): Promise<void> {
-    const { config, dispatchWakeup } = options;
+    const { config, dispatchWakeup, systemEventHub } = options;
     const now = options.now ?? Date.now();
 
     // 1. 总控校验
@@ -229,19 +231,29 @@ export class ProactiveManager {
           this.idleTriggered.add(peer);
           this.recordProactiveReply(peer, now);
 
-          const payload: WakeupPayload = {
-            trigger: 'proactive',
-            sub_trigger: 'idle',
-            peer,
-            from_user: '',
-            from_name: '',
-            content: '',
-            timestamp: now,
-          };
+          if (systemEventHub) {
+            try {
+              await systemEventHub.dispatchProactiveLurk({
+                peer,
+                idleDurationMinutes: timeoutMins,
+                timestamp: now,
+              });
+            } catch {}
+          } else if (dispatchWakeup) {
+            const payload: WakeupPayload = {
+              trigger: 'proactive',
+              sub_trigger: 'idle',
+              peer,
+              from_user: '',
+              from_name: '',
+              content: '',
+              timestamp: now,
+            };
 
-          try {
-            await dispatchWakeup(payload);
-          } catch {}
+            try {
+              await dispatchWakeup(payload);
+            } catch {}
+          }
           continue;
         }
       }
@@ -265,20 +277,30 @@ export class ProactiveManager {
         }
         this.recordProactiveReply(peer, now);
 
-        const payload: WakeupPayload = {
-          trigger: 'proactive',
-          sub_trigger: 'polling',
-          peer,
-          from_user: '',
-          from_name: '',
-          content: '',
-          buffered_messages: [...unreplied],
-          timestamp: now,
-        };
+        if (systemEventHub) {
+          try {
+            await systemEventHub.dispatchProactivePolling({
+              peer,
+              bufferedMessages: [...unreplied],
+              timestamp: now,
+            });
+          } catch {}
+        } else if (dispatchWakeup) {
+          const payload: WakeupPayload = {
+            trigger: 'proactive',
+            sub_trigger: 'polling',
+            peer,
+            from_user: '',
+            from_name: '',
+            content: '',
+            buffered_messages: [...unreplied],
+            timestamp: now,
+          };
 
-        try {
-          await dispatchWakeup(payload);
-        } catch {}
+          try {
+            await dispatchWakeup(payload);
+          } catch {}
+        }
       }
     }
   }

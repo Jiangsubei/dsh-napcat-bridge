@@ -100,6 +100,7 @@ import {
   formatWakeupPrompt,
   isQQSession,
 } from './id-resolver.js';
+import { formatSystemEventPrompt } from '../system-event-hub.js';
 import type { SessionWorkspaceManager } from './workspace.js';
 import type { SessionPersistenceManager } from './persistence.js';
 import type { SessionModelSelector } from './model-selector.js';
@@ -817,6 +818,7 @@ export class SessionAgentRunner {
     }
   ): Promise<any> {
     const isNoMessageWakeup =
+      Boolean(payload.is_system) ||
       payload.trigger === 'poke' ||
       payload.trigger === 'scheduled' ||
       payload.trigger === 'internal_agent' ||
@@ -840,6 +842,7 @@ export class SessionAgentRunner {
     // 系统触发器（scheduled / proactive / internal_agent）的 from_name 是系统身份
     // 「系统定时任务」「协同 Agent」等，若写入标题会把私聊永久改名成系统身份。
     if (
+      !payload.is_system &&
       payload.from_name &&
       REAL_SENDER_TRIGGERS.has(String(payload.trigger)) &&
       isUserPeer(payload.peer)
@@ -847,7 +850,10 @@ export class SessionAgentRunner {
       this.updateSessionTitle((agent as any).session, payload.peer, sessionId, payload.from_name);
     }
 
-    const promptText = formatWakeupPrompt(payload);
+    const promptText =
+      payload.is_system && payload.system_event
+        ? formatSystemEventPrompt(payload.system_event)
+        : formatWakeupPrompt(payload);
 
     const userMsg = createUserMessage({
       content: [{ type: 'text', text: promptText }],
@@ -856,7 +862,9 @@ export class SessionAgentRunner {
 
     // 审批「本轮唤醒者」登记：只登记真实 QQ 发送者唤醒（系统触发返回 null）。
     // 必须在 followup/steer 之前登记——followup 可能同步 append turn/start。
-    const wakeupInitiator = resolveWakeupInitiator(payload.trigger, payload.from_user);
+    const wakeupInitiator = payload.is_system
+      ? null
+      : resolveWakeupInitiator(payload.trigger, payload.from_user);
     if (wakeupInitiator) {
       this.turnInitiatorTracker?.expect(userMsg?.id, sessionId, wakeupInitiator);
     }

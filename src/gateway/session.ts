@@ -25,6 +25,8 @@ export {
   isQQSession,
 } from './session/id-resolver.js';
 export { encodeSegment };
+import type { SystemEventHub } from './system-event-hub.js';
+export { SystemEventHub };
 
 import {
   type OutboundBridgeLike,
@@ -186,6 +188,18 @@ export class SessionManager {
 
   public getTurnInitiatorTracker(): TurnInitiatorTracker | undefined {
     return this.agentRunner.getTurnInitiatorTracker();
+
+  }
+
+  // --- 系统事件与统一唤醒中枢 (SystemEventHub) ---
+  private systemEventHub?: SystemEventHub;
+
+  public setSystemEventHub(hub: SystemEventHub | undefined): void {
+    this.systemEventHub = hub;
+  }
+
+  public getSystemEventHub(): SystemEventHub | undefined {
+    return this.systemEventHub;
   }
 
   public getActiveTurn(peer: string): number | undefined {

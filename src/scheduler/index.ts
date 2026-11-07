@@ -5,6 +5,7 @@
 
 import type { MessageDatabase } from '../storage/database.js';
 import { formatDateTime } from '../storage/database.js';
+import type { SystemEventHub } from '../gateway/system-event-hub.js';
 import type {
   BridgePluginConfig,
   ScheduledTaskRecord,
@@ -25,7 +26,8 @@ export const MAX_SAFE_TIMEOUT_MS = 2147483647;
 
 export interface TaskSchedulerOptions {
   db: MessageDatabase;
-  dispatchWakeup: (payload: WakeupPayload) => Promise<void>;
+  dispatchWakeup?: (payload: WakeupPayload) => Promise<void>;
+  systemEventHub?: SystemEventHub;
   configGetter?: () => BridgePluginConfig;
   logger?: any;
 }
@@ -62,7 +64,8 @@ export function formatRuleDescription(task: {
 
 export class TaskScheduler {
   private db: MessageDatabase;
-  private dispatchWakeup: (payload: WakeupPayload) => Promise<void>;
+  private dispatchWakeup?: (payload: WakeupPayload) => Promise<void>;
+  private systemEventHub?: SystemEventHub;
   private configGetter: () => BridgePluginConfig;
   private logger: any;
   private timers = new Map<string, NodeJS.Timeout>();
@@ -72,6 +75,7 @@ export class TaskScheduler {
   constructor(options: TaskSchedulerOptions) {
     this.db = options.db;
     this.dispatchWakeup = options.dispatchWakeup;
+    this.systemEventHub = options.systemEventHub;
     this.configGetter = options.configGetter || (() => ({}));
     this.logger = options.logger || console;
   }
@@ -427,19 +431,30 @@ export class TaskScheduler {
 
     try {
       const ruleDesc = formatRuleDescription(task);
-      const payload: WakeupPayload = {
-        trigger: 'scheduled',
-        peer: task.peer,
-        from_user: task.creator,
-        from_name: '系统定时任务',
-        content: task.prompt,
-        task_id: task.id,
-        task_type: task.type,
-        task_rule: ruleDesc,
-        timestamp: Date.now(),
-      };
-
-      await this.dispatchWakeup(payload);
+      if (this.systemEventHub) {
+        await this.systemEventHub.dispatchScheduledTask({
+          peer: task.peer,
+          taskId: task.id,
+          taskType: task.type,
+          taskRule: ruleDesc,
+          prompt: task.prompt,
+          creator: task.creator,
+          timestamp: Date.now(),
+        });
+      } else if (this.dispatchWakeup) {
+        const payload: WakeupPayload = {
+          trigger: 'scheduled',
+          peer: task.peer,
+          from_user: task.creator,
+          from_name: '系统定时任务',
+          content: task.prompt,
+          task_id: task.id,
+          task_type: task.type,
+          task_rule: ruleDesc,
+          timestamp: Date.now(),
+        };
+        await this.dispatchWakeup(payload);
+      }
 
       if (task.type === 'once') {
         this.db.completeScheduledTask(task.id);
