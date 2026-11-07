@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-napcat-bridge.svg)](https://www.npmjs.com/package/dsh-napcat-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.2.0-4f46e5)](https://github.com/deepseek-ai/dsh)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-%3E%3D0.2.0%20(up%20to%200.2.2)-4f46e5)](https://github.com/deepseek-ai/dsh)
 
 DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业助手，也是懂梗斗图、能学黑话、主动冒泡的灵魂群友。让 DSH Agent 在 QQ 群聊 / 私聊中开箱即用。
 
@@ -14,6 +14,11 @@ DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业
 - **QQ 会话专属预设（`qq-session`）**：构建期与运行时单一真相源（SSOT）自动同步，专属注入 QQ 工具集，彻底杜绝工具向 Web UI 常规会话泄露；深度补齐工作区、跨平台 Shell（Windows pwsh / Linux bash）、Web 搜索、交互提问与技能系统，并抑制多余快照。
 - **用户侧静默出站体系**：遵循「用户侧静默原则」，废除纯文本直接推流；文本出站统一由 **`send_qq_message`** 工具驱动，由模型根据入站标头 `[消息ID: <id>]` 与上下文逻辑自主决定是否引用原消息（`reply_to`）或艾特用户（`at_user`）。
 - **工具与回合解耦（单 Agent 顺手维护）**：执行出站工具不强行终止回合，模型在回复用户后可在同一轮次中顺手调用记忆或表情管理工具，自然平稳终结。
+- **消息撤回机制**：支持大模型自主撤回指定消息（`recall_message`），当发错内容、产生严重幻觉、收到用户撤回要求或在群聊中处置违规内容时可安全自愈（受 QQ 平台 2 分钟时限与权限约束）。
+- **社交关系链与群聊画像感知**：支持好友列表（`get_friend_list`）、群列表（`get_group_list`）、用户资料卡（`get_user_profile`）、群基础信息（`get_group_info`）与群历史公告（`get_group_notice`）只读探查，全场景支持规范化的 `offset + limit` 分页。
+- **跨 Agent 内部协同总线**：支持活跃 Agent 状态检索（`list_active_agents`）、定向创建激活常驻 Agent（`create_target_agent`）以及内部通讯总线（`send_agent_message`），实现多 peer / 跨会话任务分派与成果回执，内部消息全链路落库且对 QQ 用户完全不可见。
+- **QQ 空间动态互动生态**：开箱支持浏览好友动态流（`read_qzone_feeds`，支持游标分页与断点续读）、图文动态发布（`publish_qzone_feed`，内置 60 秒防风控冷却）、说说评论互动（`comment_qzone_feed`，结合用户画像精准回复）与自主删说说（`delete_qzone_feed`）。
+- **统一系统事件中枢（`SystemEventHub`）**：收敛定时任务唤醒、加好友附言、戳一戳、内部协同回执等后台事件流，以统一规范标头注入大模型上下文，彻底杜绝系统事件被误当作普通聊天回复导致的幻觉。
 - **两层记忆体系**：群聊会话记忆 + 用户跨群互通画像，Markdown 文件存储，提供 `read_memory`、`create_memory`、`edit_memory` 三大工具；写入侧按“用户画像 / Session 规则 / 群聊画像总预算”三个独立字符预算硬拒绝超限落盘，注入侧保持文件内容原子；彻底摒弃独立后台回顾 Agent。
 - **表情包管理体系**：受 `face_enabled` 配置门控，提供查表情（`list_faces`）、发表情（`send_face`）、收录好图（`collect_face`）与库容维护/LRU 淘汰（`manage_faces`）闭环工具链；另有群聊 `react_message` 贴表情轻量表态。
 - **串行发送与多媒体交互**：单对端串行出站队列，避免并发乱序；支持私聊文件入站自动落盘、群共享文件索引查询（`list_group_files`）、动态资源拉取（`fetch_chat_resource`）与合并转发展开（`expand_forward_message`）。
@@ -31,7 +36,7 @@ DeepSeek Harness × OneBot 11 QQ 接入插件 —— 既是随叫随到的专业
 
 ### 前置条件
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/dsh) (`npm install -g @deepseek-ai/dsh`) `>= 0.2.0`
+- [DeepSeek Harness](https://github.com/deepseek-ai/dsh) (`npm install -g @deepseek-ai/dsh`) `>= 0.2.0`（官方全版本兼容，已全面测试适配至 `0.2.2-rc.1+`）
 - **QQ 机器人协议端（二选一）**：
   - [NapCat](https://github.com/NapNeko/NapCatQQ)（基准环境，经过大量测试验证）
   - [SnowLuma](https://github.com/snowluma/snowluma)（实测核心功能完全兼容）

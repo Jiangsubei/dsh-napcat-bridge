@@ -10,7 +10,7 @@
 
 - **Node.js**: `>= 22.12.0`（推荐 `22.x` LTS）
 - **pnpm**: `>= 9.0.0`
-- **DeepSeek Harness (DSH)**: `>= 0.2.0`
+- **DeepSeek Harness (DSH)**: `>= 0.2.0`（官方全版本兼容，已全面测试适配至 `0.2.2-rc.1+`）
 - **QQ 机器人协议端（二选一）**:
   - [NapCatQQ](https://github.com/NapNeko/NapCatQQ)：基准环境，经过大量测试验证（桌面版、Shell 版或 Docker 版均可）
   - [SnowLuma](https://github.com/snowluma/snowluma)：实测核心功能完全兼容

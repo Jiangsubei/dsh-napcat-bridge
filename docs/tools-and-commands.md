@@ -23,6 +23,7 @@
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
 | `send_qq_message` | 向当前 QQ 会话发送纯文本消息。是模型向 QQ 用户发言的唯一文本出站通道。 | `text` (string, 必填: 要发送的文本内容)<br>`reply_to` (number, 可选: 需要引用的目标消息数字 ID，来自入站标头 `[消息ID: <id>]` 或 `read_chat_history`)<br>`at_user` (string, 可选: 需要艾特的目标用户 QQ 号，仅群聊生效) |
+| `recall_message` | 撤回当前会话中的指定消息。若发现发错内容、产生严重幻觉、被用户要求撤回，或在具备管理员权限时处置违规发言时可调用。受 QQ 平台规则限制（普通消息限 2 分钟内，超时或无权限会如实报错）。 | `message_id` (number, 必填: 待撤回的目标消息数字 ID) |
 | `send_file` | 向当前会话（群聊或私聊）发送本地磁盘上的生成文件、导出报告或图片实体产物。共用串行出站队列。 | `file_path` (string, 必填: 本地绝对路径、`file://` URI 或 URL) |
 | `poke_user` | 主动在群内戳指定用户，或在私聊窗口向对方发送窗口抖动。 | `user_id` (string, 必填: 目标用户的 QQ 号) |
 | `react_message` | 为群聊中的指定消息贴表情回应（轻量情绪表态，无需发文字）。**仅限群聊调用**。 | `emoji` (string, 必填: 25 种预设语义键如 `thumbs_up`, `heart`, `laugh`, `doge`, `ok`, `cat`, `thinking` 等)<br>`message_id` (number, 可选: 目标消息 ID，省略时自动绑定当前入站消息) |
