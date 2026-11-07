@@ -59,6 +59,108 @@ export function formatDateTime(timestamp: number): string {
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
+/** 同一次群文件上传在 notice 与消息段两条记录间允许的最大时间差 */
+const GROUP_FILE_DEDUPE_WINDOW_MS = 30_000;
+
+interface GroupFileRowInfo {
+  fileName: string;
+  size?: number;
+}
+
+/**
+ * 从群文件消息行解析文件名与大小。
+ * 兼容两类历史落库形态：
+ * - notice 事件：raw 为对象，文件名在 file.name / 大小在 file.size；
+ * - 消息段：raw 为段数组，文件名在 file 段的 data.file / 大小在 data.file_size。
+ */
+function parseGroupFileRowInfo(row: any): GroupFileRowInfo {
+  let fileName = '';
+  let size: number | undefined = undefined;
+
+  if (row?.raw) {
+    try {
+      const parsed = JSON.parse(row.raw);
+      const nodes = Array.isArray(parsed) ? parsed : [parsed];
+      for (const node of nodes) {
+        const file = node?.file ?? (node?.type === 'file' ? node?.data : null);
+        if (!file) continue;
+        if (!fileName) {
+          const name = file.name ?? file.file_name ?? file.file;
+          if (name !== undefined && name !== null && String(name).trim() !== '') {
+            fileName = String(name).trim();
+          }
+        }
+        if (size === undefined) {
+          const rawSize = typeof file.size === 'number' ? file.size : Number(file.file_size);
+          if (Number.isFinite(rawSize) && rawSize >= 0) size = rawSize;
+        }
+        if (fileName && size !== undefined) break;
+      }
+    } catch {}
+  }
+
+  if (!fileName && row?.content) {
+    const match = String(row.content).match(/^\[群文件:(.+?)\s*\(ID:/);
+    if (match && match[1]) {
+      fileName = match[1].trim();
+    } else {
+      fileName = String(row.content).replace(/^\[群文件:/, '').replace(/\]$/, '').trim();
+    }
+  }
+
+  if (!fileName) fileName = '未知文件';
+  return { fileName, size };
+}
+
+/**
+ * 合并同一次群文件上传产生的双记录（notice/group_upload + 消息段）。
+ * 判定条件：同 peer（调用方保证）、同文件名、时间差 ≤ 30s、上传者与大小兼容。
+ * 合并策略：保留首次出现（notice）的 msg_id/time；file_id 优先 /uuid 形态；busid 优先正数。
+ */
+function mergeDuplicateGroupFileRows(rows: any[]): Array<GroupFileRowInfo & {
+  row: any;
+  fileId: string;
+  busid: number;
+  userId: string;
+}> {
+  const merged: Array<GroupFileRowInfo & { row: any; fileId: string; busid: number; userId: string }> = [];
+
+  for (const row of rows) {
+    const info = parseGroupFileRowInfo(row);
+    const rowTime = Number(row.time);
+    const userId = String(row.user_id ?? '');
+    const fileId = String(row.file_id || '');
+    const busid = row.busid !== null && row.busid !== undefined ? Number(row.busid) : 0;
+
+    const existing = merged.find((entry) => {
+      if (entry.fileName !== info.fileName) return false;
+      if (Math.abs(Number(entry.row.time) - rowTime) > GROUP_FILE_DEDUPE_WINDOW_MS) return false;
+      if (entry.userId && userId && entry.userId !== userId) return false;
+      if (entry.size !== undefined && info.size !== undefined && entry.size !== info.size) return false;
+      return true;
+    });
+
+    if (!existing) {
+      merged.push({ ...info, row, fileId, busid, userId });
+      continue;
+    }
+
+    // 优先 /uuid 形态 file_id（SnowLuma get_group_file_url 仅接受该形态）
+    if (!existing.fileId.startsWith('/') && fileId.startsWith('/')) {
+      existing.fileId = fileId;
+    }
+    // busid 优先保留正数
+    if ((!Number.isFinite(existing.busid) || existing.busid <= 0) && Number.isFinite(busid) && busid > 0) {
+      existing.busid = busid;
+    }
+    if (existing.size === undefined && info.size !== undefined) {
+      existing.size = info.size;
+    }
+  }
+
+  return merged;
+}
+
 /**
  * 解析用户/大模型传入的多样化时间参数为毫秒级 Unix 时间戳
  * 支持：
@@ -690,59 +792,42 @@ export class MessageDatabase {
     }
 
     const whereClause = conditions.join(' AND ');
-    const countRow = db.prepare(`SELECT count(*) as count FROM messages WHERE ${whereClause}`).get(...sqlParams) as { count: number };
-    const total = countRow ? countRow.count : 0;
-
     const order = params.order?.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const offset = Number.isFinite(Number(params.offset)) && Number(params.offset) > 0
       ? Math.floor(Number(params.offset))
       : 0;
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
 
+    // SnowLuma 兼容：同一次上传会同时产生 notice 与消息段两条记录，
+    // 先按时间升序全量取出并合并双记录，再统一排序分页，避免分页后再去重造成条数抖动。
     const rows = db.prepare(`
       SELECT * FROM messages
       WHERE ${whereClause}
-      ORDER BY time ${order}
-      LIMIT ? OFFSET ?
-    `).all(...sqlParams, limit, offset) as any[];
+      ORDER BY time ASC, msg_id ASC
+    `).all(...sqlParams) as any[];
 
-    const files: GroupFileInfo[] = rows.map((row) => {
-      let fileName = '';
-      let size: number | undefined = undefined;
+    const merged = mergeDuplicateGroupFileRows(rows);
+    if (order === 'DESC') merged.reverse();
 
-      if (row.raw) {
-        try {
-          const parsed = JSON.parse(row.raw);
-          if (parsed.file?.name) fileName = String(parsed.file.name);
-          if (typeof parsed.file?.size === 'number') size = parsed.file.size;
-        } catch {}
-      }
+    const total = merged.length;
+    const pageEntries = merged.slice(offset, offset + limit);
 
-      if (!fileName && row.content) {
-        const match = row.content.match(/^\[群文件:(.+?)\s*\(ID:/);
-        if (match && match[1]) {
-          fileName = match[1].trim();
-        } else {
-          fileName = row.content.replace(/^\[群文件:/, '').replace(/\]$/, '').trim();
-        }
-      }
-
-      if (!fileName) {
-        fileName = '未知文件';
-      }
-
-      const senderName = (row.sender_name && row.sender_name.trim()) ? row.sender_name.trim() : String(row.user_id);
+    const files: GroupFileInfo[] = pageEntries.map((entry) => {
+      const row = entry.row;
+      const senderName = (row.sender_name && String(row.sender_name).trim())
+        ? String(row.sender_name).trim()
+        : String(row.user_id);
 
       return {
         msg_id: Number(row.msg_id),
-        file_id: String(row.file_id || ''),
-        file_name: fileName,
-        busid: row.busid !== null && row.busid !== undefined ? Number(row.busid) : 0,
+        file_id: entry.fileId,
+        file_name: entry.fileName,
+        busid: entry.busid,
         sender_name: senderName,
         user_id: String(row.user_id),
         time: Number(row.time),
         formatted_time: formatDateTime(Number(row.time)),
-        size,
+        size: entry.size,
       };
     });
 
@@ -755,6 +840,39 @@ export class MessageDatabase {
       limit,
       has_more: offset + files.length < total,
     };
+  }
+
+  /**
+   * 查找同一次群文件上传产生的消息段兄弟记录（file_id 为 /uuid 形态）。
+   * 用于 SnowLuma 兼容垫片：notice 事件只带 32 位 hex file_id，需换回可用形态。
+   */
+  findGroupFileSibling(
+    peer: string,
+    fileName: string,
+    time: number,
+    size?: number
+  ): MessageRecord | null {
+    if (!peer || !fileName || !Number.isFinite(time)) return null;
+    const db = this.ensureDb();
+    const targetName = fileName.trim();
+    if (!targetName) return null;
+
+    const rows = db.prepare(`
+      SELECT * FROM messages
+      WHERE peer = ? AND type = 'group_file' AND file_id LIKE '/%'
+      ORDER BY ABS(time - ?) ASC
+      LIMIT 50
+    `).all(peer, time) as any[];
+
+    for (const row of rows) {
+      if (Math.abs(Number(row.time) - time) > GROUP_FILE_DEDUPE_WINDOW_MS) break;
+      const info = parseGroupFileRowInfo(row);
+      if (info.fileName !== targetName) continue;
+      if (size !== undefined && info.size !== undefined && info.size !== size) continue;
+      return this.getMessage(Number(row.msg_id));
+    }
+
+    return null;
   }
 
   /**

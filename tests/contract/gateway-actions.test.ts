@@ -107,6 +107,32 @@ describe('契约测试: Gateway Action 接入点 (v2 预留 + 成员信息)', ()
     expect(res.status).toBe('ok');
   });
 
+  it('SnowLuma 兼容-契约 9: busid 缺失或为 0 时不得发送 busid（NapCat 忽略 / SnowLuma 省略即默认 102）', async () => {
+    async function respondLast(action: string): Promise<Record<string, any>> {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      const pending = [...received].reverse().find((r) => r.action === action);
+      if (!pending) throw new Error(`未收到 action: ${action}, received=${JSON.stringify(received)}`);
+      client.send(JSON.stringify({ echo: pending.echo, status: 'ok', retcode: 0, data: {} }));
+      return pending;
+    }
+
+    const p1 = server.getGroupFileUrl(3000000001, '/uuid-no-busid');
+    const sent1 = await respondLast('get_group_file_url');
+    await p1;
+    expect(sent1.params).toEqual({ group_id: 3000000001, file_id: '/uuid-no-busid' });
+
+    const p2 = server.getGroupFileUrl(3000000001, '/uuid-zero-busid', 0);
+    const sent2 = await respondLast('get_group_file_url');
+    await p2;
+    expect(sent2.params).toEqual({ group_id: 3000000001, file_id: '/uuid-zero-busid' });
+
+    // 有效 busid 仍必须原样透传（NapCat 业务契约不回归）
+    const p3 = server.getGroupFileUrl(3000000001, '/uuid-busid-102', 102);
+    const sent3 = await respondLast('get_group_file_url');
+    await p3;
+    expect(sent3.params).toEqual({ group_id: 3000000001, file_id: '/uuid-busid-102', busid: 102 });
+  });
+
   it('PF-001-契约 G1: get_private_file_url 动作参数契约 {file_id}（首选直链）', async () => {
     const pendingAction = server.getPrivateFileUrl('N_private_file_001');
     const sent = await respondTo('get_private_file_url');

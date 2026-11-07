@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import * as fs from 'node:fs';
 import { fetchChatResource, pokeUser, expandForwardMessage } from '../../src/tools/index.js';
+import { clearGroupFileResolverCache } from '../../src/tools/group-file-resolve.js';
 
 /**
  * 契约测试: 群文件下载链路 (IS-F1/IS-F2)
@@ -41,6 +42,10 @@ function stubMedia() {
 }
 
 describe('契约测试: 群文件下载链路 (Group File Download Contract IS-F1/IS-F2)', () => {
+  beforeEach(() => {
+    clearGroupFileResolverCache();
+  });
+
   it('IS-F1-契约 1: group_ peer + 真 UUID file_id + busid 必须走真实下载路径（非按 file_id 字符串判定）', async () => {
     const { gateway, calls } = stubGateway();
     const { mediaManager } = stubMedia();
@@ -284,5 +289,135 @@ describe('契约测试: 群文件下载链路 (Group File Download Contract IS-F
     } finally {
       fs.rmSync(cachedFile, { force: true });
     }
+  });
+
+  /**
+   * SnowLuma 兼容：群文件 notice 事件落库的是 32 位 hex file_id，SnowLuma 的
+   * get_group_file_url 只接受消息段 /uuid。这里覆盖「本地兄弟记录优先」与
+   * 「群根目录列表兜底」两级解析，并确保成功路径不会多打协议端接口。
+   */
+  const HEX_NOTICE_ID = 'ae4d1ec67ebe8500b712d3d181e64b29';
+  const SEGMENT_FILE_ID = '/820dde00-d032-47a9-8726-dc5369c6a463';
+
+  function snowLumaGateway(rootFiles: any[] = []) {
+    const calls: Array<Record<string, any>> = [];
+    const rootCalls: any[] = [];
+    const gateway = {
+      getGroupFileUrl: async (groupId: any, fileId: any, busid: any) => {
+        calls.push({ groupId, fileId, busid });
+        if (String(fileId).startsWith('/')) {
+          return { status: 'ok', retcode: 0, data: { url: 'https://example.com/dl/resolved.txt' } };
+        }
+        return {
+          status: 'failed',
+          retcode: 100,
+          wording: 'group file url failed: code=4294966993 msg=文件 file_id 错误',
+        };
+      },
+      getGroupRootFiles: async (groupId: any) => {
+        rootCalls.push(groupId);
+        return { status: 'ok', retcode: 0, data: { files: rootFiles, folders: [] } };
+      },
+      getGroupFilesByFolder: async () => ({ status: 'ok', retcode: 0, data: { files: [], folders: [] } }),
+    };
+    return { gateway, calls, rootCalls };
+  }
+
+  it('SnowLuma-契约 8: notice 32hex 首次失败后优先用本地兄弟消息段 /uuid 重试，不请求群根目录', async () => {
+    const { gateway, calls, rootCalls } = snowLumaGateway();
+    const { mediaManager } = stubMedia();
+    const db = {
+      getByFileId: (id: string) =>
+        id === HEX_NOTICE_ID
+          ? {
+              msg_id: 1001,
+              peer: GROUP_PEER,
+              time: 1793946745000,
+              type: 'group_file',
+              content: `[群文件:demo.mp4 (ID:${HEX_NOTICE_ID})]`,
+              raw: JSON.stringify({ post_type: 'notice', file: { id: HEX_NOTICE_ID, name: 'demo.mp4', size: 4096, busid: 102 } }),
+              file_id: HEX_NOTICE_ID,
+              busid: 102,
+              local_path: null,
+            }
+          : null,
+      findGroupFileSibling: () => ({ file_id: SEGMENT_FILE_ID, busid: 102, msg_id: 1002 }),
+    } as any;
+
+    const res = await fetchChatResource(
+      { file_id: HEX_NOTICE_ID, busid: 102, file_name: 'demo.mp4' },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager, db }
+    );
+
+    expect(res.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ fileId: HEX_NOTICE_ID, busid: 102 });
+    expect(calls[1]).toMatchObject({ fileId: SEGMENT_FILE_ID, busid: 102 });
+    expect(rootCalls).toHaveLength(0);
+  });
+
+  it('SnowLuma-契约 9: 本地无兄弟记录时，通过群根目录文件名匹配 /uuid 并重试下载', async () => {
+    const { gateway, calls, rootCalls } = snowLumaGateway([
+      { file_id: SEGMENT_FILE_ID, file_name: 'demo.mp4', busid: 102, file_size: 4096, upload_time: 1793946740 },
+    ]);
+    const { mediaManager } = stubMedia();
+    const db = {
+      getByFileId: (id: string) =>
+        id === HEX_NOTICE_ID
+          ? {
+              msg_id: 1001,
+              peer: GROUP_PEER,
+              time: 1793946745000,
+              type: 'group_file',
+              content: `[群文件:demo.mp4 (ID:${HEX_NOTICE_ID})]`,
+              raw: '{}',
+              file_id: HEX_NOTICE_ID,
+              busid: 102,
+              local_path: null,
+            }
+          : null,
+      findGroupFileSibling: () => null,
+    } as any;
+
+    const res = await fetchChatResource(
+      { file_id: HEX_NOTICE_ID, busid: 102, file_name: 'demo.mp4' },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager, db }
+    );
+
+    expect(res.success).toBe(true);
+    expect(rootCalls).toEqual([3000000001]);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({ fileId: SEGMENT_FILE_ID, busid: 102 });
+  });
+
+  it('SnowLuma-契约 10: 消息段 /uuid 首次成功时绝不触发根目录兜底（NapCat 主路径零回归）', async () => {
+    const { gateway, calls, rootCalls } = snowLumaGateway();
+    const { mediaManager } = stubMedia();
+
+    const res = await fetchChatResource(
+      { file_id: SEGMENT_FILE_ID, busid: 102, file_name: 'demo.mp4' },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager }
+    );
+
+    expect(res.success).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(rootCalls).toHaveLength(0);
+  });
+
+  it('SnowLuma-契约 11: 首次与兜底解析均失败时保留协议端原始报错', async () => {
+    const { gateway } = snowLumaGateway([]);
+    const { mediaManager } = stubMedia();
+    const db = {
+      getByFileId: () => null,
+      findGroupFileSibling: () => null,
+    } as any;
+
+    const res = await fetchChatResource(
+      { file_id: HEX_NOTICE_ID, busid: 102, file_name: 'demo.mp4' },
+      { peer: GROUP_PEER, groupId: 3000000001, gateway, mediaManager, db }
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('文件 file_id 错误');
   });
 });

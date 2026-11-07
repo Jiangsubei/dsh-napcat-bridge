@@ -478,11 +478,44 @@ export class NapCatGatewayServer {
   }
 
   async getGroupFileUrl(groupId: number | string, fileId: string, busid?: number): Promise<OneBotActionResponse> {
-    return this.sendAction('get_group_file_url', {
+    const params: Record<string, any> = {
       group_id: Number(groupId),
       file_id: fileId,
-      busid: busid ?? 0,
-    });
+    };
+    // NapCat 不消费 busid；SnowLuma 缺省时会自行回退 102，但显式传 0 会报「参数错误」。
+    // 因此只有正数 busid 才透传，缺失 / null / 0 一律省略（见 devlog SnowLuma 兼容实测）。
+    const numericBusid = busid === undefined || busid === null ? NaN : Number(busid);
+    if (Number.isFinite(numericBusid) && numericBusid > 0) {
+      params.busid = numericBusid;
+    }
+    return this.sendAction('get_group_file_url', params);
+  }
+
+  /**
+   * OneBot 11 / NapCat / SnowLuma: 获取群根目录文件与文件夹列表。
+   * 用于 SnowLuma 兼容垫片：notice 事件只带 32 位 hex file_id，需换回消息段的 /uuid。
+   */
+  async getGroupRootFiles(
+    groupId: number | string,
+    timeoutMs = 20000
+  ): Promise<OneBotActionResponse<{ files?: any[]; folders?: any[] }>> {
+    return this.sendAction('get_group_root_files', {
+      group_id: Number(groupId),
+    }, timeoutMs);
+  }
+
+  /**
+   * OneBot 11 / NapCat / SnowLuma: 获取群子目录文件列表（垫片递归匹配用）。
+   */
+  async getGroupFilesByFolder(
+    groupId: number | string,
+    folderId: string,
+    timeoutMs = 20000
+  ): Promise<OneBotActionResponse<{ files?: any[]; folders?: any[] }>> {
+    return this.sendAction('get_group_files_by_folder', {
+      group_id: Number(groupId),
+      folder_id: folderId,
+    }, timeoutMs);
   }
 
   /**

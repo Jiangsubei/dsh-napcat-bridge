@@ -219,6 +219,99 @@ describe('契约测试: EN-001 list_group_files 群文件列表工具', () => {
     expect(res.files[0].busid).toBe(55);
   });
 
+  it('契约 3.5: 同一次上传的 notice + 消息段双记录合并为一条（优先 /uuid、保留 notice busid）', () => {
+    const now = Date.now();
+    const fileName = '双记录测试.zip';
+
+    // notice/group_upload 记录：32hex file_id + busid
+    db.saveMessage({
+      msg_id: 3101,
+      peer: 'group_300',
+      user_id: '1000000001',
+      sender_name: '上传者',
+      time: now,
+      type: 'group_file',
+      content: `[群文件:${fileName} (ID:32hex-notice-id)]`,
+      raw: JSON.stringify({
+        post_type: 'notice',
+        notice_type: 'group_upload',
+        file: { id: '32hex-notice-id', name: fileName, size: 999, busid: 102 },
+      }),
+      file_id: '32hex-notice-id',
+      busid: 102,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+
+    // 同一次上传的消息段记录：/uuid file_id、busid 为空、时间相差 1 秒
+    db.saveMessage({
+      msg_id: 3102,
+      peer: 'group_300',
+      user_id: '1000000001',
+      sender_name: '上传者',
+      time: now + 1000,
+      type: 'group_file',
+      content: `[群文件:${fileName} (ID:/uuid-segment)]`,
+      raw: JSON.stringify([
+        { type: 'file', data: { file: fileName, file_id: '/uuid-segment', file_size: '999' } },
+      ]),
+      file_id: '/uuid-segment',
+      busid: null,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 0,
+      reply_to: null,
+    });
+
+    const res = db.listGroupFiles('group_300');
+    expect(res.total_matched).toBe(1);
+    expect(res.files).toHaveLength(1);
+    expect(res.files[0].file_id).toBe('/uuid-segment');
+    expect(res.files[0].busid).toBe(102);
+    expect(res.files[0].size).toBe(999);
+    // 保留首次出现（notice）的 msg_id 与时间，作为文件历史定位锚点
+    expect(res.files[0].msg_id).toBe(3101);
+    expect(res.files[0].time).toBe(now);
+  });
+
+  it('契约 3.6: 同名文件在不同时间上传仍保留为两条，避免过度合并', () => {
+    const now = Date.now();
+    for (const [msgId, time] of [
+      [3201, now - 2 * 24 * 3600 * 1000],
+      [3202, now],
+    ] as const) {
+      db.saveMessage({
+        msg_id: msgId,
+        peer: 'group_300',
+        user_id: '1000000001',
+        sender_name: '上传者',
+        time,
+        type: 'group_file',
+        content: `[群文件:同名不同次.zip (ID:hex-${msgId})]`,
+        raw: JSON.stringify({
+          post_type: 'notice',
+          notice_type: 'group_upload',
+          file: { id: `hex-${msgId}`, name: '同名不同次.zip', size: 1024, busid: 102 },
+        }),
+        file_id: `hex-${msgId}`,
+        busid: 102,
+        local_path: null,
+        fingerprint: null,
+        recalled: 0,
+        self: 0,
+        reply_to: null,
+      });
+    }
+
+    const res = db.listGroupFiles('group_300');
+    expect(res.total_matched).toBe(2);
+    expect(res.files).toHaveLength(2);
+  });
+
   it('契约 4: Agent 工具 list_group_files 执行与渲染', async () => {
     db.saveMessage({
       msg_id: 4001,

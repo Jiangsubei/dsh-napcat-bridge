@@ -64,6 +64,7 @@ import {
   normalizeOffset,
 } from './pagination.js';
 import { downloadPrivateFile } from './private-file.js';
+import { resolveGroupFileReference } from './group-file-resolve.js';
 import { resolveDshPath } from '../utils/path.js';
 import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 import type { TaskScheduler } from '../scheduler/index.js';
@@ -288,8 +289,33 @@ async function fetchSingleChatResourceItem(
         };
       }
       try {
-        const res = await ctx.gateway.getGroupFileUrl(ctx.groupId, fileId, item.busid);
-        const fileUrl = res.data?.url;
+        let targetFileId = fileId;
+        let targetBusid = item.busid;
+        let res = await ctx.gateway.getGroupFileUrl(ctx.groupId, targetFileId, targetBusid);
+        let fileUrl = res.data?.url;
+
+        // SnowLuma 兼容垫片：仅当原始请求失败时解析一次可用 file_id。
+        // NapCat 首次成功路径不会触发，零额外协议端请求，避免业务回归。
+        if (!fileUrl) {
+          let resolved: Awaited<ReturnType<typeof resolveGroupFileReference>> = null;
+          try {
+            resolved = await resolveGroupFileReference({
+              gateway: ctx.gateway,
+              db: ctx.db,
+              groupId: ctx.groupId,
+              fileId,
+              busid: item.busid,
+              ...(item.file_name !== undefined ? { fileName: item.file_name } : {}),
+            });
+          } catch {}
+          if (resolved && resolved.fileId !== targetFileId) {
+            targetFileId = resolved.fileId;
+            targetBusid = resolved.busid ?? targetBusid;
+            res = await ctx.gateway.getGroupFileUrl(ctx.groupId, targetFileId, targetBusid);
+            fileUrl = res.data?.url;
+          }
+        }
+
         if (!fileUrl) {
           const apiInfo = [res.wording, res.message].filter(Boolean).join(' ');
           return {
@@ -304,6 +330,7 @@ async function fetchSingleChatResourceItem(
         const hasGroupId = ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '';
         const sessionId = sessionPeer || (hasGroupId ? `group_${ctx.groupId}` : undefined);
         const saved = await ctx.mediaManager.downloadAndSave(fileUrl, {
+          // 始终使用原始 file_id 落库/去重，兼容垫片只影响下载引用，不改变消息记录归属
           fileId,
           type: 'files',
           filename: item.file_name,
