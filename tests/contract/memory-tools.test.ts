@@ -354,8 +354,8 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect((deniedRes as any).success).toBe(false);
     expect((deniedRes as any).message).toContain('请显式传入 peer 参数');
 
-    // 2. 显式传入 peer='group_123456789' 时执行通过，且落盘到正确的文件
-    const targetPeer = 'group_123456789';
+    // 2. 显式传入 peer='group_3000000015' 时执行通过，且落盘到正确的文件
+    const targetPeer = 'group_3000000015';
     const allowedCreate = await createTool.execute(
       { type: 'session', peer: targetPeer, content: '由 review agent 显式指定 peer 写入' },
       execDefault as any
@@ -469,13 +469,13 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     const longUserContent = 'A'.repeat(2201);
     const resOverUser = await tools.createMemory({
       type: 'user',
-      qq: '123456789',
+      qq: '1000000022',
       content: longUserContent,
     });
     expect(resOverUser.success).toBe(false);
     expect(resOverUser.message).toContain('超出上限 (2200 字符)');
     expect(resOverUser.message).toContain('本次创建未写入');
-    expect(await storage.existsUserProfile('123456789')).toBe(false);
+    expect(await storage.existsUserProfile('1000000022')).toBe(false);
 
     // 2. create_memory 超出 session 上限 (2200 字符)
     const longSessionContent = 'B'.repeat(2201);
@@ -492,7 +492,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     // 3. 上限内正常创建
     const normalUser = await tools.createMemory({
       type: 'user',
-      qq: '123456789',
+      qq: '1000000022',
       content: '偏好：日常使用 Linux，喜欢简短回答',
     });
     expect(normalUser.success).toBe(true);
@@ -500,7 +500,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     // 4. edit_memory 替换后超出上限 -> 拒绝修改并保持原样
     const resEditOver = await tools.editMemory({
       type: 'user',
-      qq: '123456789',
+      qq: '1000000022',
       old_string: '喜欢简短回答',
       new_string: 'C'.repeat(2200),
     });
@@ -508,7 +508,7 @@ describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, 
     expect(resEditOver.message).toContain('超出上限 (2200 字符)');
     expect(resEditOver.message).toContain('本次编辑未落盘');
     expect(resEditOver.message).toContain('还需再缩减');
-    const keptContent = await storage.readUserProfile('123456789');
+    const keptContent = await storage.readUserProfile('1000000022');
     expect(keptContent).toContain('喜欢简短回答');
   });
 

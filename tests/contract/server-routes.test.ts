@@ -169,7 +169,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const currentCfg: BridgePluginConfig = {
         ws_port: 8080,
         ws_token: 'secret-token-super-confidential',
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
         admins: ['10001', '10002'],
         aliases: ['小助手'],
         image_ttl_days: 7,
@@ -190,7 +190,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       expect(result.body.hasSecret).toBe(true);
       expect(result.body.config.ws_port).toBe(8080);
       expect(result.body.config.ws_token).toBe(''); // 绝对脱敏保护，绝不向前端泄露明文
-      expect(result.body.config.bot_qq).toBe('12345678');
+      expect(result.body.config.bot_qq).toBe('1000000021');
       expect(result.body.config.admins).toEqual(['10001', '10002']);
       expect(result.body.config.image_ttl_days).toBe(7);
       expect(result.body.baseDefaults).toEqual(DEFAULT_BASE_CONFIG);
@@ -218,7 +218,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const currentCfg: BridgePluginConfig = {
         ws_port: 8080,
         ws_token: '',
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
       };
 
       registerConfigRoute(mockCtx, () => currentCfg, async () => {});
@@ -262,7 +262,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       let currentCfg: BridgePluginConfig = {
         ws_port: 8080,
         ws_token: 'existing_valuable_token_666',
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
       };
 
       const reconcileMock = vi.fn().mockImplementation(async (next) => {
@@ -275,7 +275,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const updatePayload: Partial<BridgePluginConfig> = {
         ws_port: 8081,
         ws_token: '', // 前端留空，代表保留原 secret
-        bot_qq: '88888888',
+        bot_qq: '1000000026',
         proactive_reply_enabled: true,
       };
 
@@ -294,7 +294,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       const passedToReconcile = reconcileMock.mock.calls[0][0];
       expect(passedToReconcile.ws_port).toBe(8081);
       expect(passedToReconcile.ws_token).toBe('existing_valuable_token_666'); // 防误清空！
-      expect(passedToReconcile.bot_qq).toBe('88888888');
+      expect(passedToReconcile.bot_qq).toBe('1000000026');
       expect(passedToReconcile.proactive_reply_enabled).toBe(true);
 
       // 验证 settings.mutate 被调用以持久化
@@ -479,7 +479,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       // 1. 模拟保存包含 bot_qq、persona 与 ws_port 的修改
       const saveReq = createMockReq('POST', {
         ws_port: 9876,
-        bot_qq: '1234567890',
+        bot_qq: '1000000023',
         persona: '猫娘助手',
       });
       const { res: saveRes, getResult: getSaveResult } = createMockRes();
@@ -489,7 +489,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
       expect(saveResult.status).toBe(200);
       expect(saveResult.body.ok).toBe(true);
       expect(mutateMock).toHaveBeenCalled();
-      expect(persistedSettings.bot_qq).toBe('1234567890');
+      expect(persistedSettings.bot_qq).toBe('1000000023');
       expect(persistedSettings.persona).toBe('猫娘助手');
 
       // 2. 模拟面板关闭后重新打开发送 GET 请求读取配置
@@ -500,7 +500,7 @@ describe('契约测试: 服务端配置 REST API 路由 (/plugins/dsh-napcat-bri
 
       expect(readResult.status).toBe(200);
       expect(readResult.body.ok).toBe(true);
-      expect(readResult.body.config.bot_qq).toBe('1234567890');
+      expect(readResult.body.config.bot_qq).toBe('1000000023');
       expect(readResult.body.config.ws_port).toBe(9876);
       expect(readResult.body.config.persona).toBe('猫娘助手');
     });

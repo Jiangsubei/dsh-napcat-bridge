@@ -35,7 +35,7 @@ describe('契约测试: 旧版配置静默探测与迁移 (migrate.ts)', () => {
 ${SETTINGS_NAMESPACE}:
   ws_port: 8090
   ws_token: legacy-token-abc
-  bot_qq: "987654321"
+  bot_qq: "1000000024"
 `;
       await fsp.writeFile(path.join(tmpHome, 'settings.yaml'), yamlContent, 'utf8');
 
@@ -43,7 +43,7 @@ ${SETTINGS_NAMESPACE}:
       expect(result).toBeDefined();
       expect(result?.ws_port).toBe(8090);
       expect(result?.ws_token).toBe('legacy-token-abc');
-      expect(result?.bot_qq).toBe('987654321');
+      expect(result?.bot_qq).toBe('1000000024');
     });
 
     it('当旧配置包含 memory_budget_chars 时链式映射至 group_memory_total_budget_chars', async () => {
@@ -80,14 +80,14 @@ ${SETTINGS_NAMESPACE}:
       const yamlContent = `
 ${SETTINGS_NAMESPACE}:
   ws_port: 8095
-  bot_qq: "11223344"
+  bot_qq: "2000000020"
 `;
       await fsp.writeFile(path.join(tmpHome, 'settings.yaml.imported'), yamlContent, 'utf8');
 
       const result = readLegacyConfig(tmpHome);
       expect(result).toBeDefined();
       expect(result?.ws_port).toBe(8095);
-      expect(result?.bot_qq).toBe('11223344');
+      expect(result?.bot_qq).toBe('2000000020');
     });
   });
 
@@ -100,7 +100,7 @@ ${SETTINGS_NAMESPACE}:
       };
 
       const currentConfig: BridgePluginConfig = {
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
       };
 
       await migrateLegacyConfig(mockCtx, currentConfig);

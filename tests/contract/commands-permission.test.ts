@@ -60,7 +60,7 @@ describe('契约测试: 两字中文斜杠命令与白名单门控 (Two-Characte
 
     // 4. 非管理员拒绝
     const nonAdminRes = await handleSlashCommand('/权限 完全', {
-      userId: '1234567890',
+      userId: '1000000023',
       admins,
       session,
       ctx: booted.ctx,

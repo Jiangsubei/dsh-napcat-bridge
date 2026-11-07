@@ -161,11 +161,11 @@ describe('契约测试: DSH 0.1.5 V3 路径编码寻址与存量 V2/旧版会话
     });
 
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const peer = 'user_9876543210';
+    const peer = 'user_2000000018';
 
     const agent = await sessionManager.getOrCreateAgent(peer);
     const sessionId = agent.session.id;
-    expect(sessionId).toBe('qq-user-9876543210');
+    expect(sessionId).toBe('qq-user-2000000018');
 
     // 真实 flush 会话落盘
     await booted.ctx.sessions.flush(agent.session);

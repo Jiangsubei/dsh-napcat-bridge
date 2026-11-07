@@ -169,7 +169,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     db.saveMessage({
       msg_id: 10,
       peer: 'group_3000000002',
-      user_id: '1111111111',
+      user_id: '2000000011',
       sender_name: 'UserA',
       time: Date.now() - 2000,
       type: 'text',
@@ -186,7 +186,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     db.saveMessage({
       msg_id: 11,
       peer: 'group_3000000002',
-      user_id: '2222222222',
+      user_id: '2000000012',
       sender_name: 'UserB',
       time: Date.now() - 3000,
       type: 'text',
@@ -203,7 +203,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     db.saveMessage({
       msg_id: 12,
       peer: 'group_3000000002',
-      user_id: '4444444444',
+      user_id: '2000000013',
       sender_name: 'UserD',
       time: Date.now() - 4000,
       type: 'text',
@@ -227,10 +227,10 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     });
 
     // 写入 UserA(1000字), UserB(1400字), 以及刚刚冒泡发言但不在活跃前列的 UserC(300字), 以及活跃成员 UserD(500字)
-    await memoryService.storage.writeUserProfile('1111111111', 'A'.repeat(1000));
-    await memoryService.storage.writeUserProfile('2222222222', 'B'.repeat(1400));
+    await memoryService.storage.writeUserProfile('2000000011', 'A'.repeat(1000));
+    await memoryService.storage.writeUserProfile('2000000012', 'B'.repeat(1400));
     await memoryService.storage.writeUserProfile('3333333333', 'C'.repeat(300));
-    await memoryService.storage.writeUserProfile('4444444444', 'D'.repeat(500));
+    await memoryService.storage.writeUserProfile('2000000013', 'D'.repeat(500));
 
     const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
 
@@ -244,7 +244,7 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     // 验证 UserC 被动态阶梯提拔至最前，并成功注入
     expect(memCtx?.text).toContain('3333333333');
     const idxUserC = memCtx?.text.indexOf('3333333333');
-    const idxUserA = memCtx?.text.indexOf('1111111111');
+    const idxUserA = memCtx?.text.indexOf('2000000011');
     expect(idxUserC).toBeGreaterThan(-1);
     expect(idxUserA).toBeGreaterThan(-1);
     expect(idxUserC).toBeLessThan(idxUserA);

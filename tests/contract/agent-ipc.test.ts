@@ -465,7 +465,7 @@ describe('契约测试: 跨 Agent 内部协同体系 (Agent IPC)', () => {
 
       const res = await sendAgentMessage(
         {
-          target_session_id: 'qq-user-9999999999',
+          target_session_id: 'qq-user-2000000019',
           message: '向未激活用户发消息',
         },
         {

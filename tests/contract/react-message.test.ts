@@ -70,7 +70,7 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
     await expect(
       reactTool.execute(
         { emoji: 'thumbs_up', message_id: 100 },
-        { agent: { session: { id: 'qq-user-11223344' } } }
+        { agent: { session: { id: 'qq-user-2000000020' } } }
       )
     ).rejects.toThrow('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
   });
@@ -82,7 +82,7 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
     await expect(
       reactTool.execute(
         { emoji: 'thumbs_up', message_id: 100 },
-        { agent: { session: { id: 'user_11223344' } } }
+        { agent: { session: { id: 'user_2000000020' } } }
       )
     ).rejects.toThrow('dsh-napcat-bridge: react_message 工具仅限群聊调用，当前会话不可执行');
   });
@@ -105,7 +105,7 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
 
     const res = await reactTool.execute(
       { emoji: 'thumbs_up', message_id: 100 },
-      { agent: { session: { id: 'qq-group-987654321' } } }
+      { agent: { session: { id: 'qq-group-3000000013' } } }
     );
     expect(res.success).toBe(true);
     expect(res.emoji_id).toBe('76');
@@ -118,7 +118,7 @@ describe('契约 1: 仅群聊注册与会话隔离门控 (Session Isolation Cont
 
     const res = await reactTool.execute(
       { emoji: 'thumbs_up', message_id: 200 },
-      { agent: { session: { id: 'group_987654321' } } }
+      { agent: { session: { id: 'group_3000000013' } } }
     );
     expect(res.success).toBe(true);
     expect(res.emoji_id).toBe('76');

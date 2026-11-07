@@ -224,8 +224,8 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
         data: {
           message_id: 77777,
           time: 1788045700,
-          user_id: 33334444,
-          sender: { user_id: 33334444, nickname: '历史用户', card: '历史用户' },
+          user_id: 1000000014,
+          sender: { user_id: 1000000014, nickname: '历史用户', card: '历史用户' },
           message: [{ type: 'text', data: { text: '这是历史上一条重要消息' } }],
           raw_message: '这是历史上一条重要消息',
         },
@@ -236,7 +236,7 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
 
     expect(capturedFollowups).toHaveLength(1);
     const prompt = capturedFollowups[0].content;
-    expect(prompt).toContain('[引用回复 历史用户 (QQ: 33334444): "这是历史上一条重要消息"]');
+    expect(prompt).toContain('[引用回复 历史用户 (QQ: 1000000014): "这是历史上一条重要消息"]');
     expect(prompt).toContain('这句话什么意思');
   });
 
@@ -408,10 +408,10 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
       sub_type: 'normal',
       message_id: 88802,
       group_id: GROUP_ID,
-      user_id: '3456789012',
+      user_id: '1000000015',
       time: 1788246505,
       self_id: BOT_QQ,
-      sender: { user_id: '3456789012', nickname: '提问者B', card: '提问者B' },
+      sender: { user_id: '1000000015', nickname: '提问者B', card: '提问者B' },
       message: [
         { type: 'at', data: { qq: BOT_QQ } },
         { type: 'text', data: { text: ' 轮次B问题' } },

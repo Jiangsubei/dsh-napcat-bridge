@@ -327,7 +327,7 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     const qqWs = path.join(tmpHome, 'qq-ws');
     fs.mkdirSync(qqWs, { recursive: true });
     const qqHandle = await booted.ctx.agents.create({
-      sessionId: 'qq-group-12345678',
+      sessionId: 'qq-group-3000000014',
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       meta: { cwd: qqWs },
       setup: async (agentCtx: any) => {

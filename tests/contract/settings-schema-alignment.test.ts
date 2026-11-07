@@ -78,7 +78,7 @@ describe('阶段 2 契约测试：设置系统收尾与三方键一致性 (Setti
     // 构造旧版 yaml 内容
     const legacyYaml = `
 dsh-napcat-bridge:
-  bot_qq: "987654321"
+  bot_qq: "1000000024"
   ws_port: 8099
   memory_budget_chars: 3333
   private_memory_budget_chars: 5555

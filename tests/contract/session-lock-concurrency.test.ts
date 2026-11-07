@@ -214,7 +214,7 @@ describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、live agent �
     });
 
     const sessionManager = new SessionManager(booted.ctx, tmpHome);
-    const sessionId = 'qq-group-999999999';
+    const sessionId = 'qq-group-3000000012';
 
     // 注入模拟的 sessionController 挂入 booted.ctx
     const realPromptMock = vi.fn().mockResolvedValue({ accepted: true });
@@ -224,7 +224,7 @@ describe('契约测试: DSH 0.1.5 会话排他锁、退避重试、live agent �
     sessionManager.guardSessionController();
 
     // 唤醒并获取 QQ Agent
-    const agent = await sessionManager.getOrCreateAgent('group_999999999');
+    const agent = await sessionManager.getOrCreateAgent('group_3000000012');
     expect(agent.session.id).toBe(sessionId);
     expect(sessionManager.hasActiveHandle(sessionId)).toBe(true);
 

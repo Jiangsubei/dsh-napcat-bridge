@@ -103,7 +103,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
     const assembleCtx = {
       agent: {
-        session: { id: 'qq-group-12345678' },
+        session: { id: 'qq-group-3000000014' },
       },
     };
 
@@ -124,7 +124,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
     const assembleCtx = {
       agent: {
-        session: { id: 'qq-user-87654321' },
+        session: { id: 'qq-user-2000000021' },
       },
     };
 
@@ -152,7 +152,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
     const assembleCtx = {
       agent: {
-        session: { id: 'qq-group-12345678' },
+        session: { id: 'qq-group-3000000014' },
       },
     };
 
@@ -207,7 +207,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
     const assembleCtx = {
       agent: {
-        session: { id: 'qq-group-12345678' },
+        session: { id: 'qq-group-3000000014' },
       },
     };
 

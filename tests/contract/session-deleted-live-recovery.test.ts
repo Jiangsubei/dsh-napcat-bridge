@@ -43,7 +43,7 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
     const sessionManager = new SessionManager(booted.ctx, tmpHome, db);
 
     // 1. 创建会话并落盘
-    const agent = await sessionManager.getOrCreateAgent('user_99990001');
+    const agent = await sessionManager.getOrCreateAgent('user_2000000014');
     const sid = agent.session.id;
     await booted.ctx.sessions.flush(agent.session);
 
@@ -87,7 +87,7 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
     const sessionManager = new SessionManager(booted.ctx, tmpHome, db);
 
     // 1. 首次创建会话并落盘
-    const agent1 = await sessionManager.getOrCreateAgent('user_99990002');
+    const agent1 = await sessionManager.getOrCreateAgent('user_2000000015');
     const sid1 = agent1.session.id;
     await booted.ctx.sessions.flush(agent1.session);
     expect(sessionManager.hasActiveHandle(sid1)).toBe(true);
@@ -107,7 +107,7 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
     // 3. QQ 发送新消息唤醒：再次调用 getOrCreateAgent
     // 此时 DSH 进程从未重启，但系统必须能感知到物理文件已被删除，
     // 自动释放旧句柄、清理缓存并成功创建新的物理会话！
-    const agent2 = await sessionManager.getOrCreateAgent('user_99990002');
+    const agent2 = await sessionManager.getOrCreateAgent('user_2000000015');
     const sid2 = agent2.session.id;
 
     // 验证：
@@ -131,13 +131,13 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
     const sessionManager = new SessionManager(booted.ctx, tmpHome, db);
 
     // 1. 创建会话并落盘
-    const agent = await sessionManager.getOrCreateAgent('user_99990003');
+    const agent = await sessionManager.getOrCreateAgent('user_2000000016');
     const sid = agent.session.id;
     await booted.ctx.sessions.flush(agent.session);
 
     expect(sessionManager.hasActiveHandle(sid)).toBe(true);
-    expect(sessionManager.peerToSessionId('user_99990003')).toBe(sid);
-    const dbStateBefore = db.getSessionState('user_99990003');
+    expect(sessionManager.peerToSessionId('user_2000000016')).toBe(sid);
+    const dbStateBefore = db.getSessionState('user_2000000016');
     expect(dbStateBefore?.current_session_id).toBe(sid);
 
     // 2. 模拟 Archive Manager 插件在删除会话后广播 api-session/removed 事件
@@ -148,11 +148,11 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
 
     // 契约红线：收到删除事件后，内存句柄必须已被释放，映射已被清理，DB 记录已清空
     expect(sessionManager.hasActiveHandle(sid)).toBe(false);
-    const dbStateAfter = db.getSessionState('user_99990003');
+    const dbStateAfter = db.getSessionState('user_2000000016');
     expect(dbStateAfter?.current_session_id).toBe('');
 
     // 3. 再次获取会话，必须生成全新会话，绝不能再返回已被删除的 sid
-    const newSid = sessionManager.peerToSessionId('user_99990003');
+    const newSid = sessionManager.peerToSessionId('user_2000000016');
     expect(newSid).not.toBe(sid);
   });
 
@@ -170,13 +170,13 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
 
     // 1. 首次对话建立会话一
     const msg1 = await sessionManager.dispatchWakeup({
-      peer: 'user_99990004',
+      peer: 'user_2000000017',
       content: '你好',
       trigger: 'mention',
       timestamp: Date.now(),
     });
     expect(msg1).toBeDefined();
-    const oldSid = sessionManager.peerToSessionId('user_99990004');
+    const oldSid = sessionManager.peerToSessionId('user_2000000017');
     const oldAgent = sessionManager.getAgent(oldSid);
     expect(oldAgent).toBeDefined();
     await booted.ctx.sessions.flush(oldAgent!.session);
@@ -197,7 +197,7 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
 
     // 3. 发送新消息唤醒
     const msg2 = await sessionManager.dispatchWakeup({
-      peer: 'user_99990004',
+      peer: 'user_2000000017',
       content: '新的一天',
       trigger: 'mention',
       timestamp: Date.now(),
@@ -205,7 +205,7 @@ describe('契约测试: 运行期物理删除会话后的僵尸句柄自动淘�
     expect(msg2).toBeDefined();
 
     // 契约红线：新会话绝不能是已被删除的 oldSid
-    const activeSid = sessionManager.peerToSessionId('user_99990004');
+    const activeSid = sessionManager.peerToSessionId('user_2000000017');
     expect(activeSid).not.toBe(oldSid);
 
     const activeAgent = sessionManager.getAgent(activeSid);

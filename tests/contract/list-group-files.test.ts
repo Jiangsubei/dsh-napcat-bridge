@@ -100,7 +100,7 @@ describe('契约测试: EN-001 list_group_files 群文件列表工具', () => {
     // 异群文件
     db.saveMessage({
       msg_id: 1003,
-      peer: 'group_999999999',
+      peer: 'group_3000000012',
       user_id: '1000000002',
       sender_name: '张三',
       time: now,
@@ -109,7 +109,7 @@ describe('契约测试: EN-001 list_group_files 群文件列表工具', () => {
       raw: JSON.stringify({
         post_type: 'notice',
         notice_type: 'group_upload',
-        group_id: 999999999,
+        group_id: 3000000012,
         user_id: 1000000002,
         file: { id: 'uuid-file-03', name: '异群文件.zip', size: 2048, busid: 104 },
       }),

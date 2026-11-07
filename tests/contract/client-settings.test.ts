@@ -207,11 +207,11 @@ describe('契约测试: 客户端 settings.section 侧边栏独立页面与 0.2.
       const html = renderToStaticMarkup(
         React.createElement(NapCatSettingsSection, {
           close: closeMock,
-          initialConfig: { bot_qq: '123456789' },
+          initialConfig: { bot_qq: '1000000022' },
         })
       );
       expect(html).toContain('NapCat');
-      expect(html).toContain('123456789');
+      expect(html).toContain('1000000022');
     });
   });
 });

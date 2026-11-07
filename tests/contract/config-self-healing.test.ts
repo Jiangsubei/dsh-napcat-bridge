@@ -123,7 +123,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
     it('sanitizeConfigPayload 正确分离合法字段与脏字段，并剔除无效键', () => {
       const dirtyInput = {
         ws_port: 3001,
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
         at_questioner: false, // 脏字段
         quote_original: true, // 脏字段
         review_enabled: true, // 历史脏字段
@@ -134,7 +134,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       const result = sanitizeConfigPayload(dirtyInput);
       expect(result.valid).toEqual({
         ws_port: 3001,
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
         persona: '测试人格',
       });
 
@@ -337,7 +337,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
             let currentCfg: BridgePluginConfig = {
         ws_port: 8080,
         ws_token: 'test_token',
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
       };
 
       const reconcileMock = vi.fn().mockImplementation(async (next) => {
@@ -349,7 +349,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       // 模拟前端带有历史脏字段提交
       const dirtyPayload = {
         ws_port: 9000,
-        bot_qq: '88888888',
+        bot_qq: '1000000026',
         at_questioner: false, // 脏字段
         quote_original: true, // 脏字段
       };
@@ -395,7 +395,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       // 模拟存量配置中持有历史废弃字段
       const dirtyCurrentCfg = {
         ws_port: 8080,
-        bot_qq: '12345678',
+        bot_qq: '1000000021',
         at_questioner: false,
         quote_original: true,
         review_enabled: true,
@@ -415,7 +415,7 @@ describe('契约测试: 配置动态校验与配置文件自愈机制 (Config Se
       expect(result.body.config.quote_original).toBeUndefined();
       expect(result.body.config.review_enabled).toBeUndefined();
       expect(result.body.config.ws_port).toBe(8080);
-      expect(result.body.config.bot_qq).toBe('12345678');
+      expect(result.body.config.bot_qq).toBe('1000000021');
     });
   });
 });

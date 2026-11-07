@@ -64,13 +64,13 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     });
 
     it('契约 1.1: getGroupMemberList 正确发送 get_group_member_list 动作与参数', async () => {
-      const waitPromise = server.getGroupMemberList(888888888, true);
+      const waitPromise = server.getGroupMemberList(3000000011, true);
 
       await new Promise((resolve) => setTimeout(resolve, 30));
       const req = received.find((r) => r.action === 'get_group_member_list');
       expect(req).toBeDefined();
       expect(req?.params).toEqual({
-        group_id: 888888888,
+        group_id: 3000000011,
         no_cache: true,
       });
 
@@ -82,7 +82,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
           retcode: 0,
           data: [
             {
-              group_id: 888888888,
+              group_id: 3000000011,
               user_id: 10001,
               nickname: 'RealOwner',
               card: '真正的群主',
@@ -108,7 +108,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
   describe('2. 工具执行与过滤语义化', () => {
     const mockMembers: GroupMemberRawItem[] = [
       {
-        group_id: 888888888,
+        group_id: 3000000011,
         user_id: 10001,
         nickname: 'Alice',
         card: '老群主',
@@ -121,7 +121,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 888888888,
+        group_id: 3000000011,
         user_id: 10002,
         nickname: 'Bob',
         card: '管理-小鲍',
@@ -134,7 +134,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 888888888,
+        group_id: 3000000011,
         user_id: 10003,
         nickname: 'Charlie',
         card: '',
@@ -147,7 +147,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
         is_robot: false,
       },
       {
-        group_id: 888888888,
+        group_id: 3000000011,
         user_id: 10004,
         nickname: 'David',
         card: '冒牌群主', // 故意取名叫冒牌群主，用来测试防伪
@@ -177,7 +177,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.1: 按 user_id 精确查询目标成员，识破自称群主但实为普通成员', async () => {
       const res = await queryGroupMemberInfo(
         { user_id: '10004' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -194,7 +194,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.2: 按 query 模糊匹配群名片与昵称', async () => {
       const res = await queryGroupMemberInfo(
         { query: '老群主' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -207,7 +207,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.3: 按 role 筛选特权成员 (owner / admin)', async () => {
       const ownerRes = await queryGroupMemberInfo(
         { role: 'owner' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       expect(ownerRes.success).toBe(true);
       expect(ownerRes.total).toBe(1);
@@ -215,7 +215,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
 
       const adminRes = await queryGroupMemberInfo(
         { role: 'admin' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       expect(adminRes.success).toBe(true);
       expect(adminRes.total).toBe(1);
@@ -237,21 +237,21 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       // 第一次调用，触发 API
       await queryGroupMemberInfo(
         { role: 'owner' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(1);
 
       // 第二次调用无 no_cache，命中缓存，API 调用次数依然为 1
       await queryGroupMemberInfo(
         { role: 'admin' },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(1);
 
       // 第三次调用带 no_cache: true，强制穿透，API 调用次数变为 2
       await queryGroupMemberInfo(
         { role: 'owner', no_cache: true },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       expect(mockGateway.getGroupMemberList).toHaveBeenCalledTimes(2);
     });
@@ -269,7 +269,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       expect(formatted.status).toBe('正常');
     });
 
-    it('契约 2.7: 真实 Agent execute 场景下，从 exec.agent.session.id (qq-group-888888888) 纯隐式自动继承群聊会话', async () => {
+    it('契约 2.7: 真实 Agent execute 场景下，从 exec.agent.session.id (qq-group-3000000011) 纯隐式自动继承群聊会话', async () => {
       const tool = createGetGroupMemberInfoTool(() => ({
         gateway: mockGateway,
       }));
@@ -277,7 +277,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       const execMock = {
         agent: {
           session: {
-            id: 'qq-group-888888888',
+            id: 'qq-group-3000000011',
           },
         },
       };
@@ -285,8 +285,8 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       // 模型入参中无群号，纯传 role
       const result = await (tool as any).execute({ role: 'owner' }, execMock);
       expect(result.success).toBe(true);
-      expect(result.group_id).toBe('888888888');
-      expect(mockGateway.getGroupMemberList).toHaveBeenCalledWith('888888888', false);
+      expect(result.group_id).toBe('3000000011');
+      expect(mockGateway.getGroupMemberList).toHaveBeenCalledWith('3000000011', false);
       expect(result.members[0].role).toContain('群主');
     });
 
@@ -298,7 +298,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       const execMock = {
         agent: {
           session: {
-            id: 'qq-group-888888888',
+            id: 'qq-group-3000000011',
           },
         },
       };
@@ -317,7 +317,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
       // mockMembers 共有 4 位成员，若指定 limit: 2, offset: 0
       const res = await queryGroupMemberInfo(
         { offset: 0, limit: 2 },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -338,7 +338,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.10: 翻页行为与末页检测 (offset: 2, limit: 2)', async () => {
       const res = await queryGroupMemberInfo(
         { offset: 2, limit: 2 },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -353,7 +353,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.11: 分页边界安全保护 (limit 超限 clamp 到 50，负 offset clamp 到 0)', async () => {
       const res = await queryGroupMemberInfo(
         { offset: -5, limit: 100 },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -365,7 +365,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.12: offset 越界时返回空列表并给出有效范围提示', async () => {
       const res = await queryGroupMemberInfo(
         { offset: 99, limit: 20 },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.success).toBe(true);
@@ -387,7 +387,7 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
 
       const res = await queryGroupMemberInfo(
         { offset: 0, limit: 4 },
-        { gateway: shuffledGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: shuffledGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
 
       expect(res.members.map((m) => m.user_id)).toEqual(['10001', '10002', '10003', '10004']);
@@ -396,12 +396,12 @@ describe('契约测试: get_group_member_info 群成员信息查询工具', () =
     it('契约 2.14: Render 使用跨页连续的全局序号', async () => {
       const tool = createGetGroupMemberInfoTool(() => ({
         gateway: mockGateway,
-        peer: 'group_888888888',
-        groupId: 888888888,
+        peer: 'group_3000000011',
+        groupId: 3000000011,
       }));
       const res = await queryGroupMemberInfo(
         { offset: 2, limit: 2 },
-        { gateway: mockGateway, peer: 'group_888888888', groupId: 888888888 }
+        { gateway: mockGateway, peer: 'group_3000000011', groupId: 3000000011 }
       );
       const rendered = (tool as any).output.render({}, res);
       const text = rendered[0].text;

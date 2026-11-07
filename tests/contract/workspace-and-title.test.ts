@@ -188,10 +188,10 @@ describe('NapCat 顶层工作区与会话标题契约测试', () => {
   describe('4. DSH 0.2.x 工作区 candidateMatches 契约与未分组防掉落', () => {
     it('契约: peerToSessionId 严禁主动从 wsRegistry.sessionPaths 中删除会话，避免触发 DSH mutate 剔除掉入未分组', () => {
       const sessionPaths = new Map<string, string>();
-      sessionPaths.set('qq-user-9999999999', path.resolve(tmpHome, 'workspace/napcat'));
+      sessionPaths.set('qq-user-2000000019', path.resolve(tmpHome, 'workspace/napcat'));
       const wsRegistry = {
         headers: new Map<string, any>([
-          ['qq-user-9999999999', { id: 'qq-user-9999999999', cwd: path.resolve(tmpHome, 'workspace/napcat') }],
+          ['qq-user-2000000019', { id: 'qq-user-2000000019', cwd: path.resolve(tmpHome, 'workspace/napcat') }],
         ]),
         sessionPaths,
         invalidSessionPaths: new Map<string, string>(),
@@ -200,10 +200,10 @@ describe('NapCat 顶层工作区与会话标题契约测试', () => {
       (ctx as any).workspaceRegistry = wsRegistry;
 
       // 模拟磁盘尚未落盘（尚未 flush）
-      sessionManager.peerToSessionId('user_9999999999');
+      sessionManager.peerToSessionId('user_2000000019');
 
       // 验证：绝对不能删除 wsRegistry.sessionPaths 中的该 sessionId！
-      expect(sessionPaths.has('qq-user-9999999999')).toBe(true);
+      expect(sessionPaths.has('qq-user-2000000019')).toBe(true);
     });
 
     it('契约: 真实 DSH WorkspaceEntity 经历挂载与解绑操作后，父会话必须始终保留在 sessionIds 中', async () => {

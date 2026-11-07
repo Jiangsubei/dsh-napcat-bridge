@@ -231,8 +231,8 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
     it('群聊新建会话默认装配 read-only 模式，特例覆盖群装配 workspace-write 模式', async () => {
       const sessionManager = (booted.ctx as any)['napcat-session'] || new SessionManager(booted.ctx, tmpHome);
 
-      // 普通群 999999999 (未在特例表中) -> 默认 read-only
-      const defaultGroupAgent = await sessionManager.getOrCreateAgent('group_999999999');
+      // 普通群 3000000012 (未在特例表中) -> 默认 read-only
+      const defaultGroupAgent = await sessionManager.getOrCreateAgent('group_3000000012');
       const permissionPresets: any =
         (booted.ctx as any).permissionPresets || (booted.ctx as any).get?.('permissionPresets');
       expect(permissionPresets?.current?.(defaultGroupAgent.session)).toBe('read-only');
@@ -248,8 +248,8 @@ describe('契约测试: 发言黑名单、新建会话权限与 Coding 工具裁
 
     it('群聊默认关闭 Coding 工具组：assemble 的 tools 列表中排除 5 个工程工具，保留只读工具 (read_image, working_directory) 以及 QQ/Web 工具', async () => {
       const sessionManager = (booted.ctx as any)['napcat-session'] || new SessionManager(booted.ctx, tmpHome);
-      // 普通群 999999999 -> coding_tools_group_default = false
-      const agent = await sessionManager.getOrCreateAgent('group_999999999');
+      // 普通群 3000000012 -> coding_tools_group_default = false
+      const agent = await sessionManager.getOrCreateAgent('group_3000000012');
 
       const asm = await booted.ctx.systemPrompt.assemble({ scope: agent, agent } as any);
       const toolNames = new Set((asm.tools as any[]).map((t) => t.name));
