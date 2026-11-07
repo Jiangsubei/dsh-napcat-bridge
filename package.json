@@ -64,6 +64,7 @@
     "test:quick": "vitest run",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc -p tsconfig.test.json",
+    "check:privacy": "tsx scripts/privacy-guard.ts",
     "clean": "rm -rf dist"
   },
   "keywords": [
