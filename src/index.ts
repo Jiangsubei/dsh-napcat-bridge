@@ -1398,12 +1398,62 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
         if (decision.wakeup && decision.payload) {
           const payloadPeer = decision.payload.peer;
           logger.info?.(`[Plugin] 戳一戳触发唤醒 (peer: ${payloadPeer})`);
-          await systemEventHub.dispatchSyntheticNotice({
-            peer: payloadPeer,
-            noticeType: "poke",
-            operatorUser: decision.payload.from_user,
-            operatorName: decision.payload.from_name,
-            timestamp: decision.payload.timestamp,
+          if (isGroup) {
+            // 即时被动唤醒：获取前序未回复消息快照拼入 payload，为 Agent 提供短程群聊上下文
+            const unrepliedBefore = proactiveManager.getUnrepliedMessages(payloadPeer);
+            if (unrepliedBefore.length > 0 && !decision.payload.buffered_messages) {
+              decision.payload.buffered_messages = unrepliedBefore;
+            }
+
+            // 即时直接唤醒：重置群主动回复观测计时，并将直接唤醒消息记录至滑动窗口 (replied: true)，
+            // 同时将滑动窗口中此前所有未回复消息全部原子标记为 replied: true（已读消费，防止幽灵重复打扰）
+            proactiveManager.recordDirectWakeup(
+              payloadPeer,
+              timestamp,
+              {
+                from_user: decision.payload.from_user,
+                from_name: decision.payload.from_name || '',
+                content: '[戳一戳]',
+                msg_id: undefined,
+              },
+              currentConfig()
+            );
+          }
+
+          const replyContext = payloadPeer
+            ? {
+                msg_id: undefined as any,
+                from_user: decision.payload.from_user,
+                is_group: isGroup,
+                trigger: 'poke',
+              }
+            : undefined;
+
+          if (payloadPeer && replyContext) {
+            outboundBridge.trackInboundContext(payloadPeer, replyContext);
+          }
+
+          // 若为群聊且当前群名称未缓存，尝试异步获取群信息以更新会话标题
+          if (isGroup && event.group_id && !sessionManager.getPeerName(payloadPeer)) {
+            server.getGroupInfo(event.group_id).then((infoRes: any) => {
+              const groupName = infoRes?.data?.group_name || infoRes?.group_name;
+              if (groupName) {
+                sessionManager.setPeerName(payloadPeer, groupName);
+                const agent = sessionManager.getAgent(payloadPeer);
+                if (agent) {
+                  const sessionId = sessionManager.peerToSessionId(payloadPeer);
+                  sessionManager.updateSessionTitle((agent as any).session, payloadPeer, sessionId, groupName);
+                }
+              }
+            }).catch(() => {});
+          }
+
+          await sessionManager.dispatchWakeup(decision.payload, {
+            onMessageCreated: (userMsg) => {
+              if (payloadPeer && replyContext && userMsg?.id) {
+                outboundBridge.trackPendingMessage(userMsg.id, payloadPeer, replyContext);
+              }
+            },
           });
         }
       } catch (err) {

@@ -117,11 +117,7 @@ export function formatExternalPrompt(
   const msgIdStr = formatMsgIdString(payload.msg_id);
   const headerTime = timeStr ? ` [${timeStr}]` : '';
 
-  // 0. 兼容旧系统触发器 (poke / scheduled / internal_agent / proactive)
-  if (payload.trigger === 'poke') {
-    return `${channelStr}${msgIdStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
-  }
-
+  // 0. 兼容旧系统触发器 (scheduled / internal_agent / proactive)
   if (payload.trigger === 'internal_agent') {
     const fromSession = payload.from_session || payload.from_user || '其他工作区';
     const replyTag =
@@ -194,8 +190,11 @@ export function formatExternalPrompt(
     }
 
     const curTimePart = payload.timestamp ? `[${formatTimeOnly(payload.timestamp)}] ` : '';
-    const curBody = formatMessageBody(senderStr, payload.content, payload.quoted);
     const curIdPrefix = msgIdStr ? `${msgIdStr.trim()} ` : '';
+    const isPoke = payload.trigger === 'poke';
+    const curBody = isPoke
+      ? `用户 ${senderStr} 戳了戳你。`
+      : formatMessageBody(senderStr, payload.content, payload.quoted);
     const currentMsgLine = `${curTimePart}${curIdPrefix}${curBody}`;
 
     const guide =
@@ -212,6 +211,9 @@ export function formatExternalPrompt(
   }
 
   // 2. 普通单条外部消息（形态 2: 群聊/私聊直接唤醒）
+  if (payload.trigger === 'poke') {
+    return `${channelStr}${msgIdStr}${headerTime} 用户 ${senderStr} 戳了戳你。`;
+  }
   const body = formatMessageBody(senderStr, payload.content, payload.quoted);
   return `${channelStr}${msgIdStr}${headerTime} ${body}`;
 }

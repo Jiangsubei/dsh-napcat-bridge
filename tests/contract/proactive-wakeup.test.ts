@@ -690,5 +690,65 @@ describe('契约测试: 群聊主动回复 (滑动窗口消息队列 & Per-Group
       // 4. 验证滑动窗口中此前未回复消息已被消费标记 (已读闭环)
       expect(proactiveManager.getUnrepliedMessages(PEER).length).toBe(0);
     });
+
+    it('契约 13: 真实生产装配闭环：普通群消息入队滑动窗口后，戳一戳通知唤醒由 Agent.followup 接收形态 1 包含上下文 Prompt，绝不含系统事件前缀，且未回复消息被消费', async () => {
+      // 1. 发送第一条普通群消息（张三发言，进入未回复池）
+      const normalEvent: OneBotMessageEvent = {
+        post_type: 'message',
+        message_type: 'group',
+        sub_type: 'normal',
+        message_id: 3003,
+        group_id: GROUP_ID,
+        user_id: 2000000001,
+        time: Math.floor(Date.now() / 1000) - 10,
+        self_id: BOT_QQ,
+        sender: { user_id: 2000000001, nickname: '张三' },
+        message: [{ type: 'text', data: { text: '机器人还在吗？' } }],
+        raw_message: '机器人还在吗？',
+      };
+
+      client.send(JSON.stringify(normalEvent));
+
+      const proactiveManager = (booted.ctx as any).get('napcat-proactive');
+      await vi.waitFor(
+        () => {
+          expect(proactiveManager?.getUnrepliedMessages(PEER)?.length).toBe(1);
+        },
+        { timeout: 3000, interval: 50 }
+      );
+
+      // 2. 发送戳一戳通知唤醒（群友B戳了戳机器人）
+      const pokeNotice: OneBotNoticeEvent = {
+        post_type: 'notice',
+        notice_type: 'notify',
+        sub_type: 'poke',
+        group_id: GROUP_ID,
+        user_id: 2000000002,
+        target_id: Number(BOT_QQ),
+        time: Math.floor(Date.now() / 1000),
+      };
+
+      client.send(JSON.stringify(pokeNotice));
+
+      // 3. 等待 Agent.followup 接收到唤醒 Prompt
+      await vi.waitFor(
+        () => {
+          expect(capturedFollowups.length).toBeGreaterThan(0);
+        },
+        { timeout: 3000, interval: 50 }
+      );
+
+      const prompt = capturedFollowups[0].content;
+      // 验证形态 1 完整契约
+      expect(prompt).toContain('背景信息：[QQ群聊: 3000000001]');
+      expect(prompt).toContain('历史消息：');
+      expect(prompt).toContain('张三 (QQ: 2000000001): 机器人还在吗？');
+      expect(prompt).toContain('当前消息：');
+      expect(prompt).toContain('(QQ: 2000000002) 戳了戳你。');
+      expect(prompt).not.toContain('系统事件：');
+
+      // 4. 验证滑动窗口中此前未回复消息已被消费标记 (已读闭环)
+      expect(proactiveManager.getUnrepliedMessages(PEER).length).toBe(0);
+    });
   });
 });
