@@ -117,6 +117,43 @@ async function invokeGatewayAction(gateway: any, action: string, params: Record<
 }
 
 /**
+ * 统一获取单条说说的精简评论区（前 5 条）
+ * 跨平台兼容垫片：若网关或环境不支持 get_qzone_msg_detail，静默降级为空数组，绝不打断主体列表
+ */
+async function fetchFeedComments(
+  gateway: any,
+  feedId: string,
+  authorUin: number,
+  botUin: number
+): Promise<QzoneCommentItem[]> {
+  if (!feedId || !gateway) return [];
+  try {
+    const detailRes = await invokeGatewayAction(gateway, 'get_qzone_msg_detail', {
+      tid: feedId,
+      target_uin: authorUin,
+    });
+    const rawComments: any[] = detailRes?.data?.comments || [];
+    const comments: QzoneCommentItem[] = [];
+    for (const c of rawComments.slice(0, 5)) {
+      const commentUin = Number(c.uin || c.user_id) || 0;
+      comments.push({
+        comment_id: String(c.id || c.comment_id || ''),
+        author: {
+          user_id: commentUin,
+          nickname: String(c.name || c.nickname || ''),
+        },
+        content: String(c.content || ''),
+        create_time: formatTimestamp(c.time),
+        is_self: botUin > 0 && commentUin === botUin,
+      });
+    }
+    return comments;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 1. 读动态工具 (read_qzone_feeds)
  */
 export async function readQzoneFeeds(
@@ -278,32 +315,7 @@ export async function readQzoneFeeds(
         }
 
         // 尝试获取精简评论区
-        const comments: QzoneCommentItem[] = [];
-        if (feedId) {
-          try {
-            const detailRes = await invokeGatewayAction(ctx.gateway, 'get_qzone_msg_detail', {
-              tid: feedId,
-              target_uin: authorUin,
-            });
-            const rawComments: any[] = detailRes?.data?.comments || [];
-            // 保留前 5 条评论
-            for (const c of rawComments.slice(0, 5)) {
-              const commentUin = Number(c.uin) || 0;
-              comments.push({
-                comment_id: c.id || c.comment_id || '',
-                author: {
-                  user_id: commentUin,
-                  nickname: String(c.name || c.nickname || ''),
-                },
-                content: String(c.content || ''),
-                create_time: formatTimestamp(c.time),
-                is_self: botUin > 0 && commentUin === botUin,
-              });
-            }
-          } catch {
-            // 忽略评论获取异常
-          }
-        }
+        const comments = await fetchFeedComments(ctx.gateway, feedId, authorUin, botUin);
 
         feedItems.push({
           feed_id: feedId,
@@ -336,7 +348,22 @@ export async function readQzoneFeeds(
 
       const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_msg_list', actionParams);
       if (res && (res.status === 'failed' || (res.retcode !== undefined && res.retcode !== 0))) {
-        const reason = res.message || res.wording || '获取指定空间说说失败（可能无访问权限或目标空间未开放）';
+        const errorMsg = String(res.message || res.wording || '');
+        // NapCat 空态容错垫片：当空间说说被删光或无动态时，NapCat 会因 msglist 为 null 抛出"QQ空间兼容说说列表响应不完整"错误，此时应视作正常空态返回 0 条动态
+        if (
+          errorMsg.includes('QQ空间兼容说说列表响应不完整') ||
+          errorMsg.includes('说说列表响应不完整') ||
+          errorMsg.includes('响应不完整')
+        ) {
+          return toLosslessJson({
+            success: true,
+            scope,
+            feeds: [],
+            has_more: false,
+            message: '成功拉取到 0 条空间动态',
+          });
+        }
+        const reason = errorMsg || '获取指定空间说说失败（可能无访问权限或目标空间未开放）';
         return toLosslessJson({
           success: false,
           scope,
@@ -389,6 +416,8 @@ export async function readQzoneFeeds(
           images.push(imgItem);
         }
 
+        const comments = await fetchFeedComments(ctx.gateway, feedId, authorUin, botUin);
+
         feedItems.push({
           feed_id: feedId,
           author: {
@@ -398,7 +427,7 @@ export async function readQzoneFeeds(
           publish_time: timeStr,
           content,
           images,
-          comments: [],
+          comments,
           total_comment_count: commentCount,
         });
       }

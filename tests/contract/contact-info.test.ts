@@ -511,6 +511,79 @@ describe('契约测试: 社交关系链探查与群信息只读工具集', () =>
       expect(res.group_id).toBe('8000000001');
       expect(res.group_name).toBe('核心技术群');
       expect(res.member_count).toBe(60);
+      expect(res.group_create_time).toBe(1585055594);
+      expect(res.group_memo).toBe('群公告摘要');
+      assertNoUndefinedFields(res);
+    });
+
+    it('get_group_info 双轨兼容垫片: 当标准 get_group_info 仅返回 6 个极简字段时，自动升阶调用 get_group_detail_info 获取建群时间与群介绍', async () => {
+      let detailCalled = false;
+      const mockGateway = {
+        getGroupInfo: async (gid: number | string) => ({
+          status: 'ok',
+          retcode: 0,
+          data: {
+            group_all_shut: 0,
+            group_remark: '',
+            group_id: Number(gid),
+            group_name: '测试群',
+            member_count: 58,
+            max_member_count: 200,
+          },
+        }),
+        getGroupDetailInfo: async (gid: number | string) => {
+          detailCalled = true;
+          return {
+            status: 'ok',
+            retcode: 0,
+            data: {
+              groupCode: String(gid),
+              groupName: '测试群',
+              groupCreateTime: 1585055594,
+              richFingerMemo: '本群创于2020324 主玩饥荒 也是一个游戏交流群',
+              fingerMemo: '本群创于2020324 主玩饥荒',
+              groupMemo: '友友在抖音做了小游戏',
+            },
+          };
+        },
+      };
+
+      const res = await queryGroupInfo({ group_id: '8000000001' }, { gateway: mockGateway as any });
+      expect(res.success).toBe(true);
+      expect(detailCalled).toBe(true);
+      expect(res.group_id).toBe('8000000001');
+      expect(res.group_name).toBe('测试群');
+      // 成功从 detailInfo 融合 groupCreateTime 与 richFingerMemo
+      expect(res.group_create_time).toBe(1585055594);
+      expect(res.group_memo).toBe('本群创于2020324 主玩饥荒 也是一个游戏交流群');
+      assertNoUndefinedFields(res);
+    });
+
+    it('get_group_notice HTML 实体解码: 正确解码 &#10; 换行、&nbsp; 空格及常见实体字符', async () => {
+      const mockGateway = {
+        getGroupNotice: async () => ({
+          status: 'ok',
+          retcode: 0,
+          data: [
+            {
+              notice_id: 'notice_html_entity',
+              sender_id: 1000000002,
+              publish_time: 1753173196,
+              message: {
+                text: '问，群友在什么情况下会把群当树洞。&#10;选项:&nbsp;A:不熟的人&nbsp;&nbsp;B:没有想法&#10;&lt;特别提醒&gt; &quot;遵守群规&quot; &amp; 友好交流',
+              },
+              read_num: 32,
+              pinned: 0,
+            },
+          ],
+        }),
+      };
+
+      const res = await queryGroupNotice({ group_id: '8000000001' }, { gateway: mockGateway as any });
+      expect(res.success).toBe(true);
+      expect(res.notices).toHaveLength(1);
+      // 必须将 &#10; 解码为真实换行 \n，&nbsp; 解码为空格，&lt; &gt; &quot; &amp; 恢复原貌
+      expect(res.notices[0].content).toContain('问，群友在什么情况下会把群当树洞。\n选项: A:不熟的人  B:没有想法\n<特别提醒> "遵守群规" & 友好交流');
       assertNoUndefinedFields(res);
     });
 

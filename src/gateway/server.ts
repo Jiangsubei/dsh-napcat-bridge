@@ -548,6 +548,15 @@ export class NapCatGatewayServer {
   }
 
   /**
+   * OneBot 11 / NapCat 扩展 get_group_detail_info: 获取群详细信息（建群时间、群介绍等）
+   */
+  async getGroupDetailInfo(groupId: number | string): Promise<OneBotActionResponse> {
+    return this.sendAction('get_group_detail_info', {
+      group_id: String(groupId),
+    });
+  }
+
+  /**
    * OneBot 11 get_stranger_info: 获取陌生人/好友信息（昵称等）
    */
   async getStrangerInfo(userId: number | string): Promise<OneBotActionResponse> {

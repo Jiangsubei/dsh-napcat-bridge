@@ -397,6 +397,101 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     assertNoUndefinedDeep(res);
   });
 
+  it('2.5.1 NapCat 空间空态误报容错 (报"QQ空间兼容说说列表响应不完整"时判定为 0 条动态且 success=true)', async () => {
+    const mockGateway: any = {
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'failed',
+        retcode: 1200,
+        data: null,
+        message: 'QQ空间兼容说说列表响应不完整',
+        wording: 'QQ空间兼容说说列表响应不完整',
+      }),
+    };
+
+    const res = await readQzoneFeeds(
+      { scope: 'self' },
+      { gateway: mockGateway, botQq: '1000000001' }
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.feeds).toEqual([]);
+    expect(res.has_more).toBe(false);
+    expect(res.message).toContain('成功拉取到 0 条空间动态');
+    assertNoUndefinedDeep(res);
+  });
+
+  it('2.5.2 自身与指定好友动态评论区读取与降级容错契约 (scope=self/user 补齐 get_qzone_msg_detail)', async () => {
+    const mockGateway: any = {
+      sendAction: vi.fn().mockImplementation((action: string, params: any) => {
+        if (action === 'get_qzone_msg_list') {
+          return Promise.resolve({
+            status: 'ok',
+            retcode: 0,
+            data: {
+              total: 1,
+              msglist: [
+                {
+                  tid: 'tid_self_feed_888',
+                  content: '我刚刚发了一条日常动态',
+                  time: 1793740000,
+                  comment_num: 2,
+                  images: [],
+                },
+              ],
+            },
+          });
+        }
+        if (action === 'get_qzone_msg_detail') {
+          expect(params.tid).toBe('tid_self_feed_888');
+          expect(params.target_uin).toBe(1000000001);
+          return Promise.resolve({
+            status: 'ok',
+            retcode: 0,
+            data: {
+              tid: 'tid_self_feed_888',
+              comments: [
+                {
+                  uin: 1000000002,
+                  name: '好友张三',
+                  time: 1793740100,
+                  content: '拍得真不错！',
+                  comment_id: 'cmt_001',
+                },
+                {
+                  uin: 1000000001,
+                  name: '我自己',
+                  time: 1793740200,
+                  content: '谢谢夸奖~',
+                  comment_id: 'cmt_002',
+                },
+              ],
+            },
+          });
+        }
+        return Promise.resolve({ status: 'failed' });
+      }),
+    };
+
+    const res = await readQzoneFeeds(
+      { scope: 'self' },
+      { gateway: mockGateway, botQq: '1000000001' }
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.feeds).toHaveLength(1);
+    expect(res.feeds[0].total_comment_count).toBe(2);
+    // 关键断言：comments 绝不能再是空数组，必须正确读取填充评论内容与 is_self 标识
+    expect(res.feeds[0].comments).toHaveLength(2);
+    expect(res.feeds[0].comments[0].content).toBe('拍得真不错！');
+    expect(res.feeds[0].comments[0].author.user_id).toBe(1000000002);
+    expect(res.feeds[0].comments[0].is_self).toBe(false);
+    expect(res.feeds[0].comments[1].content).toBe('谢谢夸奖~');
+    expect(res.feeds[0].comments[1].author.user_id).toBe(1000000001);
+    expect(res.feeds[0].comments[1].is_self).toBe(true);
+
+    assertNoUndefinedDeep(res);
+  });
+
   it('2.6 自动多页聚合补齐 (Fill-to-Limit) 与游标分页契约', async () => {
     // 场景 A: 请求 limit=5，第一页过滤后只有 2 条有效说说，底层自动沿 cursor 补拉第二页凑齐 5 条
     const mockGatewayA: any = {

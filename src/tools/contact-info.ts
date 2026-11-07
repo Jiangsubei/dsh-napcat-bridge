@@ -44,6 +44,28 @@ import {
 
 export { toLosslessJson };
 
+/**
+ * 解码 HTML 实体编码文本（如 &#10; 换行、&nbsp; 空格、&lt;、&gt; 等）
+ */
+export function decodeHtmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const code = Number(dec);
+      return Number.isSafeInteger(code) ? String.fromCodePoint(code) : _;
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const code = parseInt(hex, 16);
+      return Number.isSafeInteger(code) ? String.fromCodePoint(code) : _;
+    })
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'");
+}
+
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 默认 5 分钟缓存
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 50;
@@ -550,15 +572,41 @@ export async function queryGroupInfo(
     const res = await gateway.getGroupInfo(groupIdStr);
     if (res && res.status === 'ok' && res.data) {
       const d = res.data;
+      let groupCreateTime = Number(d.group_create_time ?? d.groupCreateTime ?? d.create_time) || 0;
+      let groupMemo = String(d.richFingerMemo || d.fingerMemo || d.group_memo || d.groupMemo || d.memo || '');
+
+      // 双轨兼容垫片：若发现建群时间为 0 或群介绍为空（如 NapCat 默认精简 6 字段），尝试升阶调用 get_group_detail_info 获取完整详情
+      if (groupCreateTime === 0 || !groupMemo) {
+        try {
+          const detailRes = typeof (gateway as any).getGroupDetailInfo === 'function'
+            ? await (gateway as any).getGroupDetailInfo(groupIdStr)
+            : typeof (gateway as any).sendAction === 'function'
+            ? await (gateway as any).sendAction('get_group_detail_info', { group_id: groupIdStr })
+            : undefined;
+
+          if (detailRes && detailRes.status === 'ok' && detailRes.data) {
+            const dd = detailRes.data;
+            if (groupCreateTime === 0) {
+              groupCreateTime = Number(dd.group_create_time ?? dd.groupCreateTime ?? dd.create_time) || 0;
+            }
+            if (!groupMemo) {
+              groupMemo = String(dd.richFingerMemo || dd.fingerMemo || dd.group_memo || dd.groupMemo || dd.memo || '');
+            }
+          }
+        } catch {
+          // 升阶异常静默降级，保留既有基础信息
+        }
+      }
+
       return toLosslessJson({
         success: true,
-        group_id: String(d.group_id || groupIdStr),
-        group_name: String(d.group_name || ''),
-        group_remark: String(d.group_remark || ''),
-        member_count: Number(d.member_count) || 0,
-        max_member_count: Number(d.max_member_count) || 0,
-        group_memo: String(d.group_memo || ''),
-        group_create_time: Number(d.group_create_time) || 0,
+        group_id: String(d.group_id || d.groupCode || groupIdStr),
+        group_name: String(d.group_name || d.groupName || ''),
+        group_remark: String(d.group_remark || d.remarkName || ''),
+        member_count: Number(d.member_count ?? d.memberNum) || 0,
+        max_member_count: Number(d.max_member_count ?? d.maxMemberNum) || 0,
+        group_memo: groupMemo,
+        group_create_time: groupCreateTime,
       });
     }
 
@@ -656,11 +704,13 @@ export async function queryGroupNotice(
             ? String(raw.message.text)
             : '';
 
+        const decodedContent = decodeHtmlEntities(textContent).trim();
+
         return {
           notice_id: String(raw.notice_id || ''),
           sender_id: String(raw.sender_id || ''),
           publish_time: Number(raw.publish_time) || 0,
-          content: textContent.trim(),
+          content: decodedContent,
           read_num: Number(raw.read_num) || 0,
           pinned: Boolean(raw.pinned),
         };
