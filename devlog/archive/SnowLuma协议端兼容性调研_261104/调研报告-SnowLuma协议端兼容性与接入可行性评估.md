@@ -82,3 +82,31 @@
 
 实测证明：**SnowLuma 与 NapCat 在 OneBot 11 核心规范层面的兼容度极高**。  
 `dsh-napcat-bridge` 可以在**无需修改任何现有核心代码**的前提下，直接通过反向 WebSocket 纳管 SnowLuma 实例，实现基础对话、图文多媒体收发、消息撤回、历史查询及表情/戳一戳交互。
+
+> **261107 修正**：群文件下载与离线补全两处需要代码补丁，已突破“零修改”结论，详见下节。
+
+---
+
+## 6. 261107 补充实测与修复落地
+
+本节记录后续针对群文件与离线补全的深入实测结论。完整脱敏报告见
+[`devlog/SnowLuma群文件兼容修复_261107/实测报告-SnowLuma群文件下载兼容与离线补全待办.md`](../../SnowLuma群文件兼容修复_261107/实测报告-SnowLuma群文件下载兼容与离线补全待办.md)。
+
+### 6.1 群文件下载（已修复）
+
+- `get_group_file_url` 显式传 `busid=0` 会报 `code=4294966993 msg=参数错误`；省略 busid 或传 `102` 均正常。
+- `group_upload` notice 落库的 32 位 hex `file_id` 不能用于取 URL（`msg=文件 file_id 错误`）；消息段的 `/uuid` 可用。
+- 同一次上传会在库中产生 notice + 消息段两条 `group_file` 记录，`list_group_files` 需要按 30 秒窗口去重。
+- 修复方式：网关 busid 仅正数透传 + 下载失败后“本地兄弟记录 → 群目录文件名匹配”两级垫片 + 列表展示层合并。
+
+### 6.2 私聊文件（无需修复）
+
+- `<md5>_<uuid>` 形态 file_id 调 `get_private_file_url` 成功，URL fetch 返回 206。
+- `get_file` 兜底在 SnowLuma 恒失败（`file_id not found in the image/voice cache...`），但主路径不依赖它。
+
+### 6.3 离线消息补全（确认不可用，待实施）
+
+- `get_recent_contact` 为恒返回 `[]` 的占位实现；
+- `get_group_msg_history` / `get_friend_msg_history` 忽略 `message_seq`，只认 `message_id` + `reverse_order`（默认 `true`），且 `message_id` 为“锚点及更旧”的包含式分页；
+- 现有“最近联系人探测 + 遇重即断”策略在 SnowLuma 上仅能补到极少量消息，需重新设计分页与去重策略，已登记根目录 `TODO.md`。
+

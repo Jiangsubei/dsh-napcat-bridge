@@ -1,6 +1,6 @@
 # dsh-napcat-bridge 活跃需求与任务排期清单 (TODO)
 
-> **更新日期**: 2026-11-03  
+> **更新日期**: 2026-11-07  
 > **文档定位**: 项目根目录活跃任务追踪与排期总览（恪守“只留未做”原则）  
 > **排期原则**: 遵照用户拍板排期，P1 与 P5（All-in-One 单 Agent 重构）已全量交付闭环并归档至 `devlog/archive/`；当前阶段聚焦 P2（JEV 前置群聊感知），P3/P4 顺延推进自修改演进与运维管理，并保持对可选语音交互扩展（Sidecar）的规划视野；P0 暂空，作为突发紧急阻塞预留位。
 
@@ -11,6 +11,7 @@
 | 优先级 | 任务主题 | 核心模块 | 当前状态 | 下一步行动 |
 |:---:|---|---|:---:|---|
 | **P0** | *(暂无紧急阻塞)* | - | - | 预留位，随时响应生产故障或重大阻断缺陷 |
+| **P1** | **SnowLuma 协议端离线消息补全适配** | `src/gateway/sync.ts`<br>`src/gateway/server.ts` | **根因已定位**<br>(待方案与实施) | 设计不依赖 `get_recent_contact` 的分页补全策略，编写契约测试 |
 | **P2** | **JEV 决策模型前置群聊感知与主动唤醒** | `src/gateway/wakeup.ts`<br>`src/gateway/jev.ts` | **方案定稿**<br>(沙盒实测验证通过) | 编写 TDD 契约测试，实现 JEV 客户端与门控装配 |
 | **P3** | **Agent 自修改演进机制**（群专属人设/行为准则自我演进） | `src/gateway/session/`<br>`src/tools/` | **架构调研草案**<br>(待方案细化) | 细化自修改工具协议与权限栅栏设计，编写契约测试 |
 | **P4** | **好友与群管理工具及专用管理 Session** | `src/gateway/`<br>`src/tools/` | **需求收敛**<br>(待排期实施) | 验证管理 API 可达性，实现管理工具及独立 Session 隔离 |
@@ -19,6 +20,23 @@
 ---
 
 ## 活跃任务跟踪清单
+
+### 【P1】SnowLuma 协议端离线消息补全适配
+
+- **相关文档**:
+  - 实测报告: [`devlog/SnowLuma群文件兼容修复_261107/实测报告-SnowLuma群文件下载兼容与离线补全待办.md`](./devlog/SnowLuma群文件兼容修复_261107/实测报告-SnowLuma群文件下载兼容与离线补全待办.md)
+  - 历史调研: [`devlog/archive/SnowLuma协议端兼容性调研_261104/调研报告-SnowLuma协议端兼容性与接入可行性评估.md`](./devlog/archive/SnowLuma协议端兼容性调研_261104/调研报告-SnowLuma协议端兼容性与接入可行性评估.md)
+- **根因**:
+  - SnowLuma 的 `get_recent_contact` 为恒返回 `[]` 的占位实现，现有 `OfflineMessageSyncer` 无法探测最近活跃会话；
+  - `get_group_msg_history` / `get_friend_msg_history` 忽略 `message_seq`，只认 `message_id` + `reverse_order`（默认 `true`），且 `message_id` 为“锚点及更旧”的包含式分页；
+  - 现有“遇重即断”策略在 SnowLuma 上仅能补到极少量消息（实测 pageSize=5 仅补入 5 条，改策略后可达 21 条）。
+- **执行清单 (Next Steps)**:
+  - [ ] 设计按协议端能力矩阵（NapCat / SnowLuma）分流的补全策略
+  - [ ] 改用以本地 peer 列表 + `message_id` 锚点分页、跳过重复而非遇重即断
+  - [ ] 编写离线补全契约测试（覆盖 SnowLuma 恒空 recent contact 与包含式分页）
+  - [ ] 真机验证补全条数与 NapCat 侧零回归
+
+---
 
 ### 【P2】JEV 决策模型前置群聊感知与主动唤醒
 
