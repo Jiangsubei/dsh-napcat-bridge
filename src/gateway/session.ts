@@ -25,6 +25,7 @@ export {
   isQQSession,
 } from './session/id-resolver.js';
 export { encodeSegment };
+export { formatExternalPrompt } from './session/id-resolver.js';
 import type { SystemEventHub } from './system-event-hub.js';
 export { SystemEventHub };
 
@@ -515,7 +516,9 @@ export class SessionManager {
   }
 
   public formatWakeupPrompt(payload: WakeupPayload): string {
-    return formatWakeupPrompt(payload);
+    return formatWakeupPrompt(payload, {
+      bufferSize: this.agentRunner.getConfig()?.proactive_buffer_size,
+    });
   }
 
   public async dispatchWakeup(

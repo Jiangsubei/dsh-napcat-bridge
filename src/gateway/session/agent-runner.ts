@@ -137,7 +137,7 @@ export class SessionAgentRunner {
     this.loadPeerNames();
   }
 
-  private getConfig(): any {
+  public getConfig(): any {
     const getter: any = this.options?.configGetter || safeGetService(this.ctx, 'napcat-bridge-config');
     return (typeof getter === 'function' ? getter() : getter) || (this.ctx as any).config || (this.ctx.root as any)?.config || {};
   }
@@ -853,7 +853,7 @@ export class SessionAgentRunner {
     const promptText =
       payload.is_system && payload.system_event
         ? formatSystemEventPrompt(payload.system_event)
-        : formatWakeupPrompt(payload);
+        : formatWakeupPrompt(payload, { bufferSize: this.getConfig()?.proactive_buffer_size });
 
     const userMsg = createUserMessage({
       content: [{ type: 'text', text: promptText }],

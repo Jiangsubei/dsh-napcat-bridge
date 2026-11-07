@@ -185,7 +185,7 @@ describe('契约测试: 引用消息真实生产装配闭环 (Quote Assembly Con
     expect(capturedFollowups).toHaveLength(1);
     const prompt = capturedFollowups[0].content;
     expect(prompt).toContain(`[QQ群聊: ${GROUP_ID}]`);
-    expect(prompt).toContain('发送者: 测试用户C (QQ: 2000000001)');
+    expect(prompt).toContain('测试用户C (QQ: 2000000001)：[引用回复');
     expect(prompt).toContain('[引用回复 测试用户A (QQ: 1000000011): "[图片:/dsh/workspace/napcat_download/image/common/test.jpg]"]');
     expect(prompt).toContain('说的这个图');
   });
