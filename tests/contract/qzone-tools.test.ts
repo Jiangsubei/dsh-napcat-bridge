@@ -420,6 +420,29 @@ describe('契约 2: readQzoneFeeds 核心执行、过滤去伪与断点续看契
     assertNoUndefinedDeep(res);
   });
 
+  it('2.5.1.1 SnowLuma 空间空态误报容错 (报"无法获取空间说说列表（响应结构异常）"时判定为 0 条动态且 success=true)', async () => {
+    const mockGateway: any = {
+      sendAction: vi.fn().mockResolvedValue({
+        status: 'failed',
+        retcode: 1400,
+        data: null,
+        message: '无法获取空间说说列表（响应结构异常）',
+        wording: '无法获取空间说说列表（响应结构异常）',
+      }),
+    };
+
+    const res = await readQzoneFeeds(
+      { scope: 'self' },
+      { gateway: mockGateway, botQq: '1000000001' }
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.feeds).toEqual([]);
+    expect(res.has_more).toBe(false);
+    expect(res.message).toContain('成功拉取到 0 条空间动态');
+    assertNoUndefinedDeep(res);
+  });
+
   it('2.5.2 自身与指定好友动态评论区读取与降级容错契约 (scope=self/user 补齐 get_qzone_msg_detail)', async () => {
     const mockGateway: any = {
       sendAction: vi.fn().mockImplementation((action: string, params: any) => {

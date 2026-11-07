@@ -349,12 +349,17 @@ export async function readQzoneFeeds(
       const res = await invokeGatewayAction(ctx.gateway, 'get_qzone_msg_list', actionParams);
       if (res && (res.status === 'failed' || (res.retcode !== undefined && res.retcode !== 0))) {
         const errorMsg = String(res.message || res.wording || '');
-        // NapCat 空态容错垫片：当空间说说被删光或无动态时，NapCat 会因 msglist 为 null 抛出"QQ空间兼容说说列表响应不完整"错误，此时应视作正常空态返回 0 条动态
-        if (
+        // 跨平台空态容错垫片：当空间说说被删光或无动态时，腾讯接口返回的 msglist 为 null：
+        // 1. NapCat 会因 msglist 为 null 抛出"QQ空间兼容说说列表响应不完整"错误；
+        // 2. SnowLuma 会抛出"无法获取空间说说列表（响应结构异常）"错误。
+        // 此时应视作正常空态返回 0 条动态，避免中断上层业务
+        const isQzoneEmptyStateError =
           errorMsg.includes('QQ空间兼容说说列表响应不完整') ||
           errorMsg.includes('说说列表响应不完整') ||
-          errorMsg.includes('响应不完整')
-        ) {
+          errorMsg.includes('响应不完整') ||
+          errorMsg.includes('响应结构异常') ||
+          (errorMsg.includes('无法获取空间说说列表') && errorMsg.includes('结构异常'));
+        if (isQzoneEmptyStateError) {
           return toLosslessJson({
             success: true,
             scope,
