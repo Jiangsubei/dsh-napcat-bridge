@@ -19,8 +19,9 @@ import type {
 } from '../types/index.js';
 
 export const MIN_DELAY_SECONDS = 10;
-export const MAX_DELAY_SECONDS = 48 * 3600; // 48 小时 = 172800 秒
 export const MAX_PENDING_TASKS_PER_PEER = 5;
+/** Node.js setTimeout 延迟上限为 32 位有符号整型 (2^31 - 1, 约 24.855 天) */
+export const MAX_SAFE_TIMEOUT_MS = 2147483647;
 
 export interface TaskSchedulerOptions {
   db: MessageDatabase;
@@ -177,11 +178,6 @@ export class TaskScheduler {
     if (!isRecurring) {
       if (deltaSeconds < MIN_DELAY_SECONDS) {
         throw new Error(`定时任务执行延迟时间不能少于 ${MIN_DELAY_SECONDS} 秒（当前为 ${deltaSeconds} 秒）。`);
-      }
-      if (deltaSeconds > MAX_DELAY_SECONDS) {
-        throw new Error(
-          `单次定时任务执行时间不能超过 48 小时 (172800 秒)（当前为 ${deltaSeconds} 秒）。`
-        );
       }
     } else {
       if (deltaSeconds < 0) {
@@ -391,6 +387,19 @@ export class TaskScheduler {
 
     const now = Date.now();
     const delay = Math.max(0, task.next_run_at - now);
+
+    if (delay > MAX_SAFE_TIMEOUT_MS) {
+      // 超长延迟分段挂载：先挂满最大安全延迟，到期后自动重新获取并进入下一段 armTimer
+      const timer = setTimeout(() => {
+        this.timers.delete(task.id);
+        const latest = this.db.getScheduledTask(task.id);
+        if (latest && latest.status === 'pending') {
+          this.armTimer(latest);
+        }
+      }, MAX_SAFE_TIMEOUT_MS);
+      this.timers.set(task.id, timer);
+      return;
+    }
 
     const timer = setTimeout(async () => {
       this.timers.delete(task.id);

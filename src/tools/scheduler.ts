@@ -44,11 +44,11 @@ export function createScheduleTaskTool(contextGetter: () => SchedulerToolContext
       },
       delay_seconds: {
         type: 'number',
-        description: '相对延迟秒数（单次任务，10 秒至 172800 秒 / 48 小时）。例如 30 分钟后填 1800。',
+        description: '相对延迟秒数（单次任务，不少于 10 秒）。例如 30 分钟后填 1800，一周后填 604800。',
       },
       execute_at: {
         type: 'string',
-        description: '精确触发时间点（格式 YYYY-MM-DD HH:mm:ss 或 ISO 8601）。',
+        description: '精确触发时间点（格式 YYYY-MM-DD HH:mm:ss 或 ISO 8601），用于单次日程提醒，执行后自动销毁。',
       },
       recurring: {
         type: 'object',

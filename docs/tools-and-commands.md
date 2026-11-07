@@ -86,7 +86,7 @@
 
 | 工具名称 | 功能描述 | 关键参数 |
 |---|---|---|
-| `schedule_task` | 安排定时单次延迟或周期任务。到达时间后系统自动唤醒 Agent 并将设定的 prompt 注入会话执行。夜间免打扰时段自动顺延。 | `prompt` (string, 必填: 触发时唤醒 Agent 的提示词内容)<br>`delay_seconds` (number, 可选: 相对延迟秒数)<br>`execute_at` (string, 可选: 精确触发时间点)<br>`recurring` (object, 可选: 周期规则，含 `type` 等字段) |
+| `schedule_task` | 安排定时单次延迟或周期任务。到达时间后系统自动唤醒 Agent 并将设定的 prompt 注入会话执行。单次任务支持相对延迟或精确日程，执行后自动销毁；群聊夜间免打扰时段自动顺延。 | `prompt` (string, 必填: 触发时唤醒 Agent 的提示词内容)<br>`delay_seconds` (number, 可选: 相对延迟秒数，不少于 10 秒，不设上限)<br>`execute_at` (string, 可选: 精确触发时间点，用于单次日程提醒，执行后自动销毁)<br>`recurring` (object, 可选: 周期规则，含 `frequency`、`time_of_day` 等字段) |
 | `manage_scheduled_tasks` | 查询、取消或修改当前会话中已排期的定时任务。任务数量较少，列表不分页。 | `action` (string, 必填: `list` 列出所有任务 / `cancel` 取消指定任务 / `update` 调整任务)<br>`task_id` (string, `cancel` 或 `update` 时必填: 目标任务 ID)<br>`prompt` / `delay_seconds` / `execute_at` / `recurring` (可选: `update` 时调整任务内容或触发时间) |
 
 ---

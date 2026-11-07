@@ -54,15 +54,60 @@ describe('契约测试: TaskScheduler 调度引擎契约', () => {
     ).rejects.toThrow(/不能少于 10 秒/);
   });
 
-  it('契约 2: 单次任务时间上限 48 小时 (172800 秒)，超过 48 小时抛错拒绝', async () => {
-    await expect(
-      scheduler.scheduleTask({
-        peer: 'group_100',
+  it('契约 2: 单次任务取消 48 小时上限，支持长延迟（如 7 天）与远期日程，且超长定时器防 32 位溢出', async () => {
+    // 假定基准时间在白天 12:00，避免群聊 DND
+    const baseDate = new Date();
+    baseDate.setHours(12, 0, 0, 0);
+    const now = baseDate.getTime();
+
+    // 1. 7 天后的相对延迟 (7 * 86400 = 604800 秒)，此前会被 48h 拦截，现在应成功创建
+    const res7d = await scheduler.scheduleTask({
+      peer: 'user_100',
+      creator: '12345',
+      prompt: '一周后提醒我交周报',
+      delay_seconds: 7 * 86400,
+      now,
+    });
+    expect(res7d.success).toBe(true);
+    expect(res7d.task_id).toBeDefined();
+    expect(res7d.next_run_at).toBe(now + 7 * 86400 * 1000);
+
+    // 2. 远期精确时间日程（30 天后 14:00），应成功创建
+    const targetDate = new Date(now + 30 * 86400 * 1000);
+    targetDate.setHours(14, 0, 0, 0);
+    const executeAtStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')} 14:00:00`;
+    const res30d = await scheduler.scheduleTask({
+      peer: 'user_100',
+      creator: '12345',
+      prompt: '一个月后的重要日程',
+      execute_at: executeAtStr,
+      now,
+    });
+    expect(res30d.success).toBe(true);
+    expect(res30d.task_id).toBeDefined();
+
+    // 3. 验证超长延迟（> 24.85 天，即 delayMs > 2147483647）时不会因 Node.js 溢出而立即触发
+    // 30 天的 delay 约为 2,592,000,000 ms > 2,147,483,647 ms
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const longRes = await scheduler.scheduleTask({
+        peer: 'user_overflow_guard',
         creator: '12345',
-        prompt: '超长任务',
-        delay_seconds: 172801,
-      })
-    ).rejects.toThrow(/不能超过 48 小时/);
+        prompt: '防止32位整型溢出测试',
+        delay_seconds: 30 * 86400,
+        now,
+      });
+      expect(longRes.success).toBe(true);
+
+      // 仅前进 1 秒，若未做溢出防御，Node.js 溢出后 delay 会重置为 1ms 并在此被触发
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(dispatchedPayloads.some((p) => p.task_id === longRes.task_id)).toBe(false);
+      const taskInDb = db.getScheduledTask(longRes.task_id!);
+      expect(taskInDb?.status).toBe('pending');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('契约 3: 群聊夜间免打扰 (23:00~08:00) Fail-Fast 拦截，创建时直接拒绝并报错', async () => {
@@ -103,7 +148,7 @@ describe('契约测试: TaskScheduler 调度引擎契约', () => {
     expect(result.task_id).toBeDefined();
   });
 
-  it('契约 5: 单个 peer 最多允许 5 个 pending 任务，超过限制拒绝创建', async () => {
+  it('契约 5: 群聊与私聊统一限制单个 peer 最多 5 个 pending 任务，超过限制拒绝创建', async () => {
     // 假定当前时间是上午 10:00，避免命中 DND
     const baseHour = 10;
     const now = new Date();
@@ -113,12 +158,12 @@ describe('契约测试: TaskScheduler 调度引擎契约', () => {
     vi.setSystemTime(fixedNow);
 
     try {
-      // 先创建 5 个合法的 pending 任务（延迟 100s, 200s, ...）
+      // 1. 群聊 peer 创建 5 个合法的 pending 任务（延迟 100s, 200s, ...）
       for (let i = 1; i <= 5; i++) {
         const res = await scheduler.scheduleTask({
           peer: 'group_quota_test',
           creator: '12345',
-          prompt: `任务 ${i}`,
+          prompt: `群任务 ${i}`,
           delay_seconds: 100 * i,
         });
         expect(res.success).toBe(true);
@@ -129,7 +174,28 @@ describe('契约测试: TaskScheduler 调度引擎契约', () => {
         scheduler.scheduleTask({
           peer: 'group_quota_test',
           creator: '12345',
-          prompt: '第6个任务',
+          prompt: '第6个群任务',
+          delay_seconds: 600,
+        })
+      ).rejects.toThrow(/待执行任务数量已达上限/);
+
+      // 2. 私聊 peer 独立且统一同样限制 5 个
+      for (let i = 1; i <= 5; i++) {
+        const res = await scheduler.scheduleTask({
+          peer: 'user_quota_test',
+          creator: '20001',
+          prompt: `私聊任务 ${i}`,
+          delay_seconds: 100 * i,
+        });
+        expect(res.success).toBe(true);
+      }
+
+      // 私聊第 6 个同样被配额拦截
+      await expect(
+        scheduler.scheduleTask({
+          peer: 'user_quota_test',
+          creator: '20001',
+          prompt: '第6个私聊任务',
           delay_seconds: 600,
         })
       ).rejects.toThrow(/待执行任务数量已达上限/);
