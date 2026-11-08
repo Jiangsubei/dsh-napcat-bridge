@@ -525,7 +525,8 @@ export function parseNormalizedContent(
           break;
 
         case 'video':
-          textParts.push('[视频]');
+          const descriptor = describeSegment(seg, { origin: 'inbound', isGroup })!;
+          textParts.push(renderAttachment(descriptor) ?? '[视频]');
           break;
 
         case 'shake':

@@ -669,6 +669,56 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
               );
             }
           }
+        } else if (seg.type === 'video') {
+          const fileId = data.file_id || data.file || null;
+          // 私聊视频入站即时落盘：优先直链下载 -> 回退 downloadPrivateFile (get_file)
+          if (!isGroup && !isSelfMsg && mediaManager && (data.url || fileId)) {
+            let savedPath: string | null = null;
+            let savedFingerprint: string | null = null;
+
+            // 1. 直链首选（NapCat 与 SnowLuma 双端原生支持）
+            if (typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+              try {
+                const saved = await mediaManager.downloadAndSave(data.url.trim(), {
+                  fileId: fileId || undefined,
+                  type: 'files',
+                  sessionId: peer,
+                  filename: data.file_name || (typeof data.file === 'string' ? data.file : undefined),
+                });
+                if (saved?.localPath) {
+                  savedPath = saved.localPath;
+                  savedFingerprint = saved.fingerprint ?? null;
+                }
+              } catch (err: any) {
+                logger.debug?.(`[Plugin] 私聊视频直链下载未成功，准备回退: ${err?.message || '未知错误'}`);
+              }
+            }
+
+            // 2. 直链未成功时回退 downloadPrivateFile (调用 get_file 换取本地路径或新直链)
+            if (!savedPath && fileId) {
+              const pf = await downloadPrivateFile({
+                fileId,
+                peer,
+                filename: data.file_name || data.file || undefined,
+                gateway: server,
+                mediaManager,
+                logger,
+              });
+              if (pf.ok && pf.localPath) {
+                savedPath = pf.localPath;
+                savedFingerprint = pf.fingerprint ?? null;
+              }
+            }
+
+            if (savedPath) {
+              data.local_path = savedPath;
+              if (savedFingerprint) data.fingerprint = savedFingerprint;
+              logger.info?.(`[Plugin] 私聊视频已即时落盘 (peer: ${peer}, file: ${fileId || 'direct_url'}) -> ${savedPath}`);
+            } else {
+              data.dl_failed = true;
+              logger.warn?.(`[Plugin] 私聊视频入站落盘失败 (peer: ${peer}, file: ${fileId || 'direct_url'})`);
+            }
+          }
         }
       }
 

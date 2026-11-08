@@ -75,6 +75,25 @@ function renderGroupFile(descriptor: AttachmentDescriptor): string {
   return `[群文件:${name}${id}]`;
 }
 
+function renderVideo(descriptor: AttachmentDescriptor): string {
+  const rawFileName = descriptor.fileName && typeof descriptor.fileName === 'string' ? descriptor.fileName.trim() : '';
+  const fileId = descriptor.remote?.fileId && typeof descriptor.remote.fileId === 'string' ? descriptor.remote.fileId.trim() : '';
+  const isRedundantName = rawFileName && fileId && rawFileName === fileId;
+  const namePart = rawFileName && !isRedundantName ? `:${rawFileName}` : '';
+
+  if (descriptor.local?.path) {
+    return `[视频${namePart} 已保存: ${descriptor.local.path}]`;
+  }
+  if (descriptor.unavailable) {
+    const idPart = fileId ? ` (ID:${fileId})` : '';
+    return `[视频${namePart}${idPart} (入站落盘失败)]`;
+  }
+  if (fileId) {
+    return `[视频${namePart} (ID:${fileId})]`;
+  }
+  return `[视频${namePart}]`;
+}
+
 /**
  * 渲染单个附件描述符；未知 kind 返回 null（由调用方兜底占位）。
  */
@@ -93,7 +112,7 @@ export function renderAttachment(descriptor: AttachmentDescriptor | null | undef
     case 'record':
       return '[语音]';
     case 'video':
-      return '[视频]';
+      return renderVideo(descriptor);
     case 'forward':
       return `[合并转发 (ID:${descriptor.remote?.forwardId || ''})]`;
     default:

@@ -49,6 +49,7 @@ import {
   buildOutboundAttachments,
   buildOutboundFaceAttachment,
 } from '../attachment/outbound.js';
+import { deserializeAttachments } from '../attachment/store.js';
 import { manageFaces } from './manage-faces.js';
 export { manageFaces };
 import type { MessageDatabase } from '../storage/database.js';
@@ -57,7 +58,7 @@ import type { MediaStorageManager } from '../storage/media.js';
 import type { NapCatGatewayServer } from '../gateway/server.js';
 import type { MessageWaitRegistry, WaitCollectedMessage } from '../gateway/server.js';
 import type { SerialSender } from '../types/index.js';
-import { classifySendFileSource, detectSendFileType } from './file-source.js';
+import { classifySendFileSource, detectSendFileType, windowsPathToWsl } from './file-source.js';
 import {
   buildOffsetMessage,
   normalizeLimit,
@@ -218,40 +219,178 @@ async function fetchSingleChatResourceItem(
   }
 
   const downloadPromise = (async (): Promise<FetchChatResourceItemResult> => {
-    // 2. IS-F1: 判定群文件 —— 依据上下文 peer / groupId / 落库类型 (group_file)
+    // 2. IS-F1: 上下文与数据库记录获取
     const sessionPeer = ctx.peer || '';
     const inGroupContext =
       (ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '') ||
       sessionPeer.startsWith('group_') ||
       sessionPeer.startsWith('qq-group-');
-    let isGroupFile = inGroupContext;
 
-    // 落库类型佐证：peer/groupId 缺失时，若库中记录类型为 group_file 仍按群文件处理
-    if (!isGroupFile && ctx.db) {
+    let dbRecord: MessageRecord | null = null;
+    if (ctx.db) {
       try {
-        const record = ctx.db.getByFileId(fileId);
-        if (record?.type === 'group_file') {
-          isGroupFile = true;
-        }
+        dbRecord = ctx.db.getByFileId(fileId) ?? null;
       } catch {}
     }
 
     // 3. 一级静态去重: 查数据库
-    if (ctx.db) {
-      const record = ctx.db.getByFileId(fileId);
-      if (record?.local_path && fs.existsSync(record.local_path)) {
+    if (dbRecord?.local_path && fs.existsSync(dbRecord.local_path)) {
+      return {
+        file_id: fileId,
+        file_name: item.file_name,
+        busid: item.busid,
+        success: true,
+        local_path: dbRecord.local_path,
+      };
+    }
+
+    const hasBusid = item.busid !== undefined && item.busid !== null;
+    const isSlashGroupFile = fileId.startsWith('/');
+    const isGroupFileSystemFile = isSlashGroupFile || dbRecord?.type === 'group_file' || (inGroupContext && hasBusid);
+
+    // 4. 群内聊天流富媒体/视频按需拉取（无 busid，且非斜杠路径的群文件系统文件）
+    if (inGroupContext && !isGroupFileSystemFile) {
+      if (!ctx.mediaManager) {
         return {
           file_id: fileId,
           file_name: item.file_name,
           busid: item.busid,
-          success: true,
-          local_path: record.local_path,
+          success: false,
+          error: '下载失败: 媒体存储服务不可用，无法落盘',
+        };
+      }
+
+      const hasGroupId = ctx.groupId !== undefined && ctx.groupId !== null && String(ctx.groupId).trim() !== '';
+      const sessionId = sessionPeer || (hasGroupId ? `group_${ctx.groupId}` : undefined);
+      const saveOpts = {
+        fileId,
+        type: 'files' as const,
+        filename: item.file_name,
+        ...(sessionId ? { sessionId } : {}),
+      };
+
+      // 4.1 优先使用库中 attachments 提取的原始直链
+      let directUrl: string | null = null;
+      if (dbRecord?.attachments) {
+        try {
+          const descriptors = deserializeAttachments(dbRecord.attachments);
+          const matched = descriptors.find((d) => d.remote?.fileId === fileId || d.kind === 'video');
+          if (matched?.remote?.url && /^https?:\/\//i.test(matched.remote.url)) {
+            directUrl = matched.remote.url;
+          }
+        } catch {}
+      }
+
+      if (directUrl) {
+        try {
+          const saved = await ctx.mediaManager.downloadAndSave(directUrl, saveOpts);
+          if (saved?.localPath) {
+            return {
+              file_id: fileId,
+              file_name: item.file_name,
+              busid: item.busid,
+              success: true,
+              local_path: saved.localPath,
+            };
+          }
+        } catch {}
+      }
+
+      // 4.2 直链不存在或已过期，回退调用 gateway.getFile(fileId) 动态刷新
+      if (!ctx.gateway) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: directUrl
+            ? '直链下载失败且 NapCat/网关未连接，无法刷新下载直链'
+            : '下载失败: NapCat 未连接 (gateway 不可用)，无法获取媒体资源',
+        };
+      }
+
+      try {
+        const res = await ctx.gateway.getFile(fileId);
+        const info = [res?.wording, res?.message].filter(Boolean).join(' ');
+
+        // SnowLuma 兼容垫片：检测到 image/voice cache 限制错误
+        if (info && /image\/voice cache/i.test(info)) {
+          return {
+            file_id: fileId,
+            file_name: item.file_name,
+            busid: item.busid,
+            success: false,
+            error: `下载失败: 视频直链不存在或已过期，且当前协议端 (SnowLuma) 的 get_file 仅支持图片和语音缓存 (image/voice cache)，无法刷新历史视频直链 (file_id: ${fileId})`,
+          };
+        }
+
+        const data = (res?.data || {}) as any;
+        const refreshedUrl = typeof data.url === 'string' && /^https?:\/\//i.test(data.url) ? data.url.trim() : null;
+        let localCandidate: string | null = null;
+        if (typeof data.file === 'string' && data.file.trim() !== '') {
+          localCandidate = data.file.trim();
+        } else if (typeof data.url === 'string' && (data.url.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(data.url))) {
+          localCandidate = data.url.trim();
+        }
+
+        if (refreshedUrl) {
+          const saved = await ctx.mediaManager.downloadAndSave(refreshedUrl, {
+            ...saveOpts,
+            filename: item.file_name || data.file_name,
+          });
+          return {
+            file_id: fileId,
+            file_name: item.file_name || data.file_name,
+            busid: item.busid,
+            success: true,
+            local_path: saved.localPath,
+          };
+        }
+
+        if (localCandidate) {
+          let wslPath: string | null = localCandidate;
+          if (!localCandidate.startsWith('/')) {
+            if (process.platform === 'win32' && fs.existsSync(localCandidate)) {
+              wslPath = localCandidate;
+            } else {
+              wslPath = windowsPathToWsl(localCandidate);
+            }
+          }
+          if (wslPath && fs.existsSync(wslPath)) {
+            const saved = await ctx.mediaManager.downloadAndSave(wslPath, {
+              ...saveOpts,
+              filename: item.file_name || data.file_name,
+            });
+            return {
+              file_id: fileId,
+              file_name: item.file_name || data.file_name,
+              busid: item.busid,
+              success: true,
+              local_path: saved.localPath,
+            };
+          }
+        }
+
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: `下载失败: get_file 未返回有效可用的下载直链或本地文件 (file_id: ${fileId})${info ? ` — 协议端: ${info}` : ''}`,
+        };
+      } catch (err: any) {
+        return {
+          file_id: fileId,
+          file_name: item.file_name,
+          busid: item.busid,
+          success: false,
+          error: `下载失败: 协议端 get_file 异常: ${err?.message || '未知错误'}`,
         };
       }
     }
 
-    // 4. 群文件: get_group_file_url({groupid, fileid, busid}) → data.url → 真实落盘
-    if (isGroupFile) {
+    // 5. 群文件: get_group_file_url({groupid, fileid, busid}) → data.url → 真实落盘
+    if (isGroupFileSystemFile) {
       if (item.busid === undefined || item.busid === null) {
         return {
           file_id: fileId,
