@@ -67,6 +67,7 @@ import {
 import { downloadPrivateFile } from './private-file.js';
 import { resolveGroupFileReference } from './group-file-resolve.js';
 import { resolveDshPath } from '../utils/path.js';
+import { formatSenderString } from '../gateway/external-prompt.js';
 import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 import type { TaskScheduler } from '../scheduler/index.js';
 import { createScheduleTaskTool, createManageScheduledTasksTool } from './scheduler.js';
@@ -943,10 +944,10 @@ export function renderChatHistoryText(result: ReadChatHistoryResult): string {
   ];
   for (let i = 0; i < result.messages.length; i++) {
     const m = result.messages[i];
-    const selfTag = m.self ? ' [机器人自身]' : '';
+    const selfTag = m.self ? ' [自身发言]' : '';
     const recalledTag = m.recalled ? ' [已撤回]' : '';
     lines.push(
-      `${offset + i + 1}. [${m.formatted_time}] ${m.sender_name || m.user_id} (${m.user_id})${selfTag}${recalledTag} | msg_id: ${m.msg_id} | ${m.type}`
+      `${offset + i + 1}. [${m.formatted_time}] ${formatSenderString(m.sender_name, m.user_id)}${selfTag}${recalledTag} | msg_id: ${m.msg_id} | ${m.type}`
     );
     if (m.content) lines.push(`   ${m.content}`);
   }

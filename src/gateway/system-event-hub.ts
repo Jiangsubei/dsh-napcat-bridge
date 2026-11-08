@@ -21,6 +21,7 @@ import type {
 } from '../types/system-event.js';
 import type { WakeupPayload } from '../types/index.js';
 import { formatDateTime } from '../storage/database.js';
+import { formatSenderString } from './external-prompt.js';
 
 export function formatTimeOnly(timestamp: number): string {
   if (!timestamp || Number.isNaN(timestamp)) return '';
@@ -106,7 +107,7 @@ export function formatSystemEventPrompt(event: SystemWakeupEvent): string {
             typeof m.msg_id === 'number' && Number.isSafeInteger(m.msg_id) && m.msg_id !== 0
               ? `[消息ID: ${m.msg_id}] `
               : '';
-          const namePart = m.from_name ? `${m.from_name} (QQ: ${m.from_user})` : `QQ: ${m.from_user}`;
+          const namePart = formatSenderString(m.from_name, m.from_user);
           msgList += `${timePart}${msgIdPart}${namePart}: ${m.content}\n`;
         }
       }
@@ -125,11 +126,7 @@ export function formatSystemEventPrompt(event: SystemWakeupEvent): string {
 
     case 'synthetic_notice': {
       if (event.noticeType === 'poke') {
-        const senderStr = event.operatorName
-          ? `${event.operatorName}${event.operatorUser ? ` (QQ: ${event.operatorUser})` : ''}`
-          : event.operatorUser
-            ? `QQ: ${event.operatorUser}`
-            : '未知用户';
+        const senderStr = formatSenderString(event.operatorName, event.operatorUser);
         return `系统事件：[戳一戳] ${channelStr} [${timeStr}]\n\n用户 ${senderStr} 戳了戳你。`;
       }
       return `系统事件：[通知合成] ${channelStr} [${timeStr}]`;

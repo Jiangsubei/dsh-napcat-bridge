@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { Context } from '@deepseek-ai/cordis';
 import { MessageDatabase } from '../../src/storage/database.js';
-import { registerAgentTools } from '../../src/tools/index.js';
+import { registerAgentTools, renderChatHistoryText } from '../../src/tools/index.js';
 
 const SELF_QQ = '1000000000';
 const FRIEND_QQ = '1000000001';
@@ -148,5 +148,36 @@ describe('契约测试: read_chat_history 显式 peer 寻址', () => {
     expect(res.total).toBe(1);
     expect(res.messages[0].msg_id).toBe(20001);
     expect(res.messages[0].content).toBe('111');
+  });
+
+  it('契约: renderChatHistoryText 发送者统一为方案2方括号消息头，且自身发言标签为 [自身发言]', () => {
+    // 存入自身发言与他人发言
+    db.saveMessage({
+      msg_id: 30001,
+      peer: `group_${GROUP_ID}`,
+      user_id: SELF_QQ,
+      sender_name: '智能小助手',
+      time: 1793716530000,
+      type: 'text',
+      content: '我是机器人回答',
+      raw: '{}',
+      file_id: null,
+      busid: null,
+      local_path: null,
+      fingerprint: null,
+      recalled: 0,
+      self: 1,
+      reply_to: null,
+    });
+
+    const res = db.readHistory(`group_${GROUP_ID}`);
+    const text = renderChatHistoryText(res);
+
+    // 1. 发送者统一为方案2格式 [昵称 (QQ: 账号)]
+    expect(text).toContain(`[智能小助手 (QQ: ${SELF_QQ})]`);
+    expect(text).toContain('[群友 B (QQ: 2000000003)]');
+    // 2. [机器人自身] 改为 [自身发言]
+    expect(text).toContain('[自身发言]');
+    expect(text).not.toContain('[机器人自身]');
   });
 });

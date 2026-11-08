@@ -27,14 +27,20 @@ export function formatTimeOnly(timestamp: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** 规范化发送者身份描述 */
+/** 规范化发送者身份描述（方案 2: 统一采用方括号闭合消息头） */
 export function formatSenderString(fromName?: string, fromUser?: string): string {
   const name = fromName?.trim();
   const user = fromUser?.trim();
-  if (name && user) return `${name} (QQ: ${user})`;
-  if (user) return `QQ: ${user}`;
-  if (name) return name;
-  return '未知用户';
+  if (name && user) {
+    if (user.startsWith('agent:')) return `[${name} (${user})]`;
+    return `[${name} (QQ: ${user})]`;
+  }
+  if (user) {
+    if (user.startsWith('agent:')) return `[${user}]`;
+    return `[QQ: ${user}]`;
+  }
+  if (name) return `[${name}]`;
+  return '[未知用户]';
 }
 
 /** 解析会话渠道元信息 */

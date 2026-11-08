@@ -57,7 +57,7 @@ describe('契约测试: 负数 message_id 全链路支持与透传', () => {
 
     expect(prompt).toContain(`[消息ID: ${NEGATIVE_MSG_ID}]`);
     expect(prompt).toContain('[QQ私聊]');
-    expect(prompt).toContain('测试用户B (QQ: 1000000012): [图片:test.png] 哈哈哈，硬梨');
+    expect(prompt).toContain('[测试用户B (QQ: 1000000012)]: [图片:test.png] 哈哈哈，硬梨');
   });
 
   it('契约 2: formatWakeupPrompt 群聊单条消息必须透传负数 [消息ID: <id>]', () => {
