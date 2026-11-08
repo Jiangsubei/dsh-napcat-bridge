@@ -196,7 +196,29 @@ NapCatGatewayServer 接收并解析 JSON
 
 ---
 
-## 8. 数据存储路径总览
+## 8. 多通道独立运行时快照与增量注入架构 (Multi-Channel Snapshots)
+
+为彻底解决大模型长程会话中因单模块微小变化导致全量快照重复重发（表情包与黑话巨块陪跑、Token 爆炸）的问题，系统自 `v0.3.5` 起采用**基于 `agent/pre-step` 瀑布流的多通道独立快照架构**：
+
+1. **六大独立上下文通道**：
+   - **人格设定 (`napcat:persona`)**：静态人设配置，仅在启动或配置热加载时注入；
+   - **行为准则 (`napcat:behavior`)**：日常行为规范与工具交互契约，静态注入；
+   - **会话规则与约定 (`napcat:session_rules`)**：当前群聊/私聊的持久共识约定，仅在达成新约定时触发；
+   - **用户画像与群成员 (`napcat:user_profiles`)**：当前发言人画像与群活跃成员动态列表，仅在发言人或画像变动时触发；
+   - **社群黑话知识库 (`napcat:slang`)**：社群词条索引，仅在新增或编辑黑话词库时触发；
+   - **本地表情包库存 (`napcat:face_summary`)**：大体积表情包库容与情绪索引，仅在调用 `collect_face` 录入打标时触发。
+2. **状态比对与 0-Token 命中**：
+   - 每个 Session 维护独立的状态字典 `retainedMap[sessionId][channelKey]`；
+   - 在每个 step 执行前，各通道分别进行字符串/哈希脏检查；
+   - 未发生变化的通道**绝对不追加任何消息（0 Token 消耗）**；
+   - 某通道变动时，仅为该通道独立生成一条带有 `form: 'snapshot'` 的专属 `UserMessage`。
+3. **Fail-Closed 安全白名单防护**：
+   - 所有通道渲染前统一经过 `resolveQQSessionContext` 白名单校验；
+   - 非合法 QQ 会话（如 Web 临时沙箱、Review 沙箱）一律静默拦截，杜绝数据越权外泄。
+
+---
+
+## 9. 数据存储路径总览
 
 所有持久化数据均规范化锚定于用户环境的 `.dsh/napcat/` 目录下：
 

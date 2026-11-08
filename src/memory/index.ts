@@ -9,7 +9,11 @@ import type { MessageDatabase } from '../storage/database.js';
 import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
 import { MemoryTools, createMemoryToolDefinitions } from './tools.js';
-import { SnapshotManager, formatMemoryContext } from '../prompt/snapshot.js';
+import {
+  SnapshotManager,
+  formatSessionRulesContext,
+  formatUserProfilesContext,
+} from '../prompt/snapshot.js';
 import {
   DEFAULT_USER_PROFILE_BUDGET_CHARS,
   DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
@@ -109,21 +113,33 @@ export function setupMemoryService(
     (ctx as any).on?.('ready', checkReadyTools);
   }
 
-  // 2. 统一通过 SnapshotManager 挂载 napcat:memory 动态上下文段 (Fail-Closed 安全白名单防护)
+  // 2. 统一通过 SnapshotManager 挂载会话规则与用户画像独立动态通道 (Fail-Closed 安全白名单防护)
   if (options.registerPromptContext !== false) {
     const snapshotManager = new SnapshotManager(ctx, {
       getCurrentSpeaker: options.getCurrentSpeaker,
     });
-    const promptDisposer = snapshotManager.registerProvider({
-      name: 'napcat:memory',
+    unregisters.push(() => snapshotManager.dispose());
+
+    const rulesDisposer = snapshotManager.registerProvider({
+      name: 'napcat:session_rules',
       order: 40,
+      provide: (session) => {
+        const raw = storage.getSessionRulesSnapshotSync(session.peer);
+        return raw ? formatSessionRulesContext(raw) : '';
+      },
+    });
+    unregisters.push(rulesDisposer);
+
+    const profilesDisposer = snapshotManager.registerProvider({
+      name: 'napcat:user_profiles',
+      order: 42,
       provide: (session) => {
         const peer = session.peer;
         const currentQQ = session.qq !== 'default' ? session.qq : undefined;
 
         let raw = '';
         if (session.isPrivate) {
-          raw = storage.getPromptSnapshotSync(
+          raw = storage.getUserProfilesSnapshotSync(
             peer,
             [{ qq: session.qq, name: session.qq }],
             DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
@@ -138,7 +154,7 @@ export function setupMemoryService(
             } catch {}
           }
 
-          raw = storage.getPromptSnapshotSync(
+          raw = storage.getUserProfilesSnapshotSync(
             peer,
             activeUsers,
             getGroupUserProfilesBudget(),
@@ -146,10 +162,10 @@ export function setupMemoryService(
           );
         }
 
-        return raw ? formatMemoryContext(raw) : '';
+        return raw ? formatUserProfilesContext(raw) : '';
       },
     });
-    unregisters.push(promptDisposer);
+    unregisters.push(profilesDisposer);
   }
 
   return {

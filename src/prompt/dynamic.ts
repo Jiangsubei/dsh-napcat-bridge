@@ -30,45 +30,47 @@ export function registerQQScenarioDynamicPrompt(_ctx: Context): () => void {
 }
 
 /**
- * 注册 NapCat 动态 System Prompt 上下文快照 (委托至 SnapshotManager)
+ * 注册 NapCat 动态上下文快照 (委托至 SnapshotManager)
  */
 export function registerNapCatDynamicPrompt(
   ctx: Context,
   getPersona: () => string,
-  getBehavior: () => string
+  getBehavior: () => string,
+  snapshotManager?: SnapshotManager
 ): () => void {
-  const manager = new SnapshotManager(ctx);
-  return manager.registerProvider({
-    name: 'napcat:behavior_persona',
-    order: 50,
+  const manager = snapshotManager || (ctx as any).snapshotManager || new SnapshotManager(ctx);
+  if (typeof (ctx as any).reflect?.provide === 'function' && !(ctx as any).snapshotManager) {
+    (ctx as any).reflect.provide('snapshotManager', manager);
+  }
+  const unreg1 = manager.registerProvider({
+    name: 'napcat:persona',
+    order: 30,
     qqOnly: false,
-    provide: (_session, assembleCtx) => {
-      if (isExplicitNonQQSession(assembleCtx)) {
-        return '';
-      }
-
-      const p = (getPersona() || '').trim();
-      const b = (getBehavior() || '').trim();
-
-      const effectivePersona = p || DEFAULT_PERSONA;
-      let effectiveBehavior = b || DEFAULT_BEHAVIOR;
+    provide: (_session: any, assembleCtx: any) => {
+      if (isExplicitNonQQSession(assembleCtx)) return '';
+      return formatPersonaContext((getPersona() || '').trim() || DEFAULT_PERSONA);
+    },
+  });
+  const unreg2 = manager.registerProvider({
+    name: 'napcat:behavior',
+    order: 35,
+    qqOnly: false,
+    provide: (_session: any, assembleCtx: any) => {
+      if (isExplicitNonQQSession(assembleCtx)) return '';
+      let effectiveBehavior = (getBehavior() || '').trim() || DEFAULT_BEHAVIOR;
       if (
         !effectiveBehavior.includes('记忆工具规则') &&
         !effectiveBehavior.includes('create_memory')
       ) {
         effectiveBehavior = `${effectiveBehavior}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
       }
-
-      const personaBlock = formatPersonaContext(effectivePersona);
-      const behaviorBlock = formatBehaviorContext(effectiveBehavior);
-
-      const parts: string[] = [];
-      if (personaBlock) parts.push(personaBlock);
-      if (behaviorBlock) parts.push(behaviorBlock);
-
-      return parts.join('\n\n').trim();
+      return formatBehaviorContext(effectiveBehavior);
     },
   });
+  return () => {
+    unreg1();
+    unreg2();
+  };
 }
 
 /**
@@ -78,9 +80,13 @@ export function registerFacePromptContext(
   ctx: Context,
   db: MessageDatabase,
   getEnabled: () => boolean = () => true,
-  getFaceStoreMax?: () => number
+  getFaceStoreMax?: () => number,
+  snapshotManager?: SnapshotManager
 ): () => void {
-  const manager = new SnapshotManager(ctx);
+  const manager = snapshotManager || (ctx as any).snapshotManager || new SnapshotManager(ctx);
+  if (typeof (ctx as any).reflect?.provide === 'function' && !(ctx as any).snapshotManager) {
+    (ctx as any).reflect.provide('snapshotManager', manager);
+  }
   return manager.registerProvider({
     name: 'napcat:face_summary',
     order: 48,

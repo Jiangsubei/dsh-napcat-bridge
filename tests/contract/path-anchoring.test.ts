@@ -200,15 +200,19 @@ describe('契约测试: Memory 与 Workspace 绝对路径锚定 (Path Anchoring 
       const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
       expect(systemPrompt).toBeDefined();
 
-      // 4. 断言 Prompt 动态注入正确读取 customDshHome 下的记忆与画像
-      const result = await systemPrompt.assemble({
-        session: { id: 'qq-group-8000000001' },
-      });
-      const memCtx = (result?.contexts || []).find((c: any) => c.name === 'napcat:memory');
+      // 4. 断言 Prompt 动态注入正确读取 customDshHome 下的记忆与画像 (独立快照通道)
+      const snapshotManager = (ctx as any).snapshotManager;
+      expect(snapshotManager).toBeDefined();
 
-      expect(memCtx).toBeDefined();
-      expect(memCtx?.text).toContain('本群是技术研发交流群，严禁灌水');
-      expect(memCtx?.text).toContain('资深架构师，关注绝对路径与安全性');
+      const preStepResult = await snapshotManager.handlePreStep({
+        agent: { session: { id: 'qq-group-8000000001' } },
+      });
+      const injectedTexts = (preStepResult?.messages || [])
+        .map((m: any) => m.content?.[0]?.text || '')
+        .join('\n');
+
+      expect(injectedTexts).toContain('本群是技术研发交流群，严禁灌水');
+      expect(injectedTexts).toContain('资深架构师，关注绝对路径与安全性');
 
       // 5. 验证真实装配下，messages.sqlite 位于 customDshHome/napcat 下，绝不在 workspace/napcat 下
       expect(fs.existsSync(path.resolve(customDshHome, 'napcat/messages.sqlite'))).toBe(true);

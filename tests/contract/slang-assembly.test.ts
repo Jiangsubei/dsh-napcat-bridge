@@ -82,20 +82,22 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
       getSlangEnabled: () => true,
     });
 
-    expect(mockSystemPrompt.context).toHaveBeenCalled();
-    expect(registeredPrompts.has('napcat:slang')).toBe(true);
+    const slangProvider = hub.getProvider('napcat:slang');
+    expect(slangProvider).toBeDefined();
+    expect(slangProvider?.order).toBe(45);
 
-    const promptObj = registeredPrompts.get('napcat:slang');
-    expect(promptObj.order).toBe(45);
+    // 1. Web 会话下：严格白名单隔离，pre-step 产出 0 条消息，绝不泄露
+    const webArgs = {
+      agent: { session: { id: 'web-session-123' } },
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Web 用户' }] }],
+    };
+    const webRes = await hub.handlePreStep(webArgs, async () => ({ kind: 'enter', messages: webArgs.messages }));
+    expect(webRes.messages.length).toBe(1);
 
-    // 1. Web 会话 / 空上下文下：严格白名单隔离，绝对不泄露
-    const webAssembleCtx = { session: { id: 'web-session-123' } };
-    expect(promptObj.text(webAssembleCtx)).toBe('');
-    expect(promptObj.text()).toBe('');
-
-    // 2. QQ 会话下，未添加词条时 Prompt 为空
+    // 2. QQ 会话下，未添加词条时 Prompt 为空，不产生快照
+    const qqSession = { peer: 'group_1000000001', qq: 'default', isGroup: true, isPrivate: false };
     const qqAssembleCtx = { agent: { session: { id: 'qq-group-1000000001-1' } } };
-    expect(promptObj.text(qqAssembleCtx)).toBe('');
+    expect(slangProvider?.provide(qqSession, qqAssembleCtx)).toBe('');
 
     // 3. QQ 会话下添加词条后，包含 L1 索引与 query_slang 指引
     await service.storage.recordEntry({
@@ -105,14 +107,28 @@ describe('契约测试: 黑话系统装配与运行时接线闭环 (Slang Assemb
       example: '想你了牢大',
     });
 
-    const activePrompt = promptObj.text(qqAssembleCtx);
+    const activePrompt = slangProvider?.provide(qqSession, qqAssembleCtx);
     expect(activePrompt).toContain('社群黑话知识库 (Slang & Memes)');
     expect(activePrompt).toContain('query_slang');
     expect(activePrompt).toContain('- 牢大：科比、坠机调侃');
 
+    // 4. QQ 会话下 pre-step 正确生成独立快照消息，且未变动时不再注入
+    const qqArgs = {
+      agent: { session: { id: 'qq-group-1000000001' } },
+      messages: [],
+    };
+    const qqRes = await hub.handlePreStep(qqArgs, async () => ({ kind: 'enter', messages: [] }));
+    const slangMsg = qqRes.messages.find((m: any) => m.source?.kind === 'napcat:slang');
+    expect(slangMsg).toBeDefined();
+    expect(slangMsg.source.form).toBe('snapshot');
+
+    // 第二轮内容无变动，0 条快照注入
+    const qqRes2 = await hub.handlePreStep(qqArgs, async () => ({ kind: 'enter', messages: [] }));
+    expect(qqRes2.messages.length).toBe(0);
+
     hub.dispose();
     service.dispose();
-    expect(registeredPrompts.has('napcat:slang')).toBe(false);
+    expect(hub.getProvider('napcat:slang')).toBeUndefined();
   });
 
   it('契约 2: registerAgentTools 在 slang_enabled !== false 时装配 query_slang, record_slang 与 manage_slang', () => {

@@ -169,8 +169,7 @@ describe('契约测试: QQ 会话专属预设装配与工具隔离 (QQ Session P
     const asm = await booted.ctx.systemPrompt.assemble({ scope: agent, agent } as any);
     const contextNames = (asm.contexts as any[]).map((c) => c.name);
 
-    // 验证 napcat:memory 运行时上下文存在（未被 persona.includeRuntimeContext: false 抑制）
-    expect(contextNames).toContain('napcat:memory');
+    // 验证运行时上下文未被抑制
     expect(contextNames.some((n: string) => n.startsWith('working-directory'))).toBe(true);
   });
 

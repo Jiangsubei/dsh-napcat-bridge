@@ -139,6 +139,28 @@ export function formatSlangContext(slangContent: string): string {
 }
 
 /**
+ * 格式化会话规则与约定 (Session Rules & Conventions)
+ */
+export function formatSessionRulesContext(rulesContent: string): string {
+  return formatPromptSection({
+    title: '会话规则与约定',
+    subtitle: 'Session Rules & Conventions',
+    content: rulesContent,
+  });
+}
+
+/**
+ * 格式化用户画像与群成员 (User Profiles & Members)
+ */
+export function formatUserProfilesContext(profilesContent: string): string {
+  return formatPromptSection({
+    title: '用户画像与群成员',
+    subtitle: 'User Profiles & Members',
+    content: profilesContent,
+  });
+}
+
+/**
  * 格式化会话规则与用户画像 (Memory & Profiles)
  */
 export function formatMemoryContext(memoryContent: string): string {

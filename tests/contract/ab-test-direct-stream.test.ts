@@ -99,13 +99,10 @@ describe('契约测试: All-in-One 架构 send_qq_message 回归与出站静默�
   });
 
   it('契约 2: QQ 会话下 assemble 系统提示词包含自然顺手维护引导，不包含历史 Background 抑制词', async () => {
-    const assemblyGroup = await booted.ctx.systemPrompt.assemble({
-      session: { id: 'qq-group-10001-1' },
-    } as any);
-
-    const fullPromptText = assemblyGroup.contexts.map((c: any) => c.text || '').join('\n');
-    expect(fullPromptText).toContain('send_qq_message');
-    expect(fullPromptText).not.toContain('持久记忆由系统后台自动打理');
+    const snapshotManager = (booted.ctx as any).snapshotManager;
+    const behaviorText = snapshotManager?.getProvider('napcat:behavior')?.provide({ peer: 'group_10001-1' }) || '';
+    expect(behaviorText).toContain('send_qq_message');
+    expect(behaviorText).not.toContain('持久记忆由系统后台自动打理');
   });
 
   it('契约 3: 用户侧静默原则：当模型在 assistant/message 输出思考或正文时，网关保持绝对静默，绝不向 QQ 直发', async () => {

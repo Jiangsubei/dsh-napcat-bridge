@@ -335,14 +335,16 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
       },
     });
     const qqAgent = qqHandle.agent || qqHandle;
-    const assembly = await (booted.ctx as any).systemPrompt.assemble({ scope: qqAgent, agent: qqAgent } as any);
-    const faceCtx = assembly.contexts.find((c: any) => c.name === 'napcat:face_summary');
-    expect(faceCtx).toBeDefined();
+    const snapshotManager = (booted.ctx as any).snapshotManager;
+    expect(snapshotManager).toBeDefined();
+    const faceProvider = snapshotManager.getProvider('napcat:face_summary');
+    expect(faceProvider).toBeDefined();
 
-    expect(faceCtx.text).toContain('当前本地库共 5 张可用表情包（当前已列出前 3 张');
-    expect(faceCtx.text).toContain('face_quota_5');
-    expect(faceCtx.text).toContain('face_quota_4');
-    expect(faceCtx.text).toContain('face_quota_3');
-    expect(faceCtx.text).not.toContain('face_quota_1');
+    const faceText = faceProvider.provide({ peer: 'group_3000000014', qq: 'default' }, { scope: qqAgent, agent: qqAgent });
+    expect(faceText).toContain('当前本地库共 5 张可用表情包（当前已列出前 3 张');
+    expect(faceText).toContain('face_quota_5');
+    expect(faceText).toContain('face_quota_4');
+    expect(faceText).toContain('face_quota_3');
+    expect(faceText).not.toContain('face_quota_1');
   });
 });

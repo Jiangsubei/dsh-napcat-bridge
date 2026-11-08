@@ -103,17 +103,24 @@ describe('契约测试: QQ 会话提示词干净度与下线验证 (QQ Scenario 
     expect(emptyCtx).toBeUndefined();
   });
 
-  it('契约 4: 校验提示词上下文中不包含 napcat:qq_scenario 段，人格与记忆段正常挂载', async () => {
+  it('契约 4: 校验提示词上下文中不包含 napcat:qq_scenario 段，运行时快照由 snapshotManager 独立管理', async () => {
     const contextMap = (booted.ctx.systemPrompt as any).layers.merge(undefined, (l: any) => l.contexts);
     const qqScenario = contextMap.get('napcat:qq_scenario');
-    const memory = contextMap.get('napcat:memory');
-    const persona = contextMap.get('napcat:behavior_persona');
-
     expect(qqScenario).toBeUndefined();
-    expect(memory).toBeDefined();
-    expect(memory.order).toBe(40);
-    expect(persona).toBeDefined();
-    expect(persona.order).toBe(50);
+
+    // 确认已彻底清理旧全局快照段，避免 DSH 重复拼接巨型快照卡片
+    expect(contextMap.get('napcat:memory')).toBeUndefined();
+    expect(contextMap.get('napcat:behavior_persona')).toBeUndefined();
+
+    // 确认 snapshotManager 注册了 6 个独立原子快照通道
+    const snapshotManager = (booted.ctx as any).snapshotManager;
+    expect(snapshotManager).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:persona')).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:behavior')).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:session_rules')).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:user_profiles')).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:slang')).toBeDefined();
+    expect(snapshotManager.getProvider('napcat:face_summary')).toBeDefined();
   });
 
   it('契约 5: registerQQScenarioDynamicPrompt 安全兼容性闭环 (Disposer Contract)', async () => {

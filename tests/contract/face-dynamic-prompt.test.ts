@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { MessageDatabase } from '../../src/storage/database.js';
 import { registerFacePromptContext } from '../../src/prompt/dynamic.js';
+import { SnapshotManager } from '../../src/prompt/snapshot.js';
 
 describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注入', () => {
   let tmpDir: string;
@@ -22,16 +23,9 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     db = new MessageDatabase(path.join(tmpDir, 'test.db'));
 
     registeredPrompts = new Map();
-    mockSystemPrompt = {
-      context: vi.fn().mockImplementation((opts: any) => {
-        registeredPrompts.set(opts.name, opts);
-        return () => {
-          registeredPrompts.delete(opts.name);
-        };
-      }),
-    };
-
+    const snapshotManager = new SnapshotManager({} as any);
     mockCtx = {
+      snapshotManager,
       get: (name: string) => {
         if (name === 'systemPrompt') return mockSystemPrompt;
         return undefined;
@@ -51,15 +45,13 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
   it('契约 1: registerFacePromptContext 正确注册 napcat:face_summary 且 order 为 48', () => {
     const unregister = registerFacePromptContext(mockCtx, db, () => true);
 
-    expect(mockSystemPrompt.context).toHaveBeenCalled();
-    expect(registeredPrompts.has('napcat:face_summary')).toBe(true);
-
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
+    expect(promptObj).toBeDefined();
     expect(promptObj.order).toBe(48);
 
     // 释放检查
     unregister();
-    expect(registeredPrompts.has('napcat:face_summary')).toBe(false);
+    expect(mockCtx.snapshotManager.getProvider('napcat:face_summary')).toBeUndefined();
   });
 
   it('契约 2: QQ 会话且库内有表情时，注入总数与 Top 情绪分布概览', () => {
@@ -99,7 +91,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     });
 
     registerFacePromptContext(mockCtx, db, () => true);
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
 
     const assembleCtx = {
       agent: {
@@ -120,7 +112,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
   it('契约 3: QQ 会话且库为空时，注入友好收录引导文案', () => {
     registerFacePromptContext(mockCtx, db, () => true);
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
 
     const assembleCtx = {
       agent: {
@@ -148,7 +140,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     });
 
     registerFacePromptContext(mockCtx, db, () => false); // 禁用
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
 
     const assembleCtx = {
       agent: {
@@ -174,7 +166,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
     });
 
     registerFacePromptContext(mockCtx, db, () => true);
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
 
     const assembleCtx = {
       agent: {
@@ -203,7 +195,7 @@ describe('契约测试: 表情包动态情绪锚点 System Prompt 上下文注�
 
     // 配置上限为 2
     registerFacePromptContext(mockCtx, db, () => true, () => 2);
-    const promptObj = registeredPrompts.get('napcat:face_summary');
+    const promptObj = mockCtx.snapshotManager.getProvider('napcat:face_summary');
 
     const assembleCtx = {
       agent: {

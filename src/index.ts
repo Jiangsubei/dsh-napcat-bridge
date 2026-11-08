@@ -445,6 +445,9 @@ export function apply(ctx: Context, config: BridgePluginConfig = {}) {
     getBehavior: () => currentConfig().behavior || '',
     logger,
   });
+  if (typeof (ctx as any).reflect?.provide === 'function') {
+    (ctx as any).reflect.provide('snapshotManager', snapshotManager);
+  }
 
   // 5.1 构造 NapCat 专属工具提供者 (供 dsh-napcat-bridge/tools 插件与 qq-session 预设挂载)
   const napcatBridgeTools: NapCatBridgeToolsProvider = {

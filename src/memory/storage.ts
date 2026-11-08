@@ -290,30 +290,27 @@ export class MemoryStorage {
   }
 
   /**
-   * 组装 System Prompt 动态记忆上下文快照
-   * - Session 规则全量注入，永不切割；
-   * - 私聊用户画像全量注入，永不切割；
-   * - 群聊用户画像按总预算整块装填：放完当前画像后达到/超过预算时，
-   *   后续用户不再注入，并追加截断提示。预算只统计用户画像，不包含 Session 规则。
+   * 单独提取 Session 规则与长程记忆快照
    */
-  public getPromptSnapshotSync(
+  public getSessionRulesSnapshotSync(peer: string): string {
+    const sessionMemory = this.readSessionMemorySync(peer).trim();
+    if (!sessionMemory) return '';
+    if (sessionMemory.startsWith('#')) {
+      return sessionMemory;
+    }
+    return `### Session 记忆（${peer}）\n${sessionMemory}`;
+  }
+
+  /**
+   * 单独提取用户画像快照（遵循预算控制与截断保护）
+   */
+  public getUserProfilesSnapshotSync(
     peer: string,
     activeUsers: ActiveUserInfo[] = [],
     groupUserProfilesBudget = DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
     currentQQ?: string
   ): string {
     const isPrivate = peer.startsWith('user_') || peer.startsWith('qq-user-');
-    const sessionMemory = this.readSessionMemorySync(peer).trim();
-
-    const parts: string[] = [];
-    if (sessionMemory) {
-      if (sessionMemory.startsWith('#')) {
-        parts.push(sessionMemory);
-      } else {
-        parts.push(`### Session 记忆（${peer}）\n${sessionMemory}`);
-      }
-    }
-
     const userBlocks: string[] = [];
     let profileLength = 0;
     let truncated = false;
@@ -403,14 +400,40 @@ export class MemoryStorage {
       }
     }
 
+    const parts: string[] = [];
     if (userBlocks.length > 0) {
       parts.push(userBlocks.join('\n\n'));
     }
-
     if (truncated) {
       parts.push(TRUNCATED_USER_PROFILE_NOTICE);
     }
+    return parts.join('\n\n').trim();
+  }
 
+  /**
+   * 组装 System Prompt 动态记忆上下文快照
+   * - Session 规则全量注入，永不切割；
+   * - 私聊用户画像全量注入，永不切割；
+   * - 群聊用户画像按总预算整块装填：放完当前画像后达到/超过预算时，
+   *   后续用户不再注入，并追加截断提示。预算只统计用户画像，不包含 Session 规则。
+   */
+  public getPromptSnapshotSync(
+    peer: string,
+    activeUsers: ActiveUserInfo[] = [],
+    groupUserProfilesBudget = DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
+    currentQQ?: string
+  ): string {
+    const rules = this.getSessionRulesSnapshotSync(peer);
+    const profiles = this.getUserProfilesSnapshotSync(
+      peer,
+      activeUsers,
+      groupUserProfilesBudget,
+      currentQQ
+    );
+
+    const parts: string[] = [];
+    if (rules) parts.push(rules);
+    if (profiles) parts.push(profiles);
     return parts.join('\n\n').trim();
   }
 }

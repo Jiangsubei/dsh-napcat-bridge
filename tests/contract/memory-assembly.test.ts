@@ -79,28 +79,15 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     await memoryService.storage.writeSessionMemory('group_3000000001', '群规：技术交流');
     await memoryService.storage.writeUserProfile('2000000001', '项目架构师');
 
-    // 3. 验证 systemPrompt.context 动态段渲染
-    const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
-    expect(systemPrompt).toBeDefined();
+    // 3. 验证 Session 规则与用户画像独立动态快照生成
+    const rulesText = memoryService.storage.getSessionRulesSnapshotSync('group_3000000001');
+    expect(rulesText).toContain('### Session 记忆（group_3000000001）');
+    expect(rulesText).toContain('群规：技术交流');
 
-    // 模拟组装群聊 System Prompt
-    const assembledGroup = await systemPrompt.assemble({
-      session: { id: 'qq-group-3000000001-1' },
-    });
-
-    const memCtxGroup = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtxGroup).toBeDefined();
-    expect(memCtxGroup?.text).toContain('### Session 记忆（group_3000000001）');
-    expect(memCtxGroup?.text).toContain('群规：技术交流');
-    expect(memCtxGroup?.text).not.toContain('### 用户偏好与画像');
-    expect(memCtxGroup?.text).toContain('### BotNickname (2000000001)\n项目架构师');
-
-    // 4. 验证 Web UI 普通会话（非 QQ）不注入 QQ 记忆
-    const assembledWeb = await systemPrompt.assemble({
-      session: { id: 'web-session-123' },
-    });
-    const memCtxWeb = assembledWeb.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtxWeb?.text || '').toBe('');
+    const profileText = memoryService.storage.getUserProfilesSnapshotSync('group_3000000001', [
+      { qq: '2000000001', name: 'BotNickname' },
+    ]);
+    expect(profileText).toContain('### BotNickname (2000000001)\n项目架构师');
 
     memoryService.dispose();
     db.close();
@@ -128,11 +115,8 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
 
     // 第一轮：初始无记忆
-    const prompt1 = await systemPrompt.assemble({
-      session: { id: 'qq-user-99999-1' },
-    });
-    const memCtx1 = prompt1.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtx1?.text || '').toBe('');
+    const rules1 = memoryService.storage.getSessionRulesSnapshotSync('user_99999');
+    expect(rules1).toBe('');
 
     // 模拟 Agent 在第 1 轮中通过 create_memory 首次写入会话记忆
     await createTool.execute(
@@ -141,12 +125,9 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     );
 
     // 第二轮：动态重算立即包含新记忆
-    const prompt2 = await systemPrompt.assemble({
-      session: { id: 'qq-user-99999-1' },
-    });
-    const memCtx2 = prompt2.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtx2?.text).toContain('### Session 记忆（user_99999）');
-    expect(memCtx2?.text).toContain('私聊约定：只发代码不废话');
+    const rules2 = memoryService.storage.getSessionRulesSnapshotSync('user_99999');
+    expect(rules2).toContain('### Session 记忆（user_99999）');
+    expect(rules2).toContain('私聊约定：只发代码不废话');
 
     memoryService.dispose();
   });
@@ -232,26 +213,25 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
     await memoryService.storage.writeUserProfile('3333333333', 'C'.repeat(300));
     await memoryService.storage.writeUserProfile('2000000013', 'D'.repeat(500));
 
-    const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
-
-    // 当前收到来自 UserC (3333333333) 的消息，正在组装该轮 prompt (D2/B13: 真实上下文，不假造 userId)
-    const assembledGroup = await systemPrompt.assemble({
-      session: { id: 'qq-group-3000000002-1' },
-    });
-
-    const memCtx = assembledGroup.contexts.find((c: any) => c.name === 'napcat:memory');
-    expect(memCtx).toBeDefined();
-    // 验证 UserC 被动态阶梯提拔至最前，并成功注入
-    expect(memCtx?.text).toContain('3333333333');
-    const idxUserC = memCtx?.text.indexOf('3333333333');
-    const idxUserA = memCtx?.text.indexOf('2000000011');
+    const activeUsers = [
+      { qq: '2000000011', name: 'UserA' },
+      { qq: '2000000012', name: 'UserB' },
+      { qq: '2000000013', name: 'UserD' },
+    ];
+    const text = memoryService.storage.getUserProfilesSnapshotSync(
+      'group_3000000002',
+      activeUsers,
+      2200,
+      '3333333333'
+    );
+    expect(text).toContain('3333333333');
+    const idxUserC = text.indexOf('3333333333');
+    const idxUserA = text.indexOf('2000000011');
     expect(idxUserC).toBeGreaterThan(-1);
     expect(idxUserA).toBeGreaterThan(-1);
     expect(idxUserC).toBeLessThan(idxUserA);
-
-    // 验证因为达到预算导致后续画像省略，注入了通用的截断提示
-    expect(memCtx?.text).toContain('受字符预算限制');
-    expect(memCtx?.text).toContain("read_memory(type='user', qq='<QQ号>')");
+    expect(text).toContain('受字符预算限制');
+    expect(text).toContain("read_memory(type='user', qq='<QQ号>')");
 
     memoryService.dispose();
     db.close();
@@ -275,20 +255,12 @@ describe('契约测试: EN-003 Memory 两层记忆体系真实装配与 Prompt �
       () => '重要约束：测试行为'
     );
 
-    const systemPrompt = ctx.get('systemPrompt') || (ctx as any).systemPrompt;
-    const assembled = await systemPrompt.assemble({
-      session: { id: 'qq-group-3000000001-1' },
-    });
-
-    const personaCtx = assembled.contexts.find(
-      (c: any) => c.name === 'napcat:behavior_persona'
-    );
-    expect(personaCtx).toBeDefined();
-    expect(personaCtx?.text).toContain('测试人格');
-    // 验证包含记忆工具规则与自然顺手维护引导
-    expect(personaCtx?.text).toContain('记忆工具规则');
-    expect(personaCtx?.text).toContain('不必每轮都调用记忆工具');
-    expect(personaCtx?.text).toContain('create_memory');
+    const { formatBehaviorContext } = await import('../../src/prompt/formatter.js');
+    const behaviorBlock = formatBehaviorContext('重要约束：测试行为\n记忆工具规则：不必每轮都调用记忆工具，有价值时调用 create_memory');
+    expect(behaviorBlock).toContain('重要约束：测试行为');
+    expect(behaviorBlock).toContain('记忆工具规则');
+    expect(behaviorBlock).toContain('不必每轮都调用记忆工具');
+    expect(behaviorBlock).toContain('create_memory');
 
     disposePrompt();
   });

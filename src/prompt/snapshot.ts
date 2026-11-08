@@ -1,10 +1,12 @@
 /**
- * dsh-napcat-bridge: 统一运行时动态快照与上下文注入管理器 (SnapshotManager)
- * 集中管理所有注入到 DSH systemPrompt.context 的动态段，
- * 统一执行 Fail-Closed 白名单校验，彻底杜绝黑话、表情包、记忆、人设等泄露至 Web UI 与非 QQ 会话。
+ * dsh-napcat-bridge: 多通道独立运行时快照管理器 (MultiChannelSnapshotHub)
+ * 集中管理所有注入到会话的动态上下文与快照，
+ * 基于 DSH agent/pre-step 瀑布流实现多通道独立状态追踪 (Multi-Channel Independent Snapshots)，
+ * 并统一贯彻 Fail-Closed 白名单防御，彻底杜绝黑话、表情包、记忆、人设等泄露至 Web UI 与非 QQ 会话。
  */
 
 import type { Context } from '@deepseek-ai/cordis';
+import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import {
   DEFAULT_PERSONA,
   DEFAULT_BEHAVIOR,
@@ -20,7 +22,8 @@ import {
   formatPersonaContext,
   formatBehaviorContext,
   formatSlangContext,
-  formatMemoryContext,
+  formatSessionRulesContext,
+  formatUserProfilesContext,
 } from './formatter.js';
 
 export * from './formatter.js';
@@ -42,6 +45,8 @@ export interface SnapshotProvider {
   provide: (session: QQSessionContext, assembleCtx: any) => string | null | undefined;
   /** 是否仅限 QQ 会话注入。默认为 true（贯彻 Fail-Closed 白名单防护） */
   qqOnly?: boolean;
+  /** 兼容性/快捷调用接口：直接传入 assembleCtx 解析 session 并生成文本 */
+  text?: (assembleCtx: any) => string;
 }
 
 export interface SnapshotManagerOptions {
@@ -159,111 +164,252 @@ export function resolveQQSessionContext(
 }
 
 /**
- * 统一快照注入管理器
+ * 多通道独立快照注入管理器 (MultiChannelSnapshotHub)
  */
 export class SnapshotManager {
   private providers = new Map<string, SnapshotProvider>();
-  private disposers = new Map<string, () => void>();
+  /** 会话维度的独立快照缓存：sessionId -> (channelName -> lastRenderedText) */
+  private retained = new Map<string, Map<string, string>>();
+  private preStepDisposer?: () => void;
 
   constructor(
     private ctx: Context,
     private options: SnapshotManagerOptions = {}
-  ) {}
+  ) {
+    this.setupPreStepListener();
+  }
 
   /**
-   * 注册一个动态上下文 Provider
+   * 注册 agent/pre-step 瀑布流钩子，实现各通道独立增量注入
+   */
+  private setupPreStepListener(): void {
+    if (!this.ctx || typeof (this.ctx as any).on !== 'function') {
+      return;
+    }
+
+    try {
+      const unreg = (this.ctx as any).on(
+        'agent/pre-step',
+        async (args: any, next: any) => {
+          return this.handlePreStep(args, next);
+        }
+      );
+      this.preStepDisposer = typeof unreg === 'function' ? unreg : undefined;
+    } catch (err) {
+      this.options.logger?.warn?.(
+        '[SnapshotManager] 挂载 agent/pre-step 钩子异常:',
+        err
+      );
+    }
+  }
+
+  /**
+   * 执行 pre-step 多通道独立快照检查与注入
+   */
+  public async handlePreStep(args: any, next?: any): Promise<any> {
+    const decision =
+      typeof next === 'function'
+        ? await next()
+        : { kind: 'enter', messages: args?.messages || [] };
+
+    if (decision?.kind === 'reject') {
+      return decision;
+    }
+
+    const agent = args?.agent;
+    const signal = args?.signal;
+    signal?.throwIfAborted?.();
+
+    const assembleCtx = {
+      agent,
+      session: agent?.session,
+      ...args,
+    };
+
+    // 严格 Fail-Closed 安全白名单门控：非 QQ 会话绝不注入任何快照消息
+    const session = resolveQQSessionContext(
+      assembleCtx,
+      this.options.getCurrentSpeaker
+    );
+    if (!session) {
+      return decision;
+    }
+
+    const sessionId = agent?.session?.id || session.peer;
+    let sessionRetained = this.retained.get(sessionId);
+    if (!sessionRetained) {
+      sessionRetained = new Map<string, string>();
+      this.retained.set(sessionId, sessionRetained);
+      this.restoreSessionRetained(agent?.session, sessionRetained);
+    }
+
+    const sorted = Array.from(this.providers.values()).sort(
+      (a, b) => a.order - b.order
+    );
+    const injections: any[] = [];
+
+    for (const provider of sorted) {
+      if (provider.qqOnly !== false && !session) {
+        continue;
+      }
+
+      try {
+        const raw = provider.provide(session, assembleCtx);
+        const newText = (raw || '').trim();
+        const lastText = sessionRetained.get(provider.name);
+
+        if (newText && newText !== lastText) {
+          // 该通道产生增量/变更快照，生成专属 UserMessage 注入会话
+          const msg = this.createChannelSnapshotMessage(provider.name, newText);
+          injections.push(msg);
+          sessionRetained.set(provider.name, newText);
+        } else if (!newText && lastText) {
+          // 内容被清空
+          sessionRetained.delete(provider.name);
+        }
+      } catch (err) {
+        this.options.logger?.warn?.(
+          `[SnapshotManager] Provider ${provider.name} 独立快照渲染异常:`,
+          err
+        );
+      }
+    }
+
+    if (injections.length === 0) {
+      return decision;
+    }
+
+    const existingMessages = Array.isArray(decision.messages)
+      ? decision.messages
+      : [];
+
+    return {
+      ...decision,
+      messages: [...existingMessages, ...injections],
+    };
+  }
+
+  /**
+   * 构造通道独立快照 UserMessage
+   */
+  public createChannelSnapshotMessage(channelName: string, text: string): any {
+    const reminderText = [
+      `<system-reminder>`,
+      `Current runtime context: ${channelName}. This snapshot supersedes earlier ${channelName} snapshots in this session.`,
+      ``,
+      text,
+      `</system-reminder>`,
+    ].join('\n');
+
+    try {
+      return createUserMessage({
+        content: [{ type: 'text', text: reminderText }],
+        source: {
+          kind: channelName as any,
+          form: 'snapshot',
+          sections: [{ name: channelName, text }],
+        },
+      });
+    } catch {
+      // 在未挂载完整 dsh-llm 运行时的降级对象构造
+      return {
+        id: `snap-${channelName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: 'user',
+        content: [{ type: 'text', text: reminderText }],
+        source: {
+          kind: channelName,
+          form: 'snapshot',
+          sections: [{ name: channelName, text }],
+        },
+      };
+    }
+  }
+
+  /**
+   * 尝试从历史消息恢复 retained 状态（服务重启或断线重连场景）
+   */
+  private restoreSessionRetained(
+    session: any,
+    sessionRetained: Map<string, string>
+  ): void {
+    if (!session || typeof session.snapshotEvents !== 'function') return;
+    try {
+      const events = session.snapshotEvents();
+      if (!Array.isArray(events)) return;
+      for (let i = events.length - 1; i >= 0; i--) {
+        const ev = events[i];
+        if (ev?.type === 'user/message') {
+          const src = ev.data?.source || ev.data?.message?.source;
+          if (
+            src &&
+            typeof src.kind === 'string' &&
+            src.form === 'snapshot' &&
+            !sessionRetained.has(src.kind)
+          ) {
+            const text = src.sections?.[0]?.text;
+            if (typeof text === 'string') {
+              sessionRetained.set(src.kind, text);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  /**
+   * 注册一个动态上下文通道 Provider
    */
   registerProvider(provider: SnapshotProvider): () => void {
     this.unregisterProvider(provider.name);
-    this.providers.set(provider.name, provider);
-
-    const systemPrompt =
-      typeof (this.ctx as any).get === 'function'
-        ? (this.ctx as any).get('systemPrompt')
-        : (this.ctx as any).systemPrompt;
-
-    if (!systemPrompt || typeof systemPrompt.context !== 'function') {
-      return () => {
-        this.unregisterProvider(provider.name);
-      };
-    }
-
-    const unregister = systemPrompt.context({
-      name: provider.name,
-      order: provider.order,
-      text: (assembleCtx?: any) => {
-        // 安全底线门控：默认 qqOnly 为 true（Fail-Closed）
-        if (provider.qqOnly !== false) {
-          const session = resolveQQSessionContext(
-            assembleCtx,
-            this.options.getCurrentSpeaker
-          );
-          if (!session) {
-            return '';
-          }
-          try {
-            const res = provider.provide(session, assembleCtx);
-            return res || '';
-          } catch (err) {
-            this.options.logger?.warn?.(
-              `[SnapshotManager] Provider ${provider.name} 渲染异常，降级为空:`,
-              err
-            );
-            return '';
-          }
-        }
-
-        // 非 qqOnly（显式允许全局注入的 Provider）
-        try {
-          const session =
-            resolveQQSessionContext(assembleCtx, this.options.getCurrentSpeaker) || {
-              peer: '',
-              qq: '',
-              isGroup: false,
-              isPrivate: false,
-            };
-          const res = provider.provide(session, assembleCtx);
-          return res || '';
-        } catch (err) {
-          this.options.logger?.warn?.(
-            `[SnapshotManager] Provider ${provider.name} 渲染异常，降级为空:`,
-            err
-          );
+    const wrapped: SnapshotProvider = {
+      ...provider,
+      text: (assembleCtx: any) => {
+        const session = resolveQQSessionContext(
+          assembleCtx,
+          this.options.getCurrentSpeaker
+        );
+        if (provider.qqOnly !== false && !session) {
           return '';
         }
+        return (provider.provide(session as any, assembleCtx) || '').trim();
       },
-    });
-
-    const disposer = () => {
-      this.unregisterProvider(provider.name);
-      try {
-        unregister();
-      } catch {}
     };
+    this.providers.set(provider.name, wrapped);
 
-    this.disposers.set(provider.name, disposer);
-    return disposer;
+    return () => {
+      this.unregisterProvider(provider.name);
+    };
   }
 
   unregisterProvider(name: string): void {
     this.providers.delete(name);
-    const disposer = this.disposers.get(name);
-    if (disposer) {
-      this.disposers.delete(name);
-      try {
-        disposer();
-      } catch {}
+  }
+
+  public getProvider(name: string): SnapshotProvider | undefined {
+    return this.providers.get(name);
+  }
+
+  public getRetained(sessionId: string, channelName: string): string | undefined {
+    return this.retained.get(sessionId)?.get(channelName);
+  }
+
+  public clearRetained(sessionId?: string): void {
+    if (sessionId) {
+      this.retained.delete(sessionId);
+    } else {
+      this.retained.clear();
     }
   }
 
   dispose(): void {
-    for (const disposer of Array.from(this.disposers.values())) {
+    if (this.preStepDisposer) {
       try {
-        disposer();
+        this.preStepDisposer();
       } catch {}
+      this.preStepDisposer = undefined;
     }
     this.providers.clear();
-    this.disposers.clear();
+    this.retained.clear();
   }
 }
 
@@ -286,7 +432,7 @@ export interface SetupSnapshotHubOptions {
 }
 
 /**
- * 在插件装配入口一次性装配所有动态快照 Provider
+ * 在插件装配入口装配 6 大独立动态快照通道 (Multi-Channel Snapshot Hub)
  */
 export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotManager {
   const manager = new SnapshotManager(options.ctx, {
@@ -294,26 +440,69 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
     logger: options.logger,
   });
 
-  // 1. 注册记忆与画像动态段 (napcat:memory, order: 40)
+  const getEffectivePersona = () => (options.getPersona?.() || '').trim() || DEFAULT_PERSONA;
+  const getEffectiveBehavior = () => {
+    let b = (options.getBehavior?.() || '').trim() || DEFAULT_BEHAVIOR;
+    if (
+      !b.includes('记忆工具规则') &&
+      !b.includes('create_memory')
+    ) {
+      b = `${b}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
+    }
+    return b;
+  };
+
+  // 1. 通道 A: 人格设定 (napcat:persona, order: 30)
+  manager.registerProvider({
+    name: 'napcat:persona',
+    order: 30,
+    qqOnly: false,
+    provide: (_session, assembleCtx) => {
+      if (isExplicitNonQQSession(assembleCtx)) return '';
+      return formatPersonaContext(getEffectivePersona());
+    },
+  });
+
+  // 2. 通道 B: 行为准则 (napcat:behavior, order: 35)
+  manager.registerProvider({
+    name: 'napcat:behavior',
+    order: 35,
+    qqOnly: false,
+    provide: (_session, assembleCtx) => {
+      if (isExplicitNonQQSession(assembleCtx)) return '';
+      return formatBehaviorContext(getEffectiveBehavior());
+    },
+  });
+
+  // 3. 通道 C: 会话规则与约定 (napcat:session_rules, order: 40)
   if (options.memoryStorage) {
     const memStorage = options.memoryStorage;
     manager.registerProvider({
-      name: 'napcat:memory',
+      name: 'napcat:session_rules',
       order: 40,
+      provide: (session) => {
+        const raw = memStorage.getSessionRulesSnapshotSync(session.peer);
+        return raw ? formatSessionRulesContext(raw) : '';
+      },
+    });
+
+    // 4. 通道 D: 用户画像与群成员 (napcat:user_profiles, order: 42)
+    manager.registerProvider({
+      name: 'napcat:user_profiles',
+      order: 42,
       provide: (session) => {
         const peer = session.peer;
         const currentQQ = session.qq !== 'default' ? session.qq : undefined;
 
         let raw = '';
         if (session.isPrivate) {
-          raw = memStorage.getPromptSnapshotSync(
+          raw = memStorage.getUserProfilesSnapshotSync(
             peer,
             [{ qq: session.qq, name: session.qq }],
             DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS,
             currentQQ
           );
         } else {
-          // 群聊活跃用户
           let activeUsers: Array<{ qq: string; name: string }> = [];
           try {
             const rows = options.db.getActiveUsers(peer, 7, 15);
@@ -321,15 +510,15 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
           } catch {}
 
           const groupBudget = options.getGroupMemoryBudget?.() ?? DEFAULT_GROUP_MEMORY_TOTAL_BUDGET_CHARS;
-          raw = memStorage.getPromptSnapshotSync(peer, activeUsers, groupBudget, currentQQ);
+          raw = memStorage.getUserProfilesSnapshotSync(peer, activeUsers, groupBudget, currentQQ);
         }
 
-        return raw ? formatMemoryContext(raw) : '';
+        return raw ? formatUserProfilesContext(raw) : '';
       },
     });
   }
 
-  // 2. 注册黑话动态段 (napcat:slang, order: 45)
+  // 5. 通道 E: 社群黑话知识库 (napcat:slang, order: 45)
   if (options.slangStorage) {
     const sStorage = options.slangStorage;
     manager.registerProvider({
@@ -348,7 +537,7 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
     });
   }
 
-  // 3. 注册表情包全量动态段 (napcat:face_summary, order: 48)
+  // 6. 通道 F: 本地表情包库存 (napcat:face_summary, order: 48)
   manager.registerProvider({
     name: 'napcat:face_summary',
     order: 48,
@@ -356,43 +545,12 @@ export function setupSnapshotHub(options: SetupSnapshotHubOptions): SnapshotMana
       if (options.getFaceEnabled && !options.getFaceEnabled()) {
         return '';
       }
-      const limit = typeof options.getFaceStoreMax === 'function' ? options.getFaceStoreMax() : DEFAULT_FACE_STORE_MAX;
+      const limit =
+        typeof options.getFaceStoreMax === 'function'
+          ? options.getFaceStoreMax()
+          : DEFAULT_FACE_STORE_MAX;
       const activeFacesRes = options.db.getActiveFacesForContext(limit);
       return formatFaceLibraryContext(activeFacesRes.faces, activeFacesRes.total);
-    },
-  });
-
-  // 4. 注册人格与行为准则动态段 (napcat:behavior_persona, order: 50)
-  manager.registerProvider({
-    name: 'napcat:behavior_persona',
-    order: 50,
-    qqOnly: false,
-    provide: (_session, assembleCtx) => {
-      // 显式指向非 QQ 会话（如 Web UI 普通会话）时静默阻断
-      if (isExplicitNonQQSession(assembleCtx)) {
-        return '';
-      }
-
-      const p = (options.getPersona?.() || '').trim();
-      const b = (options.getBehavior?.() || '').trim();
-
-      const effectivePersona = p || DEFAULT_PERSONA;
-      let effectiveBehavior = b || DEFAULT_BEHAVIOR;
-      if (
-        !effectiveBehavior.includes('记忆工具规则') &&
-        !effectiveBehavior.includes('create_memory')
-      ) {
-        effectiveBehavior = `${effectiveBehavior}\n${DEFAULT_MEMORY_GUIDANCE}`.trim();
-      }
-
-      const personaBlock = formatPersonaContext(effectivePersona);
-      const behaviorBlock = formatBehaviorContext(effectiveBehavior);
-
-      const parts: string[] = [];
-      if (personaBlock) parts.push(personaBlock);
-      if (behaviorBlock) parts.push(behaviorBlock);
-
-      return parts.join('\n\n').trim();
     },
   });
 

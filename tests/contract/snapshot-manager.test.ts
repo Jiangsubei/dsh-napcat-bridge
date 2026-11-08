@@ -1,15 +1,17 @@
 /**
  * tests/contract/snapshot-manager.test.ts
- * 契约测试: 统一运行时动态快照与上下文注入管理器 (SnapshotManager Contract)
+ * 契约测试: 多通道独立运行时快照与上下文注入管理器 (SnapshotManager Contract)
  *
  * 验证规则:
  * 1. 契约 1: resolveQQSessionContext 具备严格 Fail-Closed 白名单校验与多源解析能力；
- * 2. 契约 2: SnapshotManager 统一安全门控 — Web UI 会话与空上下文中 100% 阻断，绝不泄露；
- * 3. 契约 3: SnapshotManager 在 QQ 会话下放行并正确透传 QQSessionContext；
- * 4. 契约 4: 单 Provider 异常时优雅降级隔离，绝不影响其他 Provider 和装配流程。
+ * 2. 契约 2: SnapshotManager 安全门控 — 非 QQ 会话 (Web UI / 空上下文 / 沙箱) 100% 阻断，0 条注入；
+ * 3. 契约 3: 单 Provider 异常时优雅降级隔离，绝不影响其他 Provider 和装配流程；
+ * 4. 契约 4: dispose 与 unregister 正确释放 Provider 与清理会话状态；
+ * 5. 契约 5: setupSnapshotHub 规范装配 6 大独立原子通道，排版严格遵循 ## 模块名 规范；
+ * 6. 契约 6: 多通道独立快照脏检查与增量注入契约（0-Token 命中、单通道增量、历史恢复）。
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   SnapshotManager,
   resolveQQSessionContext,
@@ -17,37 +19,28 @@ import {
   type SnapshotProvider,
 } from '../../src/prompt/snapshot.js';
 
-describe('契约测试: 统一运行时动态快照与上下文注入管理器 (SnapshotManager Contract)', () => {
-  let mockSystemPrompt: any;
-  let registeredContexts: Map<string, any>;
+describe('契约测试: 多通道独立运行时快照管理器 (SnapshotManager Contract)', () => {
   let mockCtx: any;
+  let preStepHandler: ((args: any, next: any) => Promise<any>) | undefined;
 
   beforeEach(() => {
-    registeredContexts = new Map();
-    mockSystemPrompt = {
-      context: vi.fn().mockImplementation((opts: any) => {
-        registeredContexts.set(opts.name, opts);
+    preStepHandler = undefined;
+    mockCtx = {
+      on: vi.fn().mockImplementation((event: string, handler: any) => {
+        if (event === 'agent/pre-step') {
+          preStepHandler = handler;
+        }
         return () => {
-          registeredContexts.delete(opts.name);
+          if (preStepHandler === handler) {
+            preStepHandler = undefined;
+          }
         };
       }),
     };
-
-    mockCtx = {
-      get: (name: string) => {
-        if (name === 'systemPrompt') return mockSystemPrompt;
-        return undefined;
-      },
-    };
-  });
-
-  afterEach(() => {
-    registeredContexts.clear();
   });
 
   describe('契约 1: resolveQQSessionContext Fail-Closed 判定与解析', () => {
     it('1.1 能从多种合法群聊格式中解析出 group peer', () => {
-      // agent.session.id
       const ctx1 = { agent: { session: { id: 'qq-group-1000000001-1' } } };
       const res1 = resolveQQSessionContext(ctx1);
       expect(res1).not.toBeNull();
@@ -55,13 +48,11 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
       expect(res1?.isGroup).toBe(true);
       expect(res1?.isPrivate).toBe(false);
 
-      // session.id
       const ctx2 = { session: { id: 'group_1000000002' } };
       const res2 = resolveQQSessionContext(ctx2);
       expect(res2?.peer).toBe('group_1000000002');
       expect(res2?.isGroup).toBe(true);
 
-      // 显式 peer 属性
       const ctx3 = { peer: 'qq-group-1000000003' };
       const res3 = resolveQQSessionContext(ctx3);
       expect(res3?.peer).toBe('group_1000000003');
@@ -69,7 +60,6 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
     });
 
     it('1.2 能从多种合法私聊格式中解析出 user peer 与 QQ 号', () => {
-      // qq-user-<id>
       const ctx1 = { agent: { sessionId: 'qq-user-1000000010' } };
       const res1 = resolveQQSessionContext(ctx1);
       expect(res1).not.toBeNull();
@@ -78,13 +68,11 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
       expect(res1?.isPrivate).toBe(true);
       expect(res1?.isGroup).toBe(false);
 
-      // user_<id>
       const ctx2 = { sessionId: 'user_1000000020' };
       const res2 = resolveQQSessionContext(ctx2);
       expect(res2?.peer).toBe('user_1000000020');
       expect(res2?.qq).toBe('1000000020');
 
-      // qq-<id>
       const ctx3 = { session: { id: 'qq-1000000030' } };
       const res3 = resolveQQSessionContext(ctx3);
       expect(res3?.peer).toBe('user_1000000030');
@@ -113,12 +101,11 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
   });
 
   describe('契约 2: SnapshotManager 统一安全门控 (Web UI / 非 QQ 0 泄露)', () => {
-    it('2.1 非 QQ 会话下，所有默认 qqOnly Provider 均返回空字符串，绝不泄露', () => {
+    it('2.1 非 QQ 会话下触发 pre-step，所有默认 qqOnly Provider 均不被调用且 0 条消息注入', async () => {
       const manager = new SnapshotManager(mockCtx);
 
       const provideSlang = vi.fn().mockReturnValue('# 社群黑话知识库内容');
       const provideFace = vi.fn().mockReturnValue('[本地表情库概览]');
-      const provideMemory = vi.fn().mockReturnValue('## 记忆');
 
       manager.registerProvider({
         name: 'napcat:slang',
@@ -130,61 +117,55 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
         order: 48,
         provide: provideFace,
       });
-      manager.registerProvider({
-        name: 'napcat:memory',
-        order: 40,
-        provide: provideMemory,
-      });
 
-      // 验证注册成功
-      expect(registeredContexts.has('napcat:slang')).toBe(true);
-      expect(registeredContexts.has('napcat:face_summary')).toBe(true);
-      expect(registeredContexts.has('napcat:memory')).toBe(true);
+      const webArgs = {
+        agent: { session: { id: 'web-session-42' } },
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Web 用户提问' }] }],
+      };
 
-      // Web 会话上下文
-      const webAssembleCtx = { session: { id: 'web-session-42' } };
+      const result = await manager.handlePreStep(webArgs, async () => ({
+        kind: 'enter',
+        messages: webArgs.messages,
+      }));
 
-      const slangText = registeredContexts.get('napcat:slang').text(webAssembleCtx);
-      const faceText = registeredContexts.get('napcat:face_summary').text(webAssembleCtx);
-      const memoryText = registeredContexts.get('napcat:memory').text(webAssembleCtx);
-
-      expect(slangText).toBe('');
-      expect(faceText).toBe('');
-      expect(memoryText).toBe('');
-
-      // 业务 provide 函数在 Web 会话下根本不被调用
+      // 完全原样返回，0 条注入
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].content[0].text).toBe('Web 用户提问');
       expect(provideSlang).not.toHaveBeenCalled();
       expect(provideFace).not.toHaveBeenCalled();
-      expect(provideMemory).not.toHaveBeenCalled();
 
-      // 空上下文（无参调用）同样 100% 阻断
-      expect(registeredContexts.get('napcat:slang').text()).toBe('');
-      expect(registeredContexts.get('napcat:face_summary').text({})).toBe('');
+      manager.dispose();
     });
 
-    it('2.2 QQ 会话下，正常放行并调用 provide 产生文本', () => {
+    it('2.2 QQ 会话下，正常放行并调用 provide 产生专属通道快照消息', async () => {
       const manager = new SnapshotManager(mockCtx);
 
-      const provideSlang = vi.fn().mockReturnValue('# 黑话词条：牢大');
+      const provideSlang = vi.fn().mockReturnValue('## 社群黑话\n- 词条A: 释义A');
       manager.registerProvider({
         name: 'napcat:slang',
         order: 45,
         provide: provideSlang,
       });
 
-      const qqAssembleCtx = { agent: { session: { id: 'qq-group-1000000001-1' } } };
-      const output = registeredContexts.get('napcat:slang').text(qqAssembleCtx);
+      const qqArgs = {
+        agent: { session: { id: 'qq-group-1000000001' } },
+        messages: [],
+      };
 
-      expect(output).toBe('# 黑话词条：牢大');
+      const result = await manager.handlePreStep(qqArgs, async () => ({ kind: 'enter', messages: [] }));
+
       expect(provideSlang).toHaveBeenCalledTimes(1);
-      const [sessionArg] = provideSlang.mock.calls[0];
-      expect(sessionArg.peer).toBe('group_1000000001');
-      expect(sessionArg.isGroup).toBe(true);
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].source.kind).toBe('napcat:slang');
+      expect(result.messages[0].source.form).toBe('snapshot');
+      expect(result.messages[0].source.sections[0].text).toContain('词条A');
+
+      manager.dispose();
     });
   });
 
   describe('契约 3: 单 Provider 异常优雅降级', () => {
-    it('3.1 当某 Provider 执行抛出异常时，捕获并返回空字符串，不影响其他 Provider', () => {
+    it('3.1 当某 Provider 执行抛出异常时，捕获并不阻断其他正常通道的注入', async () => {
       const manager = new SnapshotManager(mockCtx);
 
       const badProvider: SnapshotProvider = {
@@ -198,28 +179,29 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
       const goodProvider: SnapshotProvider = {
         name: 'napcat:slang',
         order: 45,
-        provide: () => '正常黑话内容',
+        provide: () => '## 社群黑话\n正常黑话内容',
       };
 
       manager.registerProvider(badProvider);
       manager.registerProvider(goodProvider);
 
-      const qqAssembleCtx = { session: { id: 'qq-user-1000000001' } };
+      const qqArgs = {
+        agent: { session: { id: 'qq-user-1000000001' } },
+        messages: [],
+      };
 
-      // 异常 Provider 静默降级为 ''
-      expect(() => {
-        const text = registeredContexts.get('napcat:face_summary').text(qqAssembleCtx);
-        expect(text).toBe('');
-      }).not.toThrow();
+      const result = await manager.handlePreStep(qqArgs, async () => ({ kind: 'enter', messages: [] }));
 
-      // 正常 Provider 正常输出
-      const goodText = registeredContexts.get('napcat:slang').text(qqAssembleCtx);
-      expect(goodText).toBe('正常黑话内容');
+      // 异常 Provider 静默跳过，正常 Provider 成功注入
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].source.kind).toBe('napcat:slang');
+
+      manager.dispose();
     });
   });
 
-  describe('契约 4: dispose 正确释放注册项', () => {
-    it('4.1 独立 unregister 与全量 dispose 正确注销动态上下文', () => {
+  describe('契约 4: dispose 正确释放注册项与清理状态', () => {
+    it('4.1 独立 unregister 与全量 dispose 正确注销通道与清理缓存', async () => {
       const manager = new SnapshotManager(mockCtx);
 
       const unregister = manager.registerProvider({
@@ -227,15 +209,15 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
         order: 45,
         provide: () => 'test',
       });
-      expect(registeredContexts.has('napcat:slang')).toBe(true);
+      expect(manager.getProvider('napcat:slang')).toBeDefined();
 
       unregister();
-      expect(registeredContexts.has('napcat:slang')).toBe(false);
+      expect(manager.getProvider('napcat:slang')).toBeUndefined();
 
       manager.registerProvider({
-        name: 'napcat:memory',
+        name: 'napcat:session_rules',
         order: 40,
-        provide: () => 'mem',
+        provide: () => 'rules',
       });
       manager.registerProvider({
         name: 'napcat:face_summary',
@@ -243,14 +225,21 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
         provide: () => 'face',
       });
 
-      expect(registeredContexts.size).toBe(2);
+      // 预先填充 retained
+      await manager.handlePreStep(
+        { agent: { session: { id: 'group_1000000001' } }, messages: [] },
+        async () => ({ kind: 'enter', messages: [] })
+      );
+      expect(manager.getRetained('group_1000000001', 'napcat:session_rules')).toBe('rules');
+
       manager.dispose();
-      expect(registeredContexts.size).toBe(0);
+      expect(manager.getProvider('napcat:session_rules')).toBeUndefined();
+      expect(manager.getRetained('group_1000000001', 'napcat:session_rules')).toBeUndefined();
     });
   });
 
-  describe('契约 5: setupSnapshotHub 组装各业务统一二级标题格式', () => {
-    it('5.1 注册的所有 Provider 输出均严格遵循 ## 模块名 规范，且表情包按情绪分组带 ID', () => {
+  describe('契约 5: setupSnapshotHub 装配 6 大独立原子通道规范', () => {
+    it('5.1 准确装配 6 个原子通道，且每个通道输出均遵循 ## 规范', () => {
       const mockDb: any = {
         getActiveFacesForContext: vi.fn().mockReturnValue({
           total: 2,
@@ -259,8 +248,7 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
             { id: 'face_2', mood: '调侃', tags: ['摊手'], enabled: true },
           ],
         }),
-        getFaceMoodSummary: vi.fn().mockReturnValue({ total: 2, moods: [] }),
-        getActiveUsers: vi.fn().mockReturnValue([]),
+        getActiveUsers: vi.fn().mockReturnValue([{ user_id: '1000000001', sender_name: '测试用户' }]),
       };
 
       const mockSlangStorage: any = {
@@ -268,7 +256,8 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
       };
 
       const mockMemoryStorage: any = {
-        getPromptSnapshotSync: vi.fn().mockReturnValue('### Session 记忆\n- 备忘条目'),
+        getSessionRulesSnapshotSync: vi.fn().mockReturnValue('### Session 约定\n- 约定条目'),
+        getUserProfilesSnapshotSync: vi.fn().mockReturnValue('### 测试用户 (1000000001)\n- 用户偏好'),
       };
 
       const hub = setupSnapshotHub({
@@ -282,31 +271,45 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
         getSlangEnabled: () => true,
       });
 
-      const qqCtx = { session: { id: 'qq-group-1000000001' } };
+      // 验证仅装配 6 个清晰的独立原子通道
+      expect(hub.getProvider('napcat:persona')).toBeDefined();
+      expect(hub.getProvider('napcat:behavior')).toBeDefined();
+      expect(hub.getProvider('napcat:session_rules')).toBeDefined();
+      expect(hub.getProvider('napcat:user_profiles')).toBeDefined();
+      expect(hub.getProvider('napcat:slang')).toBeDefined();
+      expect(hub.getProvider('napcat:face_summary')).toBeDefined();
 
-      // 1. 记忆与画像
-      const memText = registeredContexts.get('napcat:memory').text(qqCtx);
-      expect(memText).toContain('## 会话规则与用户画像 (Memory & Profiles)');
-      expect(memText).toContain('### Session 记忆');
+      // 验证彻底剔除了历史复合通道
+      expect(hub.getProvider('napcat:memory')).toBeUndefined();
+      expect(hub.getProvider('napcat:behavior_persona')).toBeUndefined();
 
-      // 2. 黑话
-      const slangText = registeredContexts.get('napcat:slang').text(qqCtx);
-      expect(slangText).toContain('## 社群黑话知识库 (Slang & Memes)');
-      expect(slangText).toContain('- **词条一**：解释一');
+      const qqSession = { peer: 'group_1000000001', qq: 'default', isGroup: true, isPrivate: false };
+      const assembleCtx = { session: { id: 'qq-group-1000000001' } };
 
-      // 3. 表情包全量注入
-      const faceText = registeredContexts.get('napcat:face_summary').text(qqCtx);
-      expect(faceText).toContain('## 本地表情包库存 (Sticker & Meme Library)');
-      expect(faceText).toContain('共 2 张可用表情包');
-      expect(faceText).toContain('### 开心 (1)');
-      expect(faceText).toContain('- face_1: 标签: 大笑');
-      expect(faceText).toContain('### 调侃 (1)');
-      expect(faceText).toContain('- face_2: 标签: 摊手');
-
-      // 4. 人格与行为准则
-      const pbText = registeredContexts.get('napcat:behavior_persona').text(qqCtx);
-      expect(pbText).toContain('## 人格设定 (Persona)\n\n自定义人格设定');
-      expect(pbText).toContain('## 行为准则 (Behavior Guidelines)\n\n自定义行为准则');
+      // 1. 人格
+      expect(hub.getProvider('napcat:persona')?.provide(qqSession, assembleCtx)).toContain(
+        '## 人格设定 (Persona)\n\n自定义人格设定'
+      );
+      // 2. 行为准则
+      expect(hub.getProvider('napcat:behavior')?.provide(qqSession, assembleCtx)).toContain(
+        '## 行为准则 (Behavior Guidelines)\n\n自定义行为准则'
+      );
+      // 3. 会话规则
+      expect(hub.getProvider('napcat:session_rules')?.provide(qqSession, assembleCtx)).toContain(
+        '## 会话规则与约定 (Session Rules & Conventions)'
+      );
+      // 4. 用户画像
+      expect(hub.getProvider('napcat:user_profiles')?.provide(qqSession, assembleCtx)).toContain(
+        '## 用户画像与群成员 (User Profiles & Members)'
+      );
+      // 5. 黑话
+      expect(hub.getProvider('napcat:slang')?.provide(qqSession, assembleCtx)).toContain(
+        '## 社群黑话知识库 (Slang & Memes)'
+      );
+      // 6. 表情包
+      expect(hub.getProvider('napcat:face_summary')?.provide(qqSession, assembleCtx)).toContain(
+        '## 本地表情包库存 (Sticker & Meme Library)'
+      );
 
       hub.dispose();
     });
@@ -326,12 +329,212 @@ describe('契约测试: 统一运行时动态快照与上下文注入管理器 (
         getFaceStoreMax: () => 250,
       });
 
-      const qqCtx = { session: { id: 'qq-group-1000000001' } };
-      registeredContexts.get('napcat:face_summary').text(qqCtx);
+      const qqSession = { peer: 'group_1000000001', qq: 'default', isGroup: true, isPrivate: false };
+      hub.getProvider('napcat:face_summary')?.provide(qqSession, {});
 
       expect(mockDb.getActiveFacesForContext).toHaveBeenCalledWith(250);
 
       hub.dispose();
+    });
+  });
+
+  describe('契约 6: 多通道独立快照脏检查与增量注入契约 (Multi-Channel Snapshot)', () => {
+    it('6.1 首次进入会话触发 pre-step，各通道独立生成带有 form: "snapshot" 的 UserMessage', async () => {
+      const manager = new SnapshotManager(mockCtx);
+
+      manager.registerProvider({
+        name: 'napcat:slang',
+        order: 45,
+        provide: () => '## 社群黑话\n- 词条A: 释义A',
+      });
+      manager.registerProvider({
+        name: 'napcat:face_summary',
+        order: 48,
+        provide: () => '## 本地表情包库存\n- face_1',
+      });
+
+      const sessionObj = { id: 'qq-group-1000000001' };
+      const preStepArgs = {
+        agent: { session: sessionObj },
+        messages: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
+      };
+
+      const result = await manager.handlePreStep(preStepArgs, async () => ({
+        kind: 'enter',
+        messages: preStepArgs.messages,
+      }));
+
+      expect(result.kind).toBe('enter');
+      // 原消息 1 条 + 2 个通道的独立快照
+      expect(result.messages.length).toBe(3);
+
+      const slangMsg = result.messages.find((m: any) => m.source?.kind === 'napcat:slang');
+      expect(slangMsg).toBeDefined();
+      expect(slangMsg.source.form).toBe('snapshot');
+      expect(slangMsg.source.sections[0].name).toBe('napcat:slang');
+      expect(slangMsg.source.sections[0].text).toContain('词条A');
+      expect(slangMsg.content[0].text).toContain('<system-reminder>');
+      expect(slangMsg.content[0].text).toContain('Current runtime context: napcat:slang');
+
+      const faceMsg = result.messages.find((m: any) => m.source?.kind === 'napcat:face_summary');
+      expect(faceMsg).toBeDefined();
+      expect(faceMsg.source.form).toBe('snapshot');
+      expect(faceMsg.source.sections[0].name).toBe('napcat:face_summary');
+      expect(faceMsg.source.sections[0].text).toContain('face_1');
+
+      manager.dispose();
+    });
+
+    it('6.2 第二轮对话中各通道内容未发生变化时，产出 0 条注入消息，杜绝 Token 浪费', async () => {
+      const manager = new SnapshotManager(mockCtx);
+
+      manager.registerProvider({
+        name: 'napcat:slang',
+        order: 45,
+        provide: () => '## 社群黑话\n- 词条A: 释义A',
+      });
+      manager.registerProvider({
+        name: 'napcat:face_summary',
+        order: 48,
+        provide: () => '## 本地表情包库存\n- face_1',
+      });
+
+      const sessionObj = { id: 'qq-group-1000000001' };
+      const preStepArgs1 = {
+        agent: { session: sessionObj },
+        messages: [],
+      };
+
+      // 第一轮注入
+      await manager.handlePreStep(preStepArgs1, async () => ({ kind: 'enter', messages: [] }));
+
+      // 第二轮同样的内容触发
+      const preStepArgs2 = {
+        agent: { session: sessionObj },
+        messages: [{ role: 'user', content: [{ type: 'text', text: '第二轮发言' }] }],
+      };
+      const result2 = await manager.handlePreStep(preStepArgs2, async () => ({
+        kind: 'enter',
+        messages: preStepArgs2.messages,
+      }));
+
+      // 仅包含原本的消息，未追加任何快照！
+      expect(result2.messages.length).toBe(1);
+      expect(result2.messages[0].content[0].text).toBe('第二轮发言');
+
+      manager.dispose();
+    });
+
+    it('6.3 仅某一个通道（如黑话）变动时，仅为该通道生成新快照，表情包等大块通道绝不重发', async () => {
+      const manager = new SnapshotManager(mockCtx);
+
+      let slangContent = '## 社群黑话\n- 词条1: 释义1';
+      manager.registerProvider({
+        name: 'napcat:slang',
+        order: 45,
+        provide: () => slangContent,
+      });
+      manager.registerProvider({
+        name: 'napcat:face_summary',
+        order: 48,
+        provide: () => '## 本地表情包库存\n- face_1\n- face_2',
+      });
+
+      const sessionObj = { id: 'qq-group-1000000001' };
+
+      // 第一轮
+      await manager.handlePreStep(
+        { agent: { session: sessionObj }, messages: [] },
+        async () => ({ kind: 'enter', messages: [] })
+      );
+
+      // 黑话发生更新，而表情包库存未变
+      slangContent = '## 社群黑话\n- 词条1: 释义1\n- 词条2: 新增词条';
+
+      const result = await manager.handlePreStep(
+        { agent: { session: sessionObj }, messages: [] },
+        async () => ({ kind: 'enter', messages: [] })
+      );
+
+      // 仅注入 1 条消息，且正是 napcat:slang！
+      expect(result.messages.length).toBe(1);
+      const injected = result.messages[0];
+      expect(injected.source.kind).toBe('napcat:slang');
+      expect(injected.source.sections[0].text).toContain('词条2: 新增词条');
+
+      // 验证表情包通道绝对没有被触发重发
+      expect(result.messages.some((m: any) => m.source?.kind === 'napcat:face_summary')).toBe(false);
+
+      manager.dispose();
+    });
+
+    it('6.4 非 QQ 会话（如 Web UI）触发 pre-step，严格 Fail-Closed 阻断，0 条注入', async () => {
+      const manager = new SnapshotManager(mockCtx);
+
+      manager.registerProvider({
+        name: 'napcat:slang',
+        order: 45,
+        provide: () => '私密社群黑话',
+      });
+      manager.registerProvider({
+        name: 'napcat:face_summary',
+        order: 48,
+        provide: () => '私密表情包库存',
+      });
+
+      const webSessionObj = { id: 'web-session-999' };
+      const preStepArgs = {
+        agent: { session: webSessionObj },
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Web端提问' }] }],
+      };
+
+      const result = await manager.handlePreStep(preStepArgs, async () => ({
+        kind: 'enter',
+        messages: preStepArgs.messages,
+      }));
+
+      // 完全原样返回，没有任何 QQ 上下文泄露注入
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].content[0].text).toBe('Web端提问');
+
+      manager.dispose();
+    });
+
+    it('6.5 会话重连与历史恢复：当会话历史中已存在某通道相同快照时，不重复注入', async () => {
+      const manager = new SnapshotManager(mockCtx);
+
+      const existingSlang = '## 社群黑话\n- 历史已学黑话';
+      manager.registerProvider({
+        name: 'napcat:slang',
+        order: 45,
+        provide: () => existingSlang,
+      });
+
+      const mockSession = {
+        id: 'qq-group-1000000001',
+        snapshotEvents: () => [
+          {
+            type: 'user/message',
+            data: {
+              source: {
+                kind: 'napcat:slang',
+                form: 'snapshot',
+                sections: [{ name: 'napcat:slang', text: existingSlang }],
+              },
+            },
+          },
+        ],
+      };
+
+      const result = await manager.handlePreStep(
+        { agent: { session: mockSession }, messages: [] },
+        async () => ({ kind: 'enter', messages: [] })
+      );
+
+      // 成功恢复状态，不再重复注入
+      expect(result.messages.length).toBe(0);
+
+      manager.dispose();
     });
   });
 });
