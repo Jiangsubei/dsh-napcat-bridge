@@ -38,7 +38,8 @@ import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound
 import { describeMessage, toMessageMediaFields } from './attachment/classify.js';
 import { serializeAttachments } from './attachment/store.js';
 import { PerPeerSerialSender } from './outbound/queue.js';
-import { NapCatQuestionProvider, NapCatApprovalResponder, registerNapCatQuestionChannel } from './approval/responder.js';
+import { NapCatQuestionProvider, registerNapCatQuestionChannel } from './approval/question-provider.js';
+import { NapCatApprovalResponder } from './approval/tool-approval.js';
 import { TurnInitiatorTracker } from './approval/turn-initiator.js';
 import { downloadPrivateFile } from './tools/private-file.js';
 import { isSlashCommand, handleSlashCommand } from './commands/index.js';
