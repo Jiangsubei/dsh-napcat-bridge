@@ -5,7 +5,7 @@
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { GetGroupInfoParams, GetGroupInfoResult } from '../../types/index.js';
 import type { ToolExecutionContext } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 
 export const GET_GROUP_INFO_DESCRIPTION =
   '查询指定 QQ 群的基础信息与元数据（如群名称、群备注、群人数、人数上限、群公告摘要及建群时间）。用于核实群规模与基本设置。';

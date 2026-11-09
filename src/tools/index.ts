@@ -12,7 +12,7 @@ import { DEFAULT_FACE_STORE_DIR } from '../constants/index.js';
 
 // 1. 公共基础设施
 export * from './common/context.js';
-export * from './common/lossless-json.js';
+export * from '../utils/lossless-json.js';
 export * from './pagination.js';
 export { normalizePeer } from './common/context.js';
 

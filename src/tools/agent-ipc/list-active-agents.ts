@@ -9,7 +9,7 @@ import type {
   ActiveAgentInfo,
 } from '../../types/index.js';
 import type { ToolExecutionContext } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 import {
   buildOffsetMessage,
   normalizeLimit,

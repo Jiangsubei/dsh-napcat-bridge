@@ -5,7 +5,7 @@
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { GetUserProfileParams, GetUserProfileResult } from '../../types/index.js';
 import type { ToolExecutionContext } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 
 export const GET_USER_PROFILE_DESCRIPTION =
   '查询任意指定 QQ 用户的公开资料卡信息（好友与非好友均可查询）。返回昵称、备注、性别、年龄、QQ 等级、个性签名、QID 及注册时间戳等字段。用于了解陌生人身份或查询联系人资料。';

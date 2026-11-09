@@ -5,7 +5,7 @@
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { FriendItem, GetFriendListParams, GetFriendListResult } from '../../types/index.js';
 import type { ToolExecutionContext } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 import {
   buildOffsetMessage,
   normalizeLimit,

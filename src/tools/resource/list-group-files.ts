@@ -11,7 +11,7 @@ import {
   resolveToolContext,
   normalizePeer,
 } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 
 export type { ListGroupFilesParams, ListGroupFilesResult };
 

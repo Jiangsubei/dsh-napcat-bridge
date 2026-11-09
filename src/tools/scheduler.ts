@@ -4,6 +4,7 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { toLosslessJson } from '../utils/lossless-json.js';
 import type { TaskScheduler } from '../scheduler/index.js';
 import type {
   ScheduleTaskParams,
@@ -89,7 +90,7 @@ export function createScheduleTaskTool(contextGetter: () => SchedulerToolContext
     execute: async (args: ScheduleTaskParams, exec?: any): Promise<ScheduleTaskResult> => {
       const ctx = contextGetter();
       if (!ctx.scheduler) {
-        return { success: false, error: '调度引擎未初始化。' };
+        return toLosslessJson({ success: false, error: '调度引擎未初始化。' });
       }
       let peer = ctx.peer;
       if (!peer && exec) {
@@ -97,20 +98,20 @@ export function createScheduleTaskTool(contextGetter: () => SchedulerToolContext
         if (session?.id) peer = normalizePeer(session.id);
       }
       if (!peer) {
-        return { success: false, error: '缺少当前会话 peer 上下文，无法创建定时任务。' };
+        return toLosslessJson({ success: false, error: '缺少当前会话 peer 上下文，无法创建定时任务。' });
       }
 
       try {
-        return await ctx.scheduler.scheduleTask({
+        return toLosslessJson(await ctx.scheduler.scheduleTask({
           ...args,
           peer,
           creator: ctx.userId || 'self',
-        });
+        }));
       } catch (err: any) {
-        return {
+        return toLosslessJson({
           success: false,
           error: err?.message || String(err),
-        };
+        });
       }
     },
   });
@@ -193,7 +194,7 @@ export function createManageScheduledTasksTool(contextGetter: () => SchedulerToo
     execute: async (args: ManageScheduledTasksParams, exec?: any): Promise<ManageScheduledTasksResult> => {
       const ctx = contextGetter();
       if (!ctx.scheduler) {
-        return { success: false, action: args.action, error: '调度引擎未初始化。' };
+        return toLosslessJson({ success: false, action: args.action, error: '调度引擎未初始化。' });
       }
       let peer = ctx.peer;
       if (!peer && exec) {
@@ -201,20 +202,20 @@ export function createManageScheduledTasksTool(contextGetter: () => SchedulerToo
         if (session?.id) peer = normalizePeer(session.id);
       }
       if (!peer) {
-        return { success: false, action: args.action, error: '缺少当前会话 peer 上下文。' };
+        return toLosslessJson({ success: false, action: args.action, error: '缺少当前会话 peer 上下文。' });
       }
 
       try {
-        return await ctx.scheduler.manageTasks({
+        return toLosslessJson(await ctx.scheduler.manageTasks({
           ...args,
           peer,
-        });
+        }));
       } catch (err: any) {
-        return {
+        return toLosslessJson({
           success: false,
           action: args.action,
           error: err?.message || String(err),
-        };
+        });
       }
     },
   });

@@ -8,7 +8,7 @@ import {
   type ContextSource,
   resolveToolContext,
 } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 import {
   type QzoneToolContext,
   invokeGatewayAction,

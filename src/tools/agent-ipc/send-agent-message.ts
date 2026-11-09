@@ -5,7 +5,7 @@
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { SendAgentMessageParams, SendAgentMessageResult } from '../../types/index.js';
 import type { ToolExecutionContext } from '../common/context.js';
-import { toLosslessJson } from '../common/lossless-json.js';
+import { toLosslessJson } from '../../utils/lossless-json.js';
 import { parseSessionId } from '../../gateway/session/id-resolver.js';
 import { withInvocationSession } from './common.js';
 
