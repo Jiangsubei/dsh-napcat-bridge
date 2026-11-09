@@ -1,40 +1,17 @@
 /**
- * dsh-napcat-bridge: Memory Agent 工具集
- * 实现 read_memory, create_memory, edit_memory 及其 DSH defineTool 声明与上下文绑定。
+ * dsh-napcat-bridge: Memory Agent 工具集通用辅助与业务类
  */
 
 import type { Context } from '@deepseek-ai/cordis';
-import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools';
-import type { MemoryStorage } from './storage.js';
-import type { MemoryOperationResult, MemoryType } from './types.js';
+import type { MemoryStorage } from '../../memory/storage.js';
+import type { MemoryOperationResult } from '../../memory/types.js';
 import {
   DEFAULT_USER_PROFILE_BUDGET_CHARS,
   DEFAULT_SESSION_MEMORY_BUDGET_CHARS,
-} from '../constants/index.js';
-
-export interface ReadMemoryArgs {
-  type?: MemoryType;
-  user_id?: string;
-  qq?: string;
-  peer?: string;
-}
-
-export interface CreateMemoryArgs {
-  type: MemoryType;
-  content: string;
-  user_id?: string;
-  qq?: string;
-  peer?: string;
-}
-
-export interface EditMemoryArgs {
-  type: MemoryType;
-  old_string: string;
-  new_string?: string;
-  user_id?: string;
-  qq?: string;
-  peer?: string;
-}
+} from '../../constants/index.js';
+import type { ReadMemoryArgs } from './read-memory.js';
+import type { CreateMemoryArgs } from './create-memory.js';
+import type { EditMemoryArgs } from './edit-memory.js';
 
 /**
  * 从 SessionId 或 Context 中解析 Peer (group_xxx / user_xxx) 与 QQ 号
@@ -355,154 +332,4 @@ export class MemoryTools {
       message,
     };
   }
-}
-
-/**
- * 创建 DSH ToolDefinition 数组
- */
-export function createMemoryToolDefinitions(tools: MemoryTools): ToolDefinition[] {
-  return [
-    defineTool({
-      name: 'read_memory',
-      description:
-        '读取当前会话（type=\'session\'）的规则与文化记忆，或指定用户（type=\'user\'）的个人画像。适用于在日常交流或协助任务中，主动查阅以掌握用户深层偏好、习惯风格或确认群专属约定与互动氛围；当上下文快照提示画像未完全展示时按需查阅，或作为调用 edit_memory 精简修改前获取最新内容与唯一 old_string 的前置工具。日常对话若上下文中已有清晰背景则无需频繁调用。',
-      parameters: {
-        type: {
-          type: 'string',
-          enum: ['session', 'user'],
-          required: true,
-          description: "记忆类型：'session' 表示群聊/私聊规则与文化；'user' 表示个人用户画像。",
-        },
-        peer: {
-          type: 'string',
-          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
-        },
-        user_id: {
-          type: 'string',
-          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
-        },
-      },
-      output: {
-        schema: { type: 'json' },
-        render: (_args, value: any) => [
-          {
-            type: 'text',
-            text: value?.content?.trim()
-              ? `${value.message || '读取成功'}\n\n${value.content}`
-              : (value?.message || '记忆内容为空（当前无内容）'),
-          },
-        ],
-      },
-      async execute(args: any, exec) {
-        const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
-          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
-        }
-        return tools.readMemory({
-          type: args.type || 'session',
-          user_id: args.user_id || resolved.qq,
-          peer: args.peer || resolved.peer,
-        }) as any;
-      },
-    }),
-    defineTool({
-      name: 'create_memory',
-      description:
-        '首次创建跨场景通用的个人偏好画像（type=\'user\'），或当前会话专属的规则与文化（type=\'session\'）。适用于在交流或日常闲聊中发现用户确定性事实与长期偏好（如工作风格、技术栈习惯、人设与称呼偏好），或捕捉到群聊长期约定、群规与专属互动氛围时主动建立档案；亦在用户明确要求记住设定时调用。网络梗、词汇代称与社群黑话请使用专有黑话工具（record_slang），勿存入记忆；目标记忆已存在时勿重复创建，应使用 edit_memory 进行更新融合。严禁记录单次排查流水账、命令参数与操作手册、一次性跑分、临时报错、路过客套寒暄、单次复读摸鱼，以及因临时环境问题得出的负面断言。内容须保持紧凑高信号的单行陈述（如 "- 偏好：xxx" 或 "- 互动约定：xxx"），避免长篇叙事。',
-      parameters: {
-        type: {
-          type: 'string',
-          enum: ['session', 'user'],
-          required: true,
-          description: "记忆类型：'user' 表示创建用户跨场景稳定画像（群聊/私聊同一份）；'session' 表示创建当前会话专属规则与文化。",
-        },
-        content: {
-          type: 'string',
-          required: true,
-          description: '要写入的完整记忆内容。必须为简练紧凑的 Markdown 条目（建议单条 <80 字），严禁流水账叙事。',
-        },
-        peer: {
-          type: 'string',
-          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
-        },
-        user_id: {
-          type: 'string',
-          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
-        },
-      },
-      output: {
-        schema: { type: 'json' },
-        render: (_args, value: any) => [
-          {
-            type: 'text',
-            text: value.message || `成功创建记忆 (${value.target})`,
-          },
-        ],
-      },
-      async execute(args: any, exec) {
-        const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
-          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
-        }
-        return tools.createMemory({
-          type: args.type || 'session',
-          content: args.content,
-          user_id: args.user_id || resolved.qq,
-          peer: args.peer || resolved.peer,
-        }) as any;
-      },
-    }),
-    defineTool({
-      name: 'edit_memory',
-      description:
-        '定向修改、更新、合并或精简已有的长期记忆条目。通过唯一匹配 old_string 替换为 new_string（若 new_string 省略或为空字符串则直接删除匹配片段）。适用于在交流与闲聊中捕捉到用户习惯演化、新事实补充时主动更新已有记忆，或在条目冗余时主动精简合并、删减失效过时的琐碎内容，使记忆持续保持高信号；亦在用户明确要求纠正、变更或删除设定时调用。维护词条级黑话请使用 manage_slang；切勿记录临时排查流水账或偶然分歧。内容保持单行精简陈述，调用前可结合 read_memory 确保 old_string 文本唯一准确。',
-      parameters: {
-        type: {
-          type: 'string',
-          enum: ['session', 'user'],
-          required: true,
-          description: "记忆类型：'user' 表示修改用户跨场景稳定画像；'session' 表示修改当前会话专属规则。",
-        },
-        old_string: {
-          type: 'string',
-          required: true,
-          description: '待替换或删除的既有内容片段，必须在目标文件中唯一出现。',
-        },
-        new_string: {
-          type: 'string',
-          description: '替换后的新内容（保持精炼单行）；省略或为空字符串则直接删除匹配的 old_string 片段。',
-        },
-        peer: {
-          type: 'string',
-          description: "目标会话 Peer（如 'group_xxx' 或 'user_xxx'，留空自动绑定当前会话）。",
-        },
-        user_id: {
-          type: 'string',
-          description: '目标用户的 QQ 号（仅当 type="user" 时有效，留空自动绑定当前对话者）。',
-        },
-      },
-      output: {
-        schema: { type: 'json' },
-        render: (_args, value: any) => [
-          {
-            type: 'text',
-            text: value.message || `成功编辑记忆 (${value.target})：${value.preview}`,
-          },
-        ],
-      },
-      async execute(args: any, exec) {
-        const resolved = resolveContextPeerAndQQ(exec);
-        if (resolved.peer === 'default' && !args.peer && !args.user_id) {
-          return { success: false, message: '请显式传入 peer 参数（如 peer="group_xxx" 或 peer="user_xxx"）' };
-        }
-        return tools.editMemory({
-          type: args.type || 'session',
-          old_string: args.old_string,
-          new_string: args.new_string,
-          user_id: args.user_id || resolved.qq,
-          peer: args.peer || resolved.peer,
-        }) as any;
-      },
-    }),
-  ];
 }

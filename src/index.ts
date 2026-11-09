@@ -32,7 +32,7 @@ import { FriendNoticeTracker } from './gateway/friend-tracker.js';
 import { ProactiveManager } from './gateway/proactive.js';
 import { registerAgentTools, type AgentToolsOptions } from './tools/index.js';
 import { setGlobalBridgeToolsProvider, type NapCatBridgeToolsProvider } from './tools/plugin.js';
-import { createMemoryToolDefinitions } from './memory/tools.js';
+import { createMemoryToolDefinitions } from './tools/index.js';
 import { OutboundStreamBridge } from './outbound/stream.js';
 import { recordOutboundSelfMessage, enrichOutboundMediaRecord } from './outbound/self-record.js';
 import { describeMessage, toMessageMediaFields } from './attachment/classify.js';

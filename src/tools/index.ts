@@ -28,7 +28,9 @@ export * from './file-source.js';
 export * from './private-file.js';
 export * from './group-file-resolve.js';
 export * from './scheduler.js';
-export { createSlangToolDefinitions, SlangStorage } from '../slang/index.js';
+export * from './memory/index.js';
+export * from './slang/index.js';
+export { SlangStorage } from '../slang/index.js';
 
 // 3. 内部装配依赖
 import {
@@ -62,10 +64,8 @@ import {
   createScheduleTaskTool,
   createManageScheduledTasksTool,
 } from './scheduler.js';
-import {
-  createSlangToolDefinitions,
-  SlangStorage,
-} from '../slang/index.js';
+import { createSlangToolDefinitions } from './slang/index.js';
+import { SlangStorage } from '../slang/index.js';
 import {
   createReadQzoneFeedsTool,
   createPublishQzoneFeedTool,

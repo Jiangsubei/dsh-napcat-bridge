@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { MessageDatabase } from '../storage/database.js';
 import type { SessionManager } from '../gateway/session.js';
 import { MemoryStorage } from './storage.js';
-import { MemoryTools, createMemoryToolDefinitions } from './tools.js';
+import { MemoryTools, createMemoryToolDefinitions } from '../tools/memory/index.js';
 import {
   SnapshotManager,
   formatSessionRulesContext,
@@ -23,7 +23,7 @@ import { resolveDshPath } from '../utils/path.js';
 
 export * from './types.js';
 export * from './storage.js';
-export * from './tools.js';
+export * from '../tools/memory/index.js';
 
 export interface MemoryBudgetOptions {
   /** 群聊注入时所有活跃用户画像合计的总预算 */

@@ -6,7 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { SlangStorage } from './storage.js';
-import { createSlangToolDefinitions } from './tools.js';
+import { createSlangToolDefinitions } from '../tools/slang/index.js';
 import {
   DEFAULT_SLANG_MAX_ENTRIES,
   DEFAULT_SLANG_EVICT_POLICY,
@@ -19,7 +19,7 @@ import { migrateSlangStorage } from '../storage/slang-migration.js';
 import { SnapshotManager, formatSlangContext } from '../prompt/snapshot.js';
 
 export * from './storage.js';
-export * from './tools.js';
+export * from '../tools/slang/index.js';
 
 export interface SlangServiceOptions {
   db?: MessageDatabase;
