@@ -13,7 +13,7 @@ import {
   MemoryTools,
   createMemoryToolDefinitions,
   resolveContextPeerAndQQ,
-} from '../../src/memory/tools.js';
+} from '../../src/tools/memory/index.js';
 
 describe('契约测试: EN-003 Memory Agent 工具 (read_memory, create_memory, edit_memory)', () => {
   let tmpDir: string;

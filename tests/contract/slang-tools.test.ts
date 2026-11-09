@@ -9,7 +9,7 @@ import {
   querySlang,
   recordSlang,
   manageSlang,
-} from '../../src/slang/tools.js';
+} from '../../src/tools/slang/index.js';
 
 describe('Slang Tools Contract Tests', () => {
   let tmpDir: string;
