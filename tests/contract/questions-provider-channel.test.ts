@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis';
 import {
   NapCatQuestionProvider,
   registerNapCatQuestionChannel,
-} from '../../src/approval/responder.js';
+} from '../../src/approval/question-provider.js';
 
 /**
  * 契约测试: TD-001 提问 provider 级联路由接入（DSH 0.1.2-rc.1 官方 user-questions/request waterfall 机制）

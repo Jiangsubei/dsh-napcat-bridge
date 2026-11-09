@@ -21,7 +21,7 @@ import {
   createListActiveAgentsTool,
   createCreateTargetAgentTool,
   createSendAgentMessageTool,
-} from '../../src/tools/agent-ipc.js';
+} from '../../src/tools/agent-ipc/index.js';
 import { bootDshNapcatBridge } from '../../src/boot.js';
 
 /** 递归检查对象是否包含 undefined 字段 (DSH Lossless JSON 契约) */

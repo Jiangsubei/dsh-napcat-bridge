@@ -4,7 +4,7 @@ import {
   registerNapCatQuestionChannel,
   NapCatQuestionProvider,
   NapCatApprovalResponder,
-} from '../../src/approval/responder.js';
+} from '../../src/approval/index.js';
 import { registerConfigRoute } from '../../src/server/routes.js';
 import * as migrateModule from '../../src/config/migrate.js';
 import * as NapCatBridgePlugin from '../../src/index.js';

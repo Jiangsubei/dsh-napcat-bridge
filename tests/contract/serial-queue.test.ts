@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PerPeerSerialSender } from '../../src/outbound/queue.js';
-import { NapCatQuestionProvider, NapCatApprovalResponder } from '../../src/approval/responder.js';
+import { NapCatQuestionProvider } from '../../src/approval/question-provider.js';
+import { NapCatApprovalResponder } from '../../src/approval/tool-approval.js';
 
 describe('契约测试: 共享 per-peer 串行发送器保序 (Spec §7.3 / P-02, A-3)', () => {
   const PEER = 'group_3000000001';

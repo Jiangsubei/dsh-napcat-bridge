@@ -5,9 +5,9 @@ import { promises as fsp } from 'node:fs';
 import { bootDshNapcatBridge, type BootedDsh } from '../../src/boot.js';
 import {
   NapCatQuestionProvider,
-  NapCatApprovalResponder,
   registerNapCatQuestionChannel,
-} from '../../src/approval/responder.js';
+} from '../../src/approval/question-provider.js';
+import { NapCatApprovalResponder } from '../../src/approval/tool-approval.js';
 
 describe('契约测试: 提问与审批官方 Provider 状态机协同 (Questions & Approval Contract)', () => {
   let tmpHome: string;

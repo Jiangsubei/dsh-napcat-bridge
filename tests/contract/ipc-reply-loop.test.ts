@@ -15,7 +15,7 @@ import { formatWakeupPrompt } from '../../src/gateway/session/id-resolver.js';
 import {
   SEND_AGENT_MESSAGE_DESCRIPTION,
   CREATE_TARGET_AGENT_DESCRIPTION,
-} from '../../src/tools/agent-ipc.js';
+} from '../../src/tools/agent-ipc/index.js';
 import type { WakeupPayload } from '../../src/types/index.js';
 
 describe('契约测试: 内部协作回执即止', () => {

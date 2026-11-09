@@ -23,7 +23,7 @@ import {
   createGetGroupMemberInfoTool,
   groupMemberCache,
   type GroupMemberRawItem,
-} from '../../src/tools/member-info.js';
+} from '../../src/tools/contact/group-member-info.js';
 import { bootDshNapcatBridge } from '../../src/boot.js';
 
 function noopLogger(): any {

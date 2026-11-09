@@ -16,7 +16,7 @@ import {
   collectFace,
   registerAgentTools,
 } from '../../src/tools/index.js';
-import { manageFaces } from '../../src/tools/manage-faces.js';
+import { manageFaces } from '../../src/tools/face/manage-faces.js';
 import type { FaceRecord } from '../../src/types/index.js';
 
 describe('契约测试: Agent 表情工具集 (Face Tools Contract)', () => {

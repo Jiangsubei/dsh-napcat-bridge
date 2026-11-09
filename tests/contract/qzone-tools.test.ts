@@ -26,7 +26,7 @@ import {
   deleteQzoneFeed,
   QzoneRateLimiter,
   isRealUserFeed,
-} from '../../src/tools/qzone.js';
+} from '../../src/tools/qzone/index.js';
 import type {
   ReadQzoneFeedsParams,
   PublishQzoneFeedParams,

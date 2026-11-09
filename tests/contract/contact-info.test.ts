@@ -29,9 +29,9 @@ import {
   createGetUserProfileTool,
   createGetGroupInfoTool,
   createGetGroupNoticeTool,
-} from '../../src/tools/contact-info.js';
+} from '../../src/tools/contact/index.js';
 import { bootDshNapcatBridge } from '../../src/boot.js';
-import { queryGroupMemberInfo } from '../../src/tools/member-info.js';
+import { queryGroupMemberInfo } from '../../src/tools/contact/group-member-info.js';
 function noopLogger(): any {
   return {
     info: () => {},

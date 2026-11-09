@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NapCatQuestionProvider } from '../../src/approval/responder.js';
+import { NapCatQuestionProvider } from '../../src/approval/question-provider.js';
 
 /**
  * 契约测试: 串行多题问答状态机 + 卡片分场景展示 + 回复解析 (Ask Serial Contract)
