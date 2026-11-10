@@ -175,6 +175,34 @@ describe('契约 1: send_qq_message 工具回归与会话隔离契约', () => {
       '若要发送的内容较长，或包含多个不同要点、转折与独立意思，可以拆分成多条简短消息，多次调用本工具分开发送。'
     );
   });
+
+  it('1.7 send_qq_message text 参数描述包含禁止 XML/HTML 标签与闭合符的负面约束', async () => {
+    const ctx = booted.ctx;
+    const presetsSvc: any = (ctx as any).agentPresets || ctx.get?.('agentPresets');
+    const qqWs = path.join(tmpHome, 'qq-ws-text-desc');
+    await fsp.mkdir(qqWs, { recursive: true });
+
+    const qqGroupHandle = await ctx.agents.create({
+      sessionId: 'qq-group-8888',
+      agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      meta: { cwd: qqWs },
+      setup: async (agentCtx: any) => {
+        if (presetsSvc?.mount) {
+          await presetsSvc.mount(agentCtx, 'qq-session');
+        } else {
+          (ctx as any).napcatBridgeTools?.registerTools?.(agentCtx);
+        }
+      },
+    });
+    const qqGroupAgent = qqGroupHandle.agent || qqGroupHandle;
+    const asmGroup = await ctx.systemPrompt.assemble({ scope: qqGroupAgent, agent: qqGroupAgent } as any);
+    const sendTool = (asmGroup.tools as any[]).find((t) => t.name === 'send_qq_message');
+    expect(sendTool).toBeDefined();
+    const textDesc = sendTool.parameters?.properties?.text?.description;
+    expect(typeof textDesc).toBe('string');
+    expect(textDesc).toContain('直接填写展示给用户的原始文本');
+    expect(textDesc).toContain('禁止附加任何 XML/HTML 标签、标签闭合符或外层包裹标记');
+  });
 });
 
 describe('契约 2: 文本分段工具函数 (splitMessageText)', () => {

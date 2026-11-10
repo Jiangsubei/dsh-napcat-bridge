@@ -178,7 +178,8 @@ export function createSendQqMessageTool(context?: ContextSource): ToolDefinition
       text: {
         type: 'string',
         required: true,
-        description: '要发送给用户的纯文本内容。',
+        description:
+          '要发送给用户的纯文本聊天正文。直接填写展示给用户的原始文本，禁止附加任何 XML/HTML 标签、标签闭合符或外层包裹标记。',
       },
       reply_to: {
         oneOf: [{ type: 'number' }, { type: 'string' }],
