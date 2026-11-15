@@ -40,7 +40,7 @@ export async function handleModelCommand(
 
   const curSel =
     context.sessionManager?.getModelSelection(context.session.id) ||
-    (agent as any)?.modelSelection?.current;
+    (agent as any)?.model?.current?.();
   const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
   const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
   const curEffort = curSel?.reasoningEffort;
@@ -224,22 +224,27 @@ export async function handleModelCommand(
 
   try {
     if (isGlobal) {
+      // 全局默认已在 setNapcatDefaultModel 内同步到所有 live QQ Agent；
+      // 离线会话在下次 resume 时按该默认选择生效，不再逐个 resume 历史会话。
       context.sessionManager?.setNapcatDefaultModel(
         targetProvider,
         targetModel,
         targetEffort
       );
 
-      const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
-      for (const sid of allSids) {
-        try {
-          await safeSyncApiProxy(sid, targetProvider, targetModel, targetEffort);
-        } catch (syncErr: any) {
-          context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
-            `[Command] 全局切换模型同步宿主会话 ${sid} 失败 (已跳过离线/失效会话):`,
-            syncErr?.message || syncErr
-          );
-        }
+      // 仅对当前 live 会话同步一次宿主侧选择（避免遍历全部历史会话触发 resume）
+      try {
+        await safeSyncApiProxy(
+          context.session.id,
+          targetProvider,
+          targetModel,
+          targetEffort
+        );
+      } catch (syncErr: any) {
+        context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+          '[Command] 全局切换模型同步当前宿主会话失败 (已跳过):',
+          syncErr?.message || syncErr
+        );
       }
 
       return {
@@ -248,7 +253,7 @@ export async function handleModelCommand(
         reply: [
           `QQ全局模型已切换为：${targetProvider} / ${targetModel}`,
           effortDesc ? effortDesc.trim() : '',
-          '范围：已同步切换所有QQ会话，新建会话也将默认使用此模型。',
+          '范围：已切换所有活跃QQ会话；离线会话将在下次恢复时使用该模型，新建会话也将默认使用。',
         ].filter(Boolean).join('\n'),
       };
     } else {
@@ -258,12 +263,6 @@ export async function handleModelCommand(
         targetModel,
         targetEffort
       );
-
-      if (agent && (agent as any).modelSelection?.current) {
-        (agent as any).modelSelection.current.provider = targetProvider;
-        (agent as any).modelSelection.current.model = targetModel;
-        (agent as any).modelSelection.current.reasoningEffort = targetEffort;
-      }
 
       await safeSyncApiProxy(
         context.session.id,

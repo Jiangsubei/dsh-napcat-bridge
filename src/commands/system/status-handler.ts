@@ -26,7 +26,7 @@ export async function handleStatusCommand(
 
   const agents = safeGetService(context.ctx, 'agents');
   const agent = agents?.get?.(context.session.id);
-  const curSel = sm?.getModelSelection(context.session.id) || (agent as any)?.modelSelection?.current;
+  const curSel = sm?.getModelSelection(context.session.id) || (agent as any)?.model?.current?.();
   const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
   const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
   const curEffort = curSel?.reasoningEffort;

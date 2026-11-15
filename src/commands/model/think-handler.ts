@@ -41,7 +41,7 @@ export async function handleThinkCommand(
   const agent = agents?.get(context.session.id);
   const curSel =
     context.sessionManager?.getModelSelection(context.session.id) ||
-    (agent as any)?.modelSelection?.current;
+    (agent as any)?.model?.current?.();
   const curProv = curSel?.provider || (agent as any)?.options?.provider || 'deepseek-official';
   const curMod = curSel?.model || (agent as any)?.options?.model || 'deepseek-v4-flash';
   const explicitEffort = curSel?.reasoningEffort;
@@ -127,23 +127,22 @@ export async function handleThinkCommand(
   try {
     if (isGlobal) {
       context.sessionManager?.setNapcatDefaultModel(curProv, curMod, targetEffort);
-      const allSids = context.sessionManager?.getAllQQSessionIds() || [context.session.id];
-      for (const sid of allSids) {
-        try {
-          await safeSyncSessionModel(context.ctx, sid, curProv, curMod, targetEffort);
-        } catch (syncErr: any) {
-          context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
-            `[Command] 全局切换思考深度同步宿主会话 ${sid} 失败 (已跳过离线/失效会话):`,
-            syncErr?.message || syncErr
-          );
-        }
+
+      // 全局默认已同步到所有 live QQ Agent；仅对当前会话同步一次宿主侧选择。
+      try {
+        await safeSyncSessionModel(context.ctx, context.session.id, curProv, curMod, targetEffort);
+      } catch (syncErr: any) {
+        context.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
+          '[Command] 全局切换思考深度同步当前宿主会话失败 (已跳过):',
+          syncErr?.message || syncErr
+        );
       }
       return {
         handled: true,
         success: true,
         reply: [
           `QQ全局思考深度已切换为：${targetName}`,
-          '范围：已同步切换所有QQ会话，新建会话也将默认使用此思考深度。',
+          '范围：已切换所有活跃QQ会话；离线会话将在下次恢复时使用该思考深度，新建会话也将默认使用。',
         ].join('\n'),
       };
     } else {
@@ -153,9 +152,6 @@ export async function handleThinkCommand(
         curMod,
         targetEffort
       );
-      if (agent && (agent as any).modelSelection?.current) {
-        (agent as any).modelSelection.current.reasoningEffort = targetEffort;
-      }
       await safeSyncSessionModel(
         context.ctx,
         context.session.id,

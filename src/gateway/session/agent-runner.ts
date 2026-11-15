@@ -505,7 +505,7 @@ export class SessionAgentRunner {
         !this.delegate.isSessionDeleted?.(sessionId);
 
       if (isHandleValid) {
-        (handle.agent as any).modelSelection = selectionRef;
+        this.modelSelector.applySelectionToAgent(handle.agent, selectionRef.current);
         this.updateSessionTitle((handle.agent as any).session, peer, sessionId);
         return handle.agent;
       }
@@ -527,7 +527,7 @@ export class SessionAgentRunner {
         Boolean(this.delegate.isSessionDeleted?.(sessionId));
 
       if (!isExistingZombie) {
-        (existingAgent as any).modelSelection = selectionRef;
+        this.modelSelector.applySelectionToAgent(existingAgent, selectionRef.current);
         this.updateSessionTitle((existingAgent as any).session, peer, sessionId);
         return existingAgent;
       }
@@ -573,18 +573,36 @@ export class SessionAgentRunner {
     }
 
     const codingToolsEnabled = this.resolveCodingToolsEnabled(peer);
-    const applyCodingToolsRestriction = (agentCtx: any) => {
+    const applyCodingToolsRestriction = (agentCtx: any, agent?: any) => {
       const toolsSvc: any = agentCtx?.tools || (agentCtx?.get && agentCtx.get('tools'));
       if (toolsSvc && typeof toolsSvc.restrict === 'function') {
-        const potential = ['bash', 'pwsh', 'read', 'write', 'edit'];
-        const known: string[] | undefined = Array.isArray(toolsSvc.names) ? toolsSvc.names : undefined;
+        const potential = ['bash', 'pwsh', 'read', 'write', 'edit', 'apply_patch'];
+        // 0.2.2 的 restrict() 会对未知工具名整体报错（如 QQ 预设未启用 apply_patch），
+        // 因此优先从当前 scope 的可限制名称集合中过滤，避免把未装载的工具名传进去。
+        let known: string[] | undefined;
+        try {
+          const view = typeof toolsSvc.view === 'function' ? toolsSvc.view(agent || agentCtx) : undefined;
+          const names = view?.restrictableNames;
+          if (names && typeof names[Symbol.iterator] === 'function') {
+            known = Array.from(names as Iterable<string>);
+          }
+        } catch {}
+        if (!known && Array.isArray(toolsSvc.names)) {
+          known = toolsSvc.names as string[];
+        }
         const deny = known
-          ? potential.filter((t) => known.includes(t))
+          ? potential.filter((t) => known!.includes(t))
           : potential.filter((t) => (process.platform === 'win32' ? t !== 'bash' : t !== 'pwsh'));
         if (deny.length > 0) {
           try {
             toolsSvc.restrict({ deny });
           } catch (rErr: any) {
+            // 兜底：逐个工具裁剪，隔离个别未知名导致的整次 restrict 失败
+            for (const name of deny) {
+              try {
+                toolsSvc.restrict({ deny: [name] });
+              } catch {}
+            }
             this.ctx.logger?.('dsh-napcat-bridge')?.debug?.(
               '[SessionAgentRunner] tools.restrict 执行告警:',
               rErr?.message
@@ -594,9 +612,9 @@ export class SessionAgentRunner {
       }
     };
 
-    const setupFn = (agentCtx: any) => {
+    const setupFn = (agentCtx: any, agent?: any) => {
       if (typeof agentCtx?.on === 'function') {
-        installModelSelection(agentCtx, selectionRef);
+        installModelSelection(agentCtx);
       }
       const presets: any =
         agentCtx?.get?.('agentPresets') || (this.ctx as any).agentPresets;
@@ -605,7 +623,7 @@ export class SessionAgentRunner {
           .mount(agentCtx, QQ_PRESET_ID)
           .then(() => {
             if (!codingToolsEnabled) {
-              applyCodingToolsRestriction(agentCtx);
+              applyCodingToolsRestriction(agentCtx, agent);
             }
             return undefined;
           })
@@ -619,7 +637,7 @@ export class SessionAgentRunner {
               (this.ctx.root as any)?.napcatBridgeTools;
             provider?.registerTools?.(agentCtx);
             if (!codingToolsEnabled) {
-              applyCodingToolsRestriction(agentCtx);
+              applyCodingToolsRestriction(agentCtx, agent);
             }
             return undefined;
           });
@@ -629,7 +647,7 @@ export class SessionAgentRunner {
         (this.ctx.root as any)?.napcatBridgeTools;
       provider?.registerTools?.(agentCtx);
       if (!codingToolsEnabled) {
-        applyCodingToolsRestriction(agentCtx);
+        applyCodingToolsRestriction(agentCtx, agent);
       }
       return undefined;
     };
@@ -783,7 +801,11 @@ export class SessionAgentRunner {
     // 固化 agentPreset 投影至 session，确保冷重启恢复时绝不 fallback 至默认 coding 预设
     const presets: any = safeGetService(this.ctx, 'agentPresets');
     const sessionProjections: any = safeGetService(this.ctx, 'sessionProjections');
-    const currentPreset = sessionProjections?.stateOf?.(handle.agent.session, 'agentPreset');
+    let currentPreset: any;
+    try {
+      currentPreset = sessionProjections?.snapshot?.(handle.agent.session, ['agentPreset'])?.values
+        ?.agentPreset;
+    } catch {}
     if (currentPreset !== QQ_PRESET_ID) {
       if (presets?.select && typeof presets.select === 'function') {
         try {
@@ -806,7 +828,7 @@ export class SessionAgentRunner {
       }
     }
 
-    (handle.agent as any).modelSelection = selectionRef;
+    this.modelSelector.applySelectionToAgent(handle.agent, selectionRef.current);
     this.delegate.onClearPendingCleared?.(peer, sessionId);
     return handle.agent;
   }

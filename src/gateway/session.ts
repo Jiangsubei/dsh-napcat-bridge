@@ -5,7 +5,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent';
 import type { MessageDatabase } from '../storage/database.js';
 import type { WakeupPayload } from '../types/index.js';
 import type { TurnInitiatorTracker } from '../approval/turn-initiator.js';
@@ -47,6 +47,7 @@ import {
 import { SessionWorkspaceManager } from './session/workspace.js';
 import { SessionPersistenceManager } from './session/persistence.js';
 import { SessionModelSelector } from './session/model-selector.js';
+import type { ModelSelectionRef, SelectionLike } from './session/model-selector.js';
 import { SessionAgentRunner, isSystemSenderName } from './session/agent-runner.js';
 
 export class SessionManager {
@@ -263,7 +264,7 @@ export class SessionManager {
   }
 
   // --- 模型选择委托 ---
-  public getHostDefaultModelSelection(): ModelSelection {
+  public getHostDefaultModelSelection(): SelectionLike {
     return this.modelSelector.getHostDefaultModelSelection();
   }
 
@@ -271,7 +272,7 @@ export class SessionManager {
     return this.modelSelector.resolveDefaultEffort(provider, model);
   }
 
-  public getNapcatDefaultModel(): ModelSelection {
+  public getNapcatDefaultModel(): SelectionLike {
     return this.modelSelector.getNapcatDefaultModel();
   }
 
@@ -284,12 +285,28 @@ export class SessionManager {
     );
   }
 
-  public getDefaultModelSelection(): ModelSelection {
+  public getDefaultModelSelection(): SelectionLike {
     return this.modelSelector.getDefaultModelSelection();
   }
 
   public getOrCreateSelectionRef(sessionId: string): ModelSelectionRef {
     return this.modelSelector.getOrCreateSelectionRef(sessionId);
+  }
+
+  /**
+   * 把插件视角的模型选择同步到指定 live Agent（0.2.2：agent.model.select）。
+   * @returns 是否真正发起了切换。
+   */
+  public applySelectionToAgent(agent: any, selection?: SelectionLike): boolean {
+    return this.modelSelector.applySelectionToAgent(agent, selection);
+  }
+
+  /**
+   * 把模型选择同步到全部 live 的 QQ 会话 Agent（不触碰离线会话）。
+   * @returns 实际发起切换的 Agent 数量。
+   */
+  public syncModelSelectionToLiveAgents(selection?: SelectionLike): number {
+    return this.modelSelector.syncLiveAgents(selection);
   }
 
   public setModelSelection(
@@ -310,7 +327,7 @@ export class SessionManager {
     );
   }
 
-  public getModelSelection(sessionId: string): ModelSelection | undefined {
+  public getModelSelection(sessionId: string): SelectionLike | undefined {
     return this.modelSelector.getModelSelection(sessionId);
   }
 
