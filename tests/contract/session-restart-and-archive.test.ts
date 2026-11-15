@@ -289,7 +289,10 @@ describe('契约测试: DSH 重启后会话恢复与全归档开启新轮次 (Se
     expect(restoredSel?.model).toBe('deepseek-v4-pro');
     expect(restoredSel?.reasoningEffort).toBe('max');
 
-    // 7. 验证挂载在恢复后的 Agent 上的 modelSelection.current 也完整保留
-    expect((restoredAgent as any).modelSelection?.current?.reasoningEffort).toBe('max');
+    // 7. 验证恢复后的 Agent 上 DSH 认可的真实模型选择（agent.model.current）也完整保留
+    const restoredModelSelection = (restoredAgent as any).model?.current?.();
+    expect(restoredModelSelection?.provider).toBe('deepseek-official');
+    expect(restoredModelSelection?.model).toBe('deepseek-v4-pro');
+    expect(restoredModelSelection?.reasoningEffort).toBe('max');
   });
 });

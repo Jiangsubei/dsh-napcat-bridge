@@ -142,12 +142,11 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     // 2. Web 会话 Agent: 调用未在预设中的表情工具被 DSH 拦截拒绝
     const tools: any = booted.ctx.get('tools');
     const denied = await tools.execute({
-      name: 'list_faces',
-      arguments: {},
+      calls: [{ type: 'tool-call', id: 'face-denied-1', name: 'list_faces', arguments: '{}' }],
       agent: webAgent,
       signal: new AbortController().signal,
     });
-    expect(denied.isError).toBe(true);
+    expect(denied.results[0]?.result.isError).toBe(true);
 
     // 3. QQ 会话 Agent: 挂载 qq-session 预设，assemble 中包含全量表情工具，调用放行
     const qqHandle = await booted.ctx.agents.create({
@@ -164,12 +163,11 @@ describe('契约测试: 表情包系统真实装配闭环 (Face Assembly Contrac
     expect(qqFaces.map((t) => t.name).sort()).toEqual([...FACE_TOOL_NAMES].sort());
 
     const allowed = await tools.execute({
-      name: 'list_faces',
-      arguments: {},
+      calls: [{ type: 'tool-call', id: 'face-allowed-1', name: 'list_faces', arguments: '{}' }],
       agent: qqAgent,
       signal: new AbortController().signal,
     });
-    expect(allowed.isError).toBe(false);
+    expect(allowed.results[0]?.result.isError).toBe(false);
   });
 
   it('装配 4: collect_face 收集表情包必须使用绝对路径规范落盘至 canonicalFaceStoreDir，绝不受 process.cwd 漂移影响', async () => {
