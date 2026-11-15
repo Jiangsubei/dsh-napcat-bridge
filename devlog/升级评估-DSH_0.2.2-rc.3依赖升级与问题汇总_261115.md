@@ -38,7 +38,7 @@
 
 补全后本地 `node_modules` 已无 `0.2.0-rc.2` 混装：`cordis@4.1.0`、`schemastery@3.19.0`、`dsh-jobs@0.2.2-rc.3`，与 Desktop 安装内的实际版本一致。
 
-> 说明：`package.json` 的 `peerDependencies` 范围（`^4.0.2`、`>=0.2.0-0` 等）本身覆盖 0.2.2-rc.3，未收窄；本次只调整了 `devDependencies` 与 `pnpm-lock.yaml`。
+> 说明：`peerDependencies` 与 `engines.dsh` 已按 Kujira 44c38a3 的对齐做法收紧为 `@deepseek-ai/cordis ^4.1.0`、`@deepseek-ai/dsh-* >=0.2.2-0`、`@deepseek-ai/schemastery ^3.19.0`、`engines.dsh >=0.2.2-0`；`devDependencies` 的显式补全保留，作为本地构建/测试基线。
 
 ---
 
@@ -300,3 +300,24 @@ pnpm vitest run                       # 预期 114/116 文件通过，2 个 tool
 
 - 未做 NapCat 真机（WebSocket + QQ 账号）联调；建议在真机分别验证 `/模型`、`/思考`、`/模型 -g` 的端到端效果。
 - 离线会话的模型选择在「下次 resume 时」生效，这一点已由 `session-restart-and-archive` 契约覆盖，但真实 QQ 会话首次消息的切换效果仍建议真机确认。
+
+### 8.5 与 Kujira 44c38a3 的对照结论（2026-11-15 晚）
+
+对照仓库 `F:\Project\Kujira` 的升级提交 `44c38a3 chore: 升级 DSH 依赖至 0.2.2-rc.3 并适配工具批量执行与模型选择契约`：
+
+| 对照项 | Kujira 44c38a3 | dsh-napcat-bridge（本次） | 结论 |
+| --- | --- | --- | --- |
+| `tools.execute` 测试 | `calls: [{ type: 'tool-call', id, name, arguments: '{}' }]` + `results[0].result.isError` | 完全相同 | ✅ 一致 |
+| `installModelSelection` | 改为单参 `installModelSelection(agentCtx)` | 相同 | ✅ 一致 |
+| `ModelSelectionRef` 移除 | 自定义 `KujiraModelSelectionRef`（`current: ModelSelection`） | 自定义 `SelectionLike` / `ModelSelectionRef` | ✅ 等价 |
+| `agent.modelSelection` 自挂赋值 | 保留（0.2.2 下 DSH 不再读取，靠 `sessionController.selectModel` 兜底） | 移除，改为创建/复用/恢复后 `agent.model.select()` 同步 | 本实现更完整（本项目 `/模型`、`/思考` 覆盖运行时切换） |
+| 全局切换 | 遍历所有已知会话 `selectModel`（会逐个 resume 离线会话） | 更新默认 + 同步 live Agent + 仅当前会话同步宿主侧；离线会话下次恢复生效 | 行为等价且避免批量 resume |
+| `sessionProjections.stateOf` | 保留 deprecated 调用 | 迁移到 `snapshot(session, ['agentPreset'])` | 本实现消除了告警 |
+| `llm.listModels` 同步误用 | 保留（`model-selector.ts:83`） | 删除无效同步分支，回退内置默认 | 本实现消除隐患 |
+| Coding 工具裁剪 | 无此功能 | 修复 0.2.2 `restrict()` 未知名称整次失败问题 | 本项目特有功能 |
+| peer/engines 范围 | 收紧至 `>=0.2.2-0` / `cordis ^4.1.0` / `schemastery ^3.19.0` | 已同步收紧（见 1.2 节） | ✅ 一致 |
+| 本地依赖基线 | 未显式列 optional peer，靠 pnpm auto-install peers 装齐 0.2.2-rc.3 | 显式补全 12 个 devDependencies | 本实现更稳定，功能等价 |
+
+**Kujira 验证情况**：其仓库在 0.2.2-rc.3 下 `tests/contract/commands-model-sync.test.ts`、`assembly.test.ts`、`face-assembly.test.ts` 共 16 例全部通过；其 `/模型` 切换依赖的 `sessionController.selectModel` 通道与本项目 `safeSyncSessionModel` 兜底路径一致。该对照反证：升级后保留官方 `selectModel` 通道是正确做法，本次在此基础上补充的 `agent.model.select()` 只是让 live Agent 与插件状态在任意 profile 下都保持一致，没有破坏既有通道。
+
+**结论**：两边升级思路一致，本次实现是 Kujira 适配范围的超集；无需要回退的差异。收紧后的版本范围与 Kujira 完全对齐，全量测试仍为 0 失败。
